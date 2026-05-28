@@ -18,7 +18,7 @@ Homeowners don't have a reliable way to know which breaker controls which outlet
 - **G6 — Durable server-side storage** (shipped): SQLite in a bind-mounted volume; backup = copy one directory.
 - **G7 — Breaker-test workflow** (shipped): walk-up "flip a breaker, tag what just lost power" mode.
 - **G8 — Mobile-first PWA** (shipped, baseline): installable on iOS Safari + Android Chrome; touch hit targets ≥44px.
-- **G9 — LAN-only access** (shipped): no public internet required; no auth.
+- **G9 — LAN-only access** (shipped): no public internet required. Single-user login gate added in feat/auth-gate — first-time sign-up + scrypt-hashed password stored in SQLite; details in CLAUDE.md "Auth gate (feat/auth-gate + sign-up flow)".
 - **G10 — `docker compose up` deployment** (shipped): single compose stack; one host port; HTTPS terminated by the operator's external reverse proxy (Caddy / Cloudflare Tunnel) — matches the user's HousesTracker deployment pattern.
 
 ### New goals (post cycle-10 vision extension)
@@ -197,7 +197,7 @@ After the cycle-42 research synthesis (codebase audit + UX walkthrough + commerc
 - **Frontend host:** the user's phone. Installable as PWA.
 - **Network:** LAN-only or via a tunnel. No port-forwarding required; no public internet exposure assumed.
 - **TLS / HTTPS:** terminated by the operator's external proxy, not by the stack. The compose stack serves plain HTTP on the host port.
-- **Auth:** none. Trust boundary is the LAN or the operator's reverse proxy / tunnel.
+- **Auth:** single-user login gate (feat/auth-gate). First-time sign-up screen on empty DB; scrypt-hashed password in SQLite; 30-day JWT cookie. Trust boundary stays the LAN or the operator's reverse proxy / tunnel — auth is "casual visitor" deterrence, not "internet-exposed hardening".
 - **Database:** SQLite, file in a bind-mounted volume.
 - **Licenses:** MIT / Apache-2 / BSD / ISC dependencies only. No GPL.
 - **Touch:** all interactive targets ≥44×44 CSS px.
@@ -210,7 +210,7 @@ After the cycle-42 research synthesis (codebase audit + UX walkthrough + commerc
 - **Two-tier architecture:** phone-side PWA + server-side Node backend in a container, fronted by nginx for static + `/api` proxy + `/files` alias. External proxy for HTTPS.
 - **Frontend = PWA.** Not Electron, Capacitor, native, or desktop-only.
 - **Backend persistence = SQLite file** in a bind-mounted volume.
-- **Single-user, no auth, LAN-only** (or behind operator's tunnel).
+- **Single-user, LAN-only** (or behind operator's tunnel) + a minimal login gate (feat/auth-gate: sign-up on first boot, scrypt-hashed password in SQLite, JWT cookie). No multi-user, no roles, no signup beyond the first user.
 - **Mobile-first.** Desktop browser is incidental.
 - **Docker Compose is the deployment surface.** No K8s / Swarm / Helm / host-package-manager installers.
 - **No in-stack TLS** (locked in by the HousesTracker-pattern conversion). HTTPS is external. Operator picks the tool.
