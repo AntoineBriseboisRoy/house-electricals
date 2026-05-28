@@ -10,6 +10,8 @@ import { MapLandingScreen } from './screens/MapLandingScreen.js';
 import { FloorEditScreen } from './screens/FloorEditScreen.js';
 import { PrintableDiagramScreen } from './screens/PrintableDiagramScreen.js';
 import { AuditScreen } from './screens/AuditScreen.js';
+import { LoginScreen } from './screens/LoginScreen.js';
+import { useAuth } from './contexts/AuthContext.js';
 
 /**
  * Top-level router (G11 + G16).
@@ -27,6 +29,19 @@ import { AuditScreen } from './screens/AuditScreen.js';
  */
 export const App = (): JSX.Element => {
   const [location] = useLocation();
+  const { state: authState } = useAuth();
+
+  // feat/auth-gate — gate everything behind login.
+  //
+  //   loading  → tiny splash while /api/v1/auth/me is in-flight.
+  //   unauthed → LoginScreen (full-bleed, no AppShell chrome).
+  //   authed   → fall through to the normal router below.
+  if (authState.phase === 'loading') {
+    return <div className="app-auth-splash" aria-label="Loading" />;
+  }
+  if (authState.phase === 'unauthed') {
+    return <LoginScreen />;
+  }
 
   // Escape-hatch routes: matched first, render WITHOUT AppShell chrome.
   // Keep this list short — only routes that genuinely need the full

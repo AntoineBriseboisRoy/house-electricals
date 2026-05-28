@@ -29,12 +29,12 @@ const __dirname = dirname(__filename);
 const SCREENSHOTS_DIR = join(__dirname, '.screenshots');
 mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 
-const E2E_BACKEND_URL = 'http://127.0.0.1:3100';
+import { authedFetch, E2E_BACKEND_URL } from './authed-fetch.js';
 
 type Created<T> = { data: T };
 
 const post = async <T,>(path: string, body: unknown): Promise<T> => {
-  const res = await fetch(`${E2E_BACKEND_URL}${path}`, {
+  const res = await authedFetch(`${E2E_BACKEND_URL}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),

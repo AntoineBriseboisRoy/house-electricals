@@ -122,6 +122,7 @@ describe('service_entries (G40 Part 1)', () => {
       roomRepository: new SqliteRoomRepository(db),
       serviceEntryRepository: new SqliteServiceEntryRepository(db),
       db,
+      auth: null,
     });
     panel = await createPanel('Main');
     breaker = await createBreaker(panel.id, '1');

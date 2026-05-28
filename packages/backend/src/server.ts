@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
+import { jwt } from 'hono/jwt';
 import type { DatabaseSync } from 'node:sqlite';
 import type {
+  ApiError,
   BreakerRepository,
   BreakerTestRepository,
   ComponentRepository,
@@ -23,6 +25,11 @@ import { buildSwitchControlRoutes } from './routes/switch-controls.js';
 import { devStaticRoutes } from './routes/dev-static.js';
 import { healthRoutes } from './routes/health.js';
 import { spaRoutes } from './routes/static-spa.js';
+import {
+  buildProtectedAuthRoutes,
+  buildPublicAuthRoutes,
+} from './routes/auth.js';
+import { AUTH_COOKIE_NAME, type AuthConfig } from './auth.js';
 
 export type AppDeps = {
   panelRepository: PanelRepository;
@@ -38,16 +45,67 @@ export type AppDeps = {
   /** Raw DB handle — switch_controls is a thin join table, easier to
    *  query directly than via a full repo class for G19 scope. */
   db: DatabaseSync;
+  /** feat/auth-gate — single-user JWT-cookie auth config. When null,
+   *  the JWT middleware + auth routes are NOT mounted. Production passes
+   *  a real config (loaded from env in `index.ts`); tests pass `null` so
+   *  they don't need to mint cookies for every `app.request(...)` call.
+   *  The auth logic itself has its own dedicated `auth.test.ts`. */
+  auth: AuthConfig | null;
 };
 
 export const buildApp = (deps: AppDeps): Hono => {
   const app = new Hono();
+
+  // ── PUBLIC ROUTES ────────────────────────────────────────────────────
+  // Health stays open so reverse-proxy / monitoring probes work without
+  // credentials.
   app.route('/api/v1', healthRoutes);
+
+  // ── AUTH (opt-in) ────────────────────────────────────────────────────
+  // Production always passes a real `deps.auth`; tests pass null to
+  // bypass the gate and keep the `app.request(...)` calls cookie-free.
+  if (deps.auth !== null) {
+    // Login + logout are public — mounted BEFORE the JWT middleware.
+    app.route('/api/v1', buildPublicAuthRoutes(deps.auth));
+    // Every other /api/v1/* path requires a valid `he_auth` cookie.
+    // Returns JSON 401 on missing/invalid token so the frontend pivots
+    // to the login screen cleanly. /files/* and /* (SPA assets) stay
+    // UNGATED at the HTTP layer — the SPA itself decides what to render
+    // based on /auth/me, and floor-plan filenames are 8-char content
+    // hashes so unauth scraping is impractical.
+    app.use(
+      '/api/v1/*',
+      jwt({
+        secret: deps.auth.secret,
+        cookie: AUTH_COOKIE_NAME,
+        alg: 'HS256',
+      })
+    );
+    // Hono's JWT middleware throws an HTTPException with a
+    // `WWW-Authenticate` header on unauth; intercept to return the
+    // standard `{error:{message}}` envelope that the frontend already
+    // handles.
+    app.onError((err, c) => {
+      const status = (err as { status?: number }).status;
+      if (status === 401) {
+        const body: ApiError = { error: { message: 'Unauthenticated.' } };
+        return c.json(body, 401);
+      }
+      throw err;
+    });
+    // /auth/me sits inside the JWT gate.
+    app.route('/api/v1', buildProtectedAuthRoutes());
+  }
+
+  // ── PROTECTED API ROUTES ─────────────────────────────────────────────
   app.route(
     '/api/v1',
     buildPanelRoutes(deps.panelRepository, deps.breakerRepository)
   );
-  app.route('/api/v1', buildBreakerRoutes(deps.panelRepository, deps.breakerRepository));
+  app.route(
+    '/api/v1',
+    buildBreakerRoutes(deps.panelRepository, deps.breakerRepository)
+  );
   app.route(
     '/api/v1',
     buildBreakerTestRoutes(deps.breakerRepository, deps.breakerTestRepository)
@@ -75,19 +133,14 @@ export const buildApp = (deps: AppDeps): Hono => {
     '/api/v1',
     buildSwitchControlRoutes(deps.db, deps.componentRepository)
   );
-  // Static serving for `/files/floor-plans/:filename`. After the single-
-  // image consolidation this is the canonical floor-plan serving path in
-  // BOTH dev and prod — no nginx in front anymore. The route file kept
-  // its historical `devStaticRoutes` name; the logic was already
-  // production-grade (path-traversal hardened, MIME-correct, immutable
-  // cache header).
+
+  // ── UNGATED static serving (intentional) ─────────────────────────────
+  // `/files/floor-plans/:filename` — uploaded floor-plan images. Same
+  // caveat as before: filenames are 8-char content hashes so unauth
+  // discovery is impractical.
   app.route('/', devStaticRoutes);
   // SPA + static asset serving for the Vite-built frontend. MUST be
-  // registered last so /api/v1/* and /files/floor-plans/* match first;
-  // any GET that falls through here either serves the matching file
-  // from PUBLIC_DIR or falls back to index.html (wouter takes over).
-  // In dev (PUBLIC_DIR missing) this silently 404s; devs use Vite's
-  // own port for the SPA.
+  // registered last so /api/v1/* and /files/* match first.
   app.route('/', spaRoutes);
   return app;
 };

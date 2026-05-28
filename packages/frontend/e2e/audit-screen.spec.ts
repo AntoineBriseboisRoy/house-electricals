@@ -19,16 +19,13 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { authedFetch, E2E_BACKEND_URL } from './authed-fetch.js';
+
 // .state.json lives under packages/frontend/e2e/ — Playwright is invoked
 // with cwd = packages/frontend, so this resolves correctly under both
 // `pnpm test:e2e` and a direct `pnpm exec playwright test` from the
 // frontend package root.
 const STATE_FILE = join(process.cwd(), 'e2e', '.state.json');
-
-// Inlined so we don't import from playwright.config.ts (its `defineConfig`
-// call has side-effects at import time). Mirrors the constant in
-// playwright.config.ts — keep in sync.
-const E2E_BACKEND_URL = 'http://127.0.0.1:3100';
 
 type SeededState = {
   seeded?: {
@@ -49,7 +46,7 @@ const postTest = async (
   breakerId: string,
   body: Record<string, unknown>
 ): Promise<{ id: string }> => {
-  const res = await fetch(
+  const res = await authedFetch(
     `${E2E_BACKEND_URL}/api/v1/breakers/${breakerId}/breaker-tests`,
     {
       method: 'POST',
@@ -65,7 +62,7 @@ const postTest = async (
 };
 
 const deleteTest = async (id: string): Promise<void> => {
-  await fetch(`${E2E_BACKEND_URL}/api/v1/breaker-tests/${id}`, {
+  await authedFetch(`${E2E_BACKEND_URL}/api/v1/breaker-tests/${id}`, {
     method: 'DELETE',
   });
 };

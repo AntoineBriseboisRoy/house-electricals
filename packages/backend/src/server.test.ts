@@ -35,6 +35,7 @@ describe('panel routes', () => {
       roomRepository: new SqliteRoomRepository(db),
       serviceEntryRepository: new SqliteServiceEntryRepository(db),
       db,
+      auth: null,
     });
   });
 
@@ -234,6 +235,7 @@ describe('breaker routes', () => {
       roomRepository: new SqliteRoomRepository(db),
       serviceEntryRepository: new SqliteServiceEntryRepository(db),
       db,
+      auth: null,
     });
     const res = await app.request('/api/v1/panels', {
       method: 'POST',
@@ -618,6 +620,7 @@ describe('component routes', () => {
       roomRepository: new SqliteRoomRepository(db),
       serviceEntryRepository: new SqliteServiceEntryRepository(db),
       db,
+      auth: null,
     });
   });
 

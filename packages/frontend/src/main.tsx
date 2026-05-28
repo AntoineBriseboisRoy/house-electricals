@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.js';
+import { AuthProvider } from './contexts/AuthContext.js';
 import { ThemeProvider } from './contexts/ThemeContext.js';
 import { ThemedToaster } from './ui/toast.js';
 // G22 cycle-23: self-host Plus Jakarta Sans via @fontsource. 4 weights
@@ -29,13 +30,15 @@ if (!rootEl) {
 createRoot(rootEl).render(
   <StrictMode>
     <ThemeProvider>
-      <App />
-      <ThemedToaster
-        position="top-center"
-        richColors
-        closeButton
-        toastOptions={{ duration: 4000 }}
-      />
+      <AuthProvider>
+        <App />
+        <ThemedToaster
+          position="top-center"
+          richColors
+          closeButton
+          toastOptions={{ duration: 4000 }}
+        />
+      </AuthProvider>
     </ThemeProvider>
   </StrictMode>
 );

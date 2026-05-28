@@ -7,18 +7,50 @@
  * - Public REST API only. NO direct SQLite writes.
  * - Returned ids are persisted in `e2e/.state.json` for spec reuse.
  * - All POST bodies match the zod schemas exported from @he/shared.
+ *
+ * feat/auth-gate — every mutating request now requires the auth cookie.
+ * `seedFixtures` does a one-shot login at the top and threads the cookie
+ * through every `post()` call.
  */
 
 type Json = Record<string, unknown> | unknown[];
 
+/** feat/auth-gate — login + return the `he_auth=…` cookie value. The
+ *  caller passes this verbatim as the `cookie:` request header on
+ *  subsequent fetches. The username + password match the env vars
+ *  injected by globalSetup. */
+export const loginForSeed = async (baseUrl: string): Promise<string> => {
+  const res = await fetch(`${baseUrl}/api/v1/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      username: 'e2e-user',
+      password: 'e2e-password',
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `[seed] login failed: ${res.status} ${res.statusText} — ${text}`
+    );
+  }
+  const setCookie = res.headers.get('set-cookie') ?? '';
+  const m = setCookie.match(/he_auth=[^;]+/);
+  if (m === null) {
+    throw new Error('[seed] login succeeded but no he_auth cookie returned');
+  }
+  return m[0];
+};
+
 const post = async <T = unknown>(
   baseUrl: string,
   path: string,
-  body: Json
+  body: Json,
+  cookie: string
 ): Promise<T> => {
   const res = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', cookie },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -45,12 +77,14 @@ export type SeededIds = {
 };
 
 export const seedFixtures = async (baseUrl: string): Promise<SeededIds> => {
+  // feat/auth-gate — every mutating request needs the cookie.
+  const cookie = await loginForSeed(baseUrl);
   // 1) Panel
   const panel = await post<{ id: string }>(baseUrl, '/api/v1/panels', {
     name: 'Main Panel',
     orientation: 'vertical',
     slotCount: 24,
-  });
+  }, cookie);
   const panelId = panel.id;
 
   // 2) Breakers — mix of single/double-pole with explicit slot positions
@@ -67,7 +101,8 @@ export const seedFixtures = async (baseUrl: string): Promise<SeededIds> => {
     const b = await post<{ id: string }>(
       baseUrl,
       `/api/v1/panels/${panelId}/breakers`,
-      spec
+      spec,
+      cookie
     );
     breakerIds.push(b.id);
   }
@@ -76,7 +111,7 @@ export const seedFixtures = async (baseUrl: string): Promise<SeededIds> => {
   const floor = await post<{ id: string }>(baseUrl, '/api/v1/floors', {
     name: 'Main Floor',
     displayOrder: 1,
-  });
+  }, cookie);
   const floorId = floor.id;
 
   // 4) Rooms — 2 axis-aligned rectangles
@@ -89,7 +124,8 @@ export const seedFixtures = async (baseUrl: string): Promise<SeededIds> => {
     const r = await post<{ id: string }>(
       baseUrl,
       `/api/v1/floors/${floorId}/rooms`,
-      spec
+      spec,
+      cookie
     );
     roomIds.push(r.id);
   }
@@ -106,7 +142,8 @@ export const seedFixtures = async (baseUrl: string): Promise<SeededIds> => {
     const w = await post<{ id: string }>(
       baseUrl,
       `/api/v1/floors/${floorId}/walls`,
-      spec
+      spec,
+      cookie
     );
     wallIds.push(w.id);
   }
@@ -189,7 +226,7 @@ export const seedFixtures = async (baseUrl: string): Promise<SeededIds> => {
   ];
   const componentIds: string[] = [];
   for (const spec of componentSpecs) {
-    const c = await post<{ id: string }>(baseUrl, '/api/v1/components', spec);
+    const c = await post<{ id: string }>(baseUrl, '/api/v1/components', spec, cookie);
     componentIds.push(c.id);
   }
 
@@ -201,11 +238,11 @@ export const seedFixtures = async (baseUrl: string): Promise<SeededIds> => {
   await post(baseUrl, `/api/v1/components/${switchId}/controls`, {
     gangIndex: 0,
     controlledId: controlledLightIds[0],
-  });
+  }, cookie);
   await post(baseUrl, `/api/v1/components/${switchId}/controls`, {
     gangIndex: 1,
     controlledId: controlledLightIds[1],
-  });
+  }, cookie);
 
   return {
     panelId,

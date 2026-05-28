@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const E2E_BACKEND_URL = 'http://127.0.0.1:3100';
+import { authedFetch, E2E_BACKEND_URL } from './authed-fetch.js';
 
 type SeededState = {
   seeded?: {
@@ -64,7 +64,7 @@ const createUnplacedOnPanel = async (
   name: string,
   breakerId: string
 ): Promise<string> => {
-  const res = await fetch(`${E2E_BACKEND_URL}/api/v1/components`, {
+  const res = await authedFetch(`${E2E_BACKEND_URL}/api/v1/components`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -230,7 +230,7 @@ test.describe('G42(f) Unplaced bulk actions @cycle-51', () => {
 
     // Verify via API that the breakerId actually changed on both.
     const getRes = async (id: string): Promise<{ breakerId: string | null }> => {
-      const res = await fetch(`${E2E_BACKEND_URL}/api/v1/components/${id}`);
+      const res = await authedFetch(`${E2E_BACKEND_URL}/api/v1/components/${id}`);
       const body = (await res.json()) as {
         data: { breakerId: string | null };
       };

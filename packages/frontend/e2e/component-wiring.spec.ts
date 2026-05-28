@@ -33,12 +33,12 @@ const loadSeeded = (): NonNullable<SeededState['seeded']> => {
   return state.seeded;
 };
 
-const E2E_BACKEND_URL = 'http://127.0.0.1:3100';
+import { authedFetch, E2E_BACKEND_URL } from './authed-fetch.js';
 
 /** POST a fresh unwired component so each test has its own clean slate
  *  (the seed's Ceiling Junction would otherwise drift between tests). */
 const createUnwiredComponent = async (name: string): Promise<string> => {
-  const res = await fetch(`${E2E_BACKEND_URL}/api/v1/components`, {
+  const res = await authedFetch(`${E2E_BACKEND_URL}/api/v1/components`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({

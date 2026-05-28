@@ -2,6 +2,91 @@
 
 This is the project-root `CLAUDE.md`. It records *project-wide conventions* that future cycles must respect. Per-package context lives in `packages/*/CLAUDE.md` (if any). Story-specific details belong in commit messages / `scripts/ralph/progress.txt`, not here.
 
+## Auth gate (feat/auth-gate)
+
+Single-user JWT-cookie auth. Every `/api/v1/*` route except the public
+carve-outs (`/auth/login`, `/auth/logout`, `/health`) requires a valid
+`he_auth` cookie signed with `AUTH_SECRET`. Pin these decisions — future
+cycles touching auth, routes, or test setup MUST respect them.
+
+1. **Single-user model.** `AUTH_USERNAME` + `AUTH_PASSWORD` env vars; no
+   user table, no signup, no password-reset. `AUTH_PASSWORD` is REQUIRED
+   — `loadAuthConfig()` fails fast with a formatted multi-line error if
+   it's missing. `AUTH_USERNAME` defaults to `'admin'`.
+
+2. **`AUTH_SECRET` is auto-generated** at first boot (`crypto.randomBytes(32)
+   → hex`) and persisted to `${DATA_DIR}/.auth-secret` with mode 600.
+   Subsequent boots read the file. Deleting it invalidates every
+   existing session cookie — the canonical "log everyone out" lever.
+   Do NOT bake the secret into the image or commit it.
+
+3. **Cookie name = `he_auth`.** HttpOnly, SameSite=Lax, Secure=false
+   (the app runs over plain HTTP behind the operator's reverse proxy),
+   30-day Max-Age. Value is a Hono-signed JWT (HS256) with
+   `{ sub: username, iat, exp }`. Do NOT rename the cookie — every spec
+   + the frontend storageState file + the auth route handler hard-code
+   `he_auth`.
+
+4. **Middleware mount order is load-bearing**: public auth routes
+   (`/auth/login`, `/auth/logout`) → `/api/v1/health` → JWT middleware
+   guarding `/api/v1/*` → `onError` translating JWT-401 to the canonical
+   `{ error: { message: 'Unauthenticated.' } }` envelope → protected
+   auth routes (`/auth/me`) → all other protected routes. Adding a new
+   public route requires mounting it BEFORE the JWT middleware AND
+   updating this pin.
+
+5. **`AppDeps.auth: AuthConfig | null`** in `server.ts:buildApp(...)`.
+   When `null`, the JWT middleware is NOT mounted — this is the
+   test-bypass mode. All backend `*.test.ts` files pass `auth: null`;
+   only `auth.test.ts` passes `auth: TEST_AUTH` from `test-helpers.ts`.
+   Do NOT thread real auth into the bulk backend test suite — those
+   tests would have to login + cookie-thread every request for zero
+   coverage gain.
+
+6. **Frontend auth state is a context**, NOT URL-routed. `AuthContext`
+   wraps `App` in `main.tsx`. State machine: `'loading'` (mount probe
+   `/auth/me`) → `'authed' | 'unauthed'`. Unauthed renders
+   `<LoginScreen />`; authed renders the normal App. A 401 from ANY
+   `/api/v1/*` call flips state back to `'unauthed'` via
+   `setUnauthorizedHandler` registered in `AuthContext` — covers
+   session-expired mid-use.
+
+7. **Logout = floating top-right button.** `<LogoutButton />` mounts
+   inside `AppShell` next to `<ThemeToggle />` and `<VersionPill />`.
+   Both `LogoutButton` + `ThemeToggle` are `position: fixed` top-right;
+   `.screen-header` reserves right-edge padding so they don't overlap
+   header CTAs (cycle-34 G28 pin extended). The logout button carries
+   `data-testid="logout-button"` for e2e.
+
+8. **e2e auth contract.** `globalSetup.ts` spawns the backend with
+   `AUTH_USERNAME='e2e-user'` + `AUTH_PASSWORD='e2e-password'`, calls
+   `loginForSeed()` (in `seed.ts`) to mint a cookie, and writes a
+   Playwright `storageState` file at `e2e/.auth.json` (gitignored).
+   `playwright.config.ts` sets that file as the global `use.storageState`
+   so every spec starts pre-authed. The cookie is scoped to domain
+   `127.0.0.1` so it survives both backend (port 3100) and Vite proxy
+   (port 5180) origins. The readiness probe in `waitForBackend` uses
+   the unauthed `/api/v1/health` endpoint, NOT `/api/v1/panels`.
+
+9. **`e2e/authed-fetch.ts` is the canonical helper** for specs that
+   talk to the backend directly (NOT via `page` / NOT via Playwright's
+   `request` fixture). It reads the cookie from `e2e/.auth.json` once
+   per process and attaches it to every fetch. Playwright's `request`
+   fixture already inherits `storageState` automatically — those
+   callsites do NOT need `authedFetch`. Specs MUST use `authedFetch`
+   when calling the backend via raw `fetch()`; future direct-fetch
+   callsites that skip it will hit 401.
+
+10. **`/api/v1/health` is the unauthed liveness probe** — used by
+    `waitForBackend` in globalSetup, the Docker healthcheck, and any
+    monitoring you wire up. Do NOT widen its response shape or add
+    auth-gated info to it. Keep it `{ data: { ok: true } }` forever.
+
+11. **The `data/.auth-secret` file is user-survivable data.** Back it
+    up alongside `panels.db`. Deleting it is the canonical "log
+    everyone out" lever. Documented in README.md (Login section) +
+    DEPLOYMENT.md (Data Persistence section).
+
 ## UX refactor 2026-05 (5-commit autonomous loop)
 
 The "Components/Panels/Map" 3-tab IA was reorganized to a 4-tab IA after the

@@ -22,11 +22,11 @@ mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 
 // We POST against the seeded backend (port 3100) directly to create a
 // fresh panel-with-no-components scenario in addition to the existing seed.
-const E2E_BACKEND_URL = 'http://127.0.0.1:3100';
+import { authedFetch, E2E_BACKEND_URL } from './authed-fetch.js';
 
 const createEmptyPanel = async (): Promise<string> => {
   // Panel
-  const pRes = await fetch(`${E2E_BACKEND_URL}/api/v1/panels`, {
+  const pRes = await authedFetch(`${E2E_BACKEND_URL}/api/v1/panels`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name: 'main', orientation: 'horizontal', slotCount: 24 }),
@@ -39,7 +39,7 @@ const createEmptyPanel = async (): Promise<string> => {
     { slot: '1', slotPosition: 1, amperage: 20, poles: 'single', label: 'asdasda' },
     { slot: '2', slotPosition: 2, amperage: 20, poles: 'single', label: 'dasda' },
   ]) {
-    await fetch(`${E2E_BACKEND_URL}/api/v1/panels/${panelId}/breakers`, {
+    await authedFetch(`${E2E_BACKEND_URL}/api/v1/panels/${panelId}/breakers`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(spec),

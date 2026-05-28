@@ -16,8 +16,9 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { authedFetch, E2E_BACKEND_URL } from './authed-fetch.js';
+
 const STATE_FILE = join(process.cwd(), 'e2e', '.state.json');
-const E2E_BACKEND_URL = 'http://127.0.0.1:3100';
 
 type SeededState = {
   seeded?: {
@@ -36,7 +37,7 @@ const loadSeeded = (): NonNullable<SeededState['seeded']> => {
 };
 
 const deleteServiceEntry = async (id: string): Promise<void> => {
-  await fetch(`${E2E_BACKEND_URL}/api/v1/service-entries/${id}`, {
+  await authedFetch(`${E2E_BACKEND_URL}/api/v1/service-entries/${id}`, {
     method: 'DELETE',
   });
 };
@@ -44,7 +45,7 @@ const deleteServiceEntry = async (id: string): Promise<void> => {
 const listEntriesForComponent = async (
   componentId: string
 ): Promise<{ id: string; note: string }[]> => {
-  const res = await fetch(
+  const res = await authedFetch(
     `${E2E_BACKEND_URL}/api/v1/service-entries?parentType=component&parentId=${componentId}`
   );
   const body = (await res.json()) as {
@@ -122,7 +123,7 @@ test.describe('G40 Part 2 service-log on ComponentRow @cycle-67', () => {
     // "scorched-cycle67" appears in NO component's name or room, so a
     // hit at /components?search=... is exclusively from the note widening.
     const targetComponentId = seeded.componentIds[0];
-    const post = await fetch(
+    const post = await authedFetch(
       `${E2E_BACKEND_URL}/api/v1/components/${targetComponentId}/service-entries`,
       {
         method: 'POST',

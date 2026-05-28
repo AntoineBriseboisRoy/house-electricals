@@ -41,6 +41,11 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
     video: 'off',
+    // feat/auth-gate — every test starts pre-authenticated via the
+    // session cookie globalSetup writes after seeding. Specs that
+    // explicitly want to test the unauthed flow can call
+    // `page.context().clearCookies()` at the start.
+    storageState: './e2e/.auth.json',
   },
   projects: [
     {

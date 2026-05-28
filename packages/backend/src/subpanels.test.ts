@@ -98,6 +98,7 @@ describe('subpanel hierarchy (G39)', () => {
       roomRepository: new SqliteRoomRepository(db),
       serviceEntryRepository: new SqliteServiceEntryRepository(db),
       db,
+      auth: null,
     });
   });
 

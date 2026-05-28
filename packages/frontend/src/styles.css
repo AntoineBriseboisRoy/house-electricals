@@ -91,6 +91,82 @@ body {
   border-color: var(--color-border-strong);
 }
 
+/* feat/auth-gate — LogoutButton: sibling of ThemeToggle, sits just to
+   its LEFT in the top-right cluster. Shares the visible-pill styling
+   so the two controls read as a related toolbar. */
+.logout-button {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + var(--space-3));
+  /* Sits to the LEFT of ThemeToggle (44px touch-target + space-3 gap +
+     the right inset). */
+  right: calc(
+    env(safe-area-inset-right) + var(--touch-target) + var(--space-3) +
+      var(--space-2)
+  );
+  z-index: 60;
+}
+.logout-button .icon-btn {
+  background: var(--color-bg-surface);
+  border-color: var(--color-border-subtle);
+  box-shadow: var(--shadow-sm);
+}
+.logout-button .icon-btn:hover:not(:disabled) {
+  background: var(--color-bg-surface-raised);
+  border-color: var(--color-border-strong);
+}
+
+/* feat/auth-gate — initial loading splash + login screen. */
+.app-auth-splash {
+  position: fixed;
+  inset: 0;
+  background: var(--color-bg-canvas);
+}
+
+.login-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: var(--color-bg-canvas);
+}
+.login-screen__card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+.login-screen__title {
+  margin: 0;
+  font-size: var(--text-size-xl);
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-default);
+  letter-spacing: var(--text-tracking-tight);
+  text-align: center;
+}
+.login-screen__subtitle {
+  margin: 0 0 var(--space-2) 0;
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-muted);
+  text-align: center;
+}
+.login-screen__error {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-danger-subtle);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  color: var(--color-danger);
+  font-size: var(--text-size-sm);
+}
+
 /* Cycle-68 — VersionPill: tiny floating "v <sha>" chip in the BOTTOM-LEFT
    corner, sitting just above the bottom-tabs. Tapping opens a confirm
    modal with "Force refresh" (unregisters SW + clears caches + reloads).

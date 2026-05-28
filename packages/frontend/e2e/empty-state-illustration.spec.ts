@@ -16,9 +16,7 @@
 
 import { test, expect, type APIRequestContext } from '@playwright/test';
 import { seedFixtures } from './seed.js';
-
-// Inlined (cycle-21 convention) — keep in sync with playwright.config.ts.
-const E2E_BACKEND_URL = 'http://127.0.0.1:3100';
+import { E2E_BACKEND_URL } from './authed-fetch.js';
 
 const listIds = async (
   api: APIRequestContext,

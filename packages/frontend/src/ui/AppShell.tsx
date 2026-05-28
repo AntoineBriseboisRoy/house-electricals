@@ -6,6 +6,7 @@ import {
   Map as MapIcon,
 } from 'lucide-react';
 import { BottomTabs, type Tab } from './BottomTabs.js';
+import { LogoutButton } from './LogoutButton.js';
 import { ThemeToggle } from './ThemeToggle.js';
 import { VersionPill } from './VersionPill.js';
 
@@ -108,6 +109,7 @@ export const AppShell = ({
         {children}
       </div>
       <ThemeToggle />
+      <LogoutButton />
       <VersionPill />
       <BottomTabs tabs={APP_TABS} />
     </div>

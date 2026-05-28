@@ -38,7 +38,67 @@ export class ApiHttpError extends Error {
   }
 }
 
+/**
+ * feat/auth-gate — global 401 handler. AuthContext registers a callback
+ * here so any expired-session response bubbles back to the React tree
+ * and the user is redirected to the LoginScreen without losing the
+ * current URL.
+ */
+let unauthorizedHandler: (() => void) | null = null;
+
+export const setUnauthorizedHandler = (cb: (() => void) | null): void => {
+  unauthorizedHandler = cb;
+};
+
 const unwrap = async <T,>(res: Response): Promise<T> => {
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const body = (await res.json()) as { error?: { message?: string } };
+      detail = body.error?.message ?? '';
+    } catch {
+      detail = await res.text().catch(() => '');
+    }
+    if (res.status === 401 && unauthorizedHandler !== null) {
+      // Fire-and-forget — let the AuthContext flip user → null.
+      try {
+        unauthorizedHandler();
+      } catch {
+        // best-effort
+      }
+    }
+    throw new ApiHttpError(res.status, detail);
+  }
+  const body = (await res.json()) as ApiEnvelope<T>;
+  return body.data;
+};
+
+// ── feat/auth-gate — auth endpoints used by AuthContext ────────────────
+
+export type AuthUser = { username: string };
+
+export const fetchAuthMe = async (): Promise<AuthUser | null> => {
+  const res = await fetch('/api/v1/auth/me');
+  if (res.status === 401) return null;
+  if (!res.ok) {
+    throw new ApiHttpError(res.status, await res.text().catch(() => ''));
+  }
+  const body = (await res.json()) as ApiEnvelope<AuthUser>;
+  return body.data;
+};
+
+export const submitLogin = async (
+  username: string,
+  password: string
+): Promise<AuthUser> => {
+  const res = await fetch('/api/v1/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  if (res.status === 401) {
+    throw new ApiHttpError(401, 'Invalid username or password.');
+  }
   if (!res.ok) {
     let detail = '';
     try {
@@ -49,8 +109,12 @@ const unwrap = async <T,>(res: Response): Promise<T> => {
     }
     throw new ApiHttpError(res.status, detail);
   }
-  const body = (await res.json()) as ApiEnvelope<T>;
+  const body = (await res.json()) as ApiEnvelope<AuthUser>;
   return body.data;
+};
+
+export const submitLogout = async (): Promise<void> => {
+  await fetch('/api/v1/auth/logout', { method: 'POST' });
 };
 
 export const listPanels = async (): Promise<Panel[]> => {

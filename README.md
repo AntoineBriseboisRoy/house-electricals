@@ -18,6 +18,7 @@
 - 🧪 **Walk-through test mode** — flip a breaker IRL, tap the components that lost power, the app records the wiring
 - 🛡️ **GFCI/AFCI tracking** with monthly test reminders + printable panel-door diagram
 - 📒 **Per-breaker audit log** and per-component service log
+- 🔐 **Single-user login gate** — username + password protect every screen
 - 🌗 Dark and light themes
 - 🏠 100% **self-hosted**, no cloud, no telemetry — your wiring data stays on your hardware
 
@@ -35,6 +36,11 @@ services:
     restart: unless-stopped
     ports:
       - 8070:3000
+    environment:
+      # Required. The app refuses to start without it.
+      AUTH_PASSWORD: change-me-before-first-start
+      # Optional. Defaults to "admin".
+      # AUTH_USERNAME: admin
     volumes:
       - ./data:/data
 ```
@@ -54,16 +60,30 @@ Start it:
 docker compose up -d
 ```
 
-Open **http://your-host:8070/**. On your phone, use *Add to Home Screen* to install the PWA.
+Open **http://your-host:8070/**. The first screen is a login — sign in with the username + password you set in `compose.yaml`. On your phone, use *Add to Home Screen* to install the PWA.
+
+## Login
+
+Every screen sits behind a single-user login gate.
+
+- **`AUTH_PASSWORD` is required** — the backend refuses to start without it.
+- **`AUTH_USERNAME` defaults to `admin`** — override if you want.
+- On first boot, the app writes a random `data/.auth-secret` (mode 600) used to sign session cookies. Back it up alongside `data/db.sqlite`; deleting it logs everyone out.
+- Sessions last 30 days. Sign out from the floating button at the top-right of any screen.
+- Changing `AUTH_PASSWORD` and restarting takes effect on the next login attempt; existing sessions stay valid until the cookie expires or `data/.auth-secret` is regenerated.
+
+There is no public sign-up, no password reset, no "forgot password" flow. This is a single-user app on a LAN — the username + password protect the data from a casual visitor on your network, not from a determined attacker. Put it behind HTTPS (see below) before exposing it to the internet.
 
 ## Configuration
 
-All optional — the defaults work for a typical home server. Set under `environment:` in `compose.yaml` or in a sibling `.env` file.
+Set under `environment:` in `compose.yaml` or in a sibling `.env` file.
 
 | Variable | Default | Notes |
 |---|---|---|
+| `AUTH_PASSWORD` | **(required)** | Password for the login gate. Container refuses to start without it. |
+| `AUTH_USERNAME` | `admin` | Username for the login gate. |
 | `HOST_PORT` | `8070` | Host port the container binds to. Change the left side of `ports:` to match. |
-| `DATA_PATH` | `./data` | Host directory holding the SQLite DB and uploaded floor-plan images. Back this up. |
+| `DATA_PATH` | `./data` | Host directory holding the SQLite DB, floor-plan uploads, and the auto-generated `.auth-secret`. Back this up. |
 | `IMAGE` | `ghcr.io/antoinebriseboisroy/house-electricals:latest` | Pin to a commit SHA (e.g. `:a1b2c3d…`) or a `vX.Y.Z` tag for a stable rollback target. |
 
 ## HTTPS

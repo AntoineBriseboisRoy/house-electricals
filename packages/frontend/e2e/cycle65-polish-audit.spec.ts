@@ -30,7 +30,7 @@ const __dirname = dirname(__filename);
 
 const SCREENSHOTS_ROOT = join(__dirname, '.screenshots', 'cycle65');
 
-const E2E_BACKEND_URL = 'http://127.0.0.1:3100';
+import { authedFetch, E2E_BACKEND_URL } from './authed-fetch.js';
 
 type SeededState = {
   seeded?: {
@@ -96,7 +96,7 @@ const waitForModalSettled = async (
 };
 
 const post = async (path: string, body: unknown): Promise<unknown> => {
-  const res = await fetch(`${E2E_BACKEND_URL}${path}`, {
+  const res = await authedFetch(`${E2E_BACKEND_URL}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -111,7 +111,7 @@ const post = async (path: string, body: unknown): Promise<unknown> => {
 };
 
 const patch = async (path: string, body: unknown): Promise<void> => {
-  const res = await fetch(`${E2E_BACKEND_URL}${path}`, {
+  const res = await authedFetch(`${E2E_BACKEND_URL}${path}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -138,7 +138,7 @@ const supplementalSeed = async (
   const b0 = seeded.breakerIds[0];
 
   // 1. Breaker tests — three rows w/ different outcomes + ages.
-  const existingTests = await fetch(
+  const existingTests = await authedFetch(
     `${E2E_BACKEND_URL}/api/v1/breaker-tests?breakerId=${b0}`
   ).then((r) => r.json() as Promise<{ data: { id: string }[] }>);
   if (existingTests.data.length < 3) {
@@ -175,7 +175,7 @@ const supplementalSeed = async (
   }
 
   // 3. Tandem breaker pair at slot 9 a/b (avoid colliding with seeded 1..7)
-  const probe = (await fetch(
+  const probe = (await authedFetch(
     `${E2E_BACKEND_URL}/api/v1/panels/${seeded.panelId}/breakers`
   ).then((r) => r.json())) as { data: { slotPosition: number | null; tandemHalf: string | null }[] };
   const hasTandem = probe.data.some(
@@ -208,7 +208,7 @@ const supplementalSeed = async (
   //    co-controls the existing Living-Room light (cycle-64 surface).
   //    The seeded switch (gang 1) already controls the Living-Room light.
   //    A new 2nd switch with gang0 → same Living-Room light makes it a 3-way.
-  const components = (await fetch(`${E2E_BACKEND_URL}/api/v1/components`).then(
+  const components = (await authedFetch(`${E2E_BACKEND_URL}/api/v1/components`).then(
     (r) => r.json()
   )) as { data: { id: string; name: string }[] };
   const has3wayFlag = components.data.some(

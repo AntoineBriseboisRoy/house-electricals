@@ -36,6 +36,7 @@ describe('floor routes (G13)', () => {
       roomRepository: new SqliteRoomRepository(db),
       serviceEntryRepository: new SqliteServiceEntryRepository(db),
       db,
+      auth: null,
     });
   });
 
@@ -535,6 +536,7 @@ describe('cycle-85: floors.panel_id link', () => {
       roomRepository: new SqliteRoomRepository(db),
       serviceEntryRepository: new SqliteServiceEntryRepository(db),
       db,
+      auth: null,
     });
     const r = await app.request('/api/v1/panels', {
       method: 'POST',

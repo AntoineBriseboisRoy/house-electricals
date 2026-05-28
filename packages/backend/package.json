@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/repository.test.ts src/breaker-repository.test.ts src/component-repository.test.ts src/server.test.ts src/floor-plans.test.ts src/floors.test.ts src/walls.test.ts src/rooms.test.ts src/switch-controls.test.ts",
+    "test": "tsx --test src/repository.test.ts src/breaker-repository.test.ts src/component-repository.test.ts src/server.test.ts src/floor-plans.test.ts src/floors.test.ts src/walls.test.ts src/rooms.test.ts src/switch-controls.test.ts src/auth.test.ts",
     "start": "node --experimental-sqlite dist/index.js",
     "dev": "tsx watch --clear-screen=false --env-file=../../.env.dev src/index.ts"
   },

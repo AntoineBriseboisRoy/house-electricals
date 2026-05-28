@@ -39,7 +39,7 @@ const loadSeeded = (): NonNullable<SeededState['seeded']> => {
   return state.seeded;
 };
 
-const E2E_BACKEND_URL = 'http://127.0.0.1:3100';
+import { authedFetch, E2E_BACKEND_URL } from './authed-fetch.js';
 
 test.describe('cycle-85 room dropdown + floor-panel link', () => {
   test('ComponentForm Room field is a strict Combobox of existing rooms', async ({
@@ -93,7 +93,7 @@ test.describe('cycle-85 room dropdown + floor-panel link', () => {
 
     // Server PATCH succeeded — verify by re-fetching the floor.
     await expect(async () => {
-      const res = await fetch(
+      const res = await authedFetch(
         `${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`
       );
       const body = (await res.json()) as { data: { panelId: string | null } };
@@ -102,7 +102,7 @@ test.describe('cycle-85 room dropdown + floor-panel link', () => {
 
     // Cleanup — leave the seed floor unlinked so later specs (smoke,
     // configure, etc.) see the floor in its original shape.
-    await fetch(`${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`, {
+    await authedFetch(`${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ panelId: null }),
@@ -115,14 +115,14 @@ test.describe('cycle-85 room dropdown + floor-panel link', () => {
     const seed = loadSeeded();
     // Step 1: link the floor to the panel via the public API so the
     // ComponentsScreen sees the floor.panelId on load.
-    await fetch(`${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`, {
+    await authedFetch(`${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ panelId: seed.panelId }),
     });
 
     // Step 2: create a fresh unwired component on this floor.
-    const created = await fetch(`${E2E_BACKEND_URL}/api/v1/components`, {
+    const created = await authedFetch(`${E2E_BACKEND_URL}/api/v1/components`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -149,10 +149,10 @@ test.describe('cycle-85 room dropdown + floor-panel link', () => {
     await expect(panelSelect).toHaveValue(seed.panelId);
 
     // Cleanup so the test is idempotent.
-    await fetch(`${E2E_BACKEND_URL}/api/v1/components/${componentId}`, {
+    await authedFetch(`${E2E_BACKEND_URL}/api/v1/components/${componentId}`, {
       method: 'DELETE',
     });
-    await fetch(`${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`, {
+    await authedFetch(`${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ panelId: null }),

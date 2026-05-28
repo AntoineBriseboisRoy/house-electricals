@@ -38,6 +38,7 @@ playwright-report/
 test-results/
 packages/frontend/e2e/.screenshots/
 packages/frontend/e2e/.state.json
+packages/frontend/e2e/.auth.json
 .playwright/
 
 

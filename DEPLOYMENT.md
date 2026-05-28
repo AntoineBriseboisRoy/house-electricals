@@ -51,11 +51,13 @@ On Windows Docker Desktop / WSL2 / macOS this isn't necessary — the VFS layer 
 
 ## Configuration (`.env`)
 
-| Variable      | Description                                                  | Default                                              |
-|---------------|--------------------------------------------------------------|------------------------------------------------------|
-| `HOST_PORT`   | Port exposed on the host                                     | `8070`                                               |
-| `DATA_PATH`   | Host path holding `panels.db` + `floor-plans/`               | `./data`                                             |
-| `IMAGE`       | (compose.prod.yaml only) Registry path for the unified image | `ghcr.io/antoinebriseboisroy/house-electricals:latest` (the maintainer's published image; override for forks) |
+| Variable        | Description                                                  | Default                                              |
+|-----------------|--------------------------------------------------------------|------------------------------------------------------|
+| `AUTH_PASSWORD` | **Required.** Password for the login gate. The backend refuses to start without it. | *(none — must be set)* |
+| `AUTH_USERNAME` | Username for the login gate                                  | `admin`                                              |
+| `HOST_PORT`     | Port exposed on the host                                     | `8070`                                               |
+| `DATA_PATH`     | Host path holding `panels.db` + `floor-plans/` + `.auth-secret` | `./data`                                          |
+| `IMAGE`         | (compose.prod.yaml only) Registry path for the unified image | `ghcr.io/antoinebriseboisroy/house-electricals:latest` (the maintainer's published image; override for forks) |
 
 For real-server deployments use an absolute `DATA_PATH` (e.g. `/srv/house-electricals/data`), not a repo-relative path.
 
@@ -68,8 +70,11 @@ ${DATA_PATH}/
 ├── panels.db          # SQLite database
 ├── panels.db-wal      # WAL file (write-ahead log)
 ├── panels.db-shm      # shared-memory file
+├── .auth-secret       # auto-generated HMAC secret for login session cookies (mode 600)
 └── floor-plans/       # uploaded floor-plan images, content-hashed filenames
 ```
+
+The `.auth-secret` file is generated on first boot and reused on every subsequent restart. Back it up alongside `panels.db` — without it, all existing login sessions become invalid (users have to log in again, but no data is lost). Deleting it is a soft "log everyone out".
 
 The bind-mount means SQLite + images survive container rebuilds, `docker compose down`, and host reboots.
 
@@ -168,7 +173,9 @@ The build-from-source path described above ("Quick Start") is still fully suppor
 
 ## Troubleshooting
 
-**Containers won't start.** `docker compose logs backend` — most often the backend can't read `/data` because of UID 65532 ownership on a fresh Linux directory. Run `sudo chown -R 65532:65532 ${DATA_PATH}` and `docker compose restart backend`.
+**Containers won't start.** `docker compose logs backend` — most often:
+- The backend can't read `/data` because of UID 65532 ownership on a fresh Linux directory. Run `sudo chown -R 65532:65532 ${DATA_PATH}` and `docker compose restart backend`.
+- `AUTH_PASSWORD` isn't set. The backend prints a multi-line error and exits. Add it to your `.env` (or `environment:` block) and `docker compose up -d`.
 
 **Can't reach the app.** `curl -s http://localhost:${HOST_PORT:-8070}/api/v1/health` should return `{"data":{"ok":true}}`. If you get connection-refused, check `docker compose ps` for the `web` container's status. If the curl works from the host but the phone can't reach it, verify firewall rules and that the reverse proxy is forwarding to the right port.
 

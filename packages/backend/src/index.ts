@@ -13,12 +13,17 @@ import {
   openDatabase,
 } from './repository.js';
 import { buildApp } from './server.js';
+import { loadAuthConfig } from './auth.js';
 
 const DB_PATH = process.env.DB_PATH ?? '/data/panels.db';
 const PORT = Number.parseInt(process.env.PORT ?? '3000', 10);
 const HOST = process.env.HOST ?? '0.0.0.0';
 
 mkdirSync(dirname(DB_PATH), { recursive: true });
+
+// feat/auth-gate — fail-fast on missing AUTH_PASSWORD so the operator
+// can't accidentally boot a wide-open instance.
+const auth = loadAuthConfig();
 
 const db = openDatabase(DB_PATH);
 const panelRepository = new SqlitePanelRepository(db);
@@ -39,6 +44,7 @@ const app = buildApp({
   roomRepository,
   serviceEntryRepository,
   db,
+  auth,
 });
 
 const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST });

@@ -41,6 +41,7 @@ describe('switch_controls routes (G19)', () => {
       roomRepository: new SqliteRoomRepository(db),
       serviceEntryRepository: new SqliteServiceEntryRepository(db),
       db,
+      auth: null,
     });
   });
 

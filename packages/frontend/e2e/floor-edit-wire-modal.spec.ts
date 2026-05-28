@@ -39,7 +39,7 @@ const loadSeeded = (): NonNullable<SeededState['seeded']> => {
   return state.seeded;
 };
 
-const E2E_BACKEND_URL = 'http://127.0.0.1:3100';
+import { authedFetch, E2E_BACKEND_URL } from './authed-fetch.js';
 
 test.describe('cycle-86 wire components from FloorEditScreen via Modal', () => {
   test('Edit details Modal pre-selects floor.panelId and saves a breakerId', async ({
@@ -54,14 +54,14 @@ test.describe('cycle-86 wire components from FloorEditScreen via Modal', () => {
 
     // 1) Link the floor to the seeded panel so ComponentForm has a
     //    floorPanelDefault to pre-select.
-    await fetch(`${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`, {
+    await authedFetch(`${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ panelId: seed.panelId }),
     });
 
     // 2) Create a fresh unwired component on this floor via REST.
-    const created = await fetch(`${E2E_BACKEND_URL}/api/v1/components`, {
+    const created = await authedFetch(`${E2E_BACKEND_URL}/api/v1/components`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -118,7 +118,7 @@ test.describe('cycle-86 wire components from FloorEditScreen via Modal', () => {
     await expect(modal).not.toBeVisible();
 
     // 10) Verify via API that the component is now wired to the breaker.
-    const after = await fetch(
+    const after = await authedFetch(
       `${E2E_BACKEND_URL}/api/v1/components/${componentId}`
     );
     const body = (await after.json()) as {
@@ -128,10 +128,10 @@ test.describe('cycle-86 wire components from FloorEditScreen via Modal', () => {
 
     // Cleanup — leave the seed in its original shape so later specs see
     // the unlinked floor + no scratch component.
-    await fetch(`${E2E_BACKEND_URL}/api/v1/components/${componentId}`, {
+    await authedFetch(`${E2E_BACKEND_URL}/api/v1/components/${componentId}`, {
       method: 'DELETE',
     });
-    await fetch(`${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`, {
+    await authedFetch(`${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ panelId: null }),

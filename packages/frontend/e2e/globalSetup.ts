@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { seedFixtures } from './seed.js';
+import { loginForSeed, seedFixtures } from './seed.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -28,6 +28,7 @@ const __dirname = dirname(__filename);
 const WORKSPACE_ROOT = resolve(__dirname, '../../..');
 const BACKEND_DIR = join(WORKSPACE_ROOT, 'packages/backend');
 const STATE_FILE = join(__dirname, '.state.json');
+const AUTH_STORAGE_STATE_FILE = join(__dirname, '.auth.json');
 
 const E2E_BACKEND_PORT = 3100;
 const E2E_BACKEND_URL = `http://127.0.0.1:${E2E_BACKEND_PORT}`;
@@ -40,7 +41,9 @@ const waitForBackend = async (
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
-      const res = await fetch(`${baseUrl}/api/v1/panels`);
+      // feat/auth-gate — use the unauthed /health endpoint;
+      // /api/v1/panels now requires a cookie.
+      const res = await fetch(`${baseUrl}/api/v1/health`);
       if (res.status === 200) return;
     } catch {
       // ECONNREFUSED while booting — keep polling.
@@ -76,6 +79,9 @@ const spawnBackend = (
       PORT: String(E2E_BACKEND_PORT),
       // Quiet the backend's own startup noise in CI logs (but keep errors).
       NODE_ENV: 'test',
+      // feat/auth-gate — the backend refuses to start without these.
+      AUTH_USERNAME: 'e2e-user',
+      AUTH_PASSWORD: 'e2e-password',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: isWin,
@@ -147,6 +153,36 @@ export default async function globalSetup(): Promise<void> {
     const seeded = await seedFixtures(E2E_BACKEND_URL);
     console.log(
       `[e2e globalSetup] seeded: panel=${seeded.panelId} breakers=${seeded.breakerIds.length} floor=${seeded.floorId} components=${seeded.componentIds.length}`
+    );
+
+    // feat/auth-gate — write a Playwright storageState file with the
+    // session cookie so every test starts pre-authenticated. Without
+    // this, every spec would have to navigate to the login screen first.
+    // The cookie is stored against the Vite-dev origin (127.0.0.1:5180);
+    // Vite's proxy forwards it to the backend on /api/v1/* calls.
+    const seedCookie = await loginForSeed(E2E_BACKEND_URL);
+    const tokenValue = seedCookie.replace(/^he_auth=/, '');
+    const storageState = {
+      cookies: [
+        {
+          name: 'he_auth',
+          value: tokenValue,
+          domain: '127.0.0.1',
+          path: '/',
+          expires: -1,
+          httpOnly: true,
+          secure: false,
+          sameSite: 'Lax',
+        },
+      ],
+      origins: [],
+    };
+    writeFileSync(
+      AUTH_STORAGE_STATE_FILE,
+      JSON.stringify(storageState, null, 2)
+    );
+    console.log(
+      `[e2e globalSetup] wrote auth storageState → ${AUTH_STORAGE_STATE_FILE}`
     );
 
     // Re-write state with seeded ids for spec convenience.
