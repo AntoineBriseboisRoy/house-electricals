@@ -18,7 +18,7 @@
 - 🧪 **Walk-through test mode** — flip a breaker IRL, tap the components that lost power, the app records the wiring
 - 🛡️ **GFCI/AFCI tracking** with monthly test reminders + printable panel-door diagram
 - 📒 **Per-breaker audit log** and per-component service log
-- 🔐 **Single-user login gate** — username + password protect every screen
+- 🔐 **Sign-up on first boot, login after** — single-user account, scrypt-hashed password, change-password from the floating Account chip
 - 🌗 Dark and light themes
 - 🏠 100% **self-hosted**, no cloud, no telemetry — your wiring data stays on your hardware
 
@@ -36,11 +36,6 @@ services:
     restart: unless-stopped
     ports:
       - 8070:3000
-    environment:
-      # Required. The app refuses to start without it.
-      AUTH_PASSWORD: change-me-before-first-start
-      # Optional. Defaults to "admin".
-      # AUTH_USERNAME: admin
     volumes:
       - ./data:/data
 ```
@@ -60,19 +55,19 @@ Start it:
 docker compose up -d
 ```
 
-Open **http://your-host:8070/**. The first screen is a login — sign in with the username + password you set in `compose.yaml`. On your phone, use *Add to Home Screen* to install the PWA.
+Open **http://your-host:8070/**. The very first visit shows a **sign-up screen** — pick a username and password (8+ characters). After that, every visit goes to the login screen. On your phone, use *Add to Home Screen* to install the PWA.
 
 ## Login
 
 Every screen sits behind a single-user login gate.
 
-- **`AUTH_PASSWORD` is required** — the backend refuses to start without it.
-- **`AUTH_USERNAME` defaults to `admin`** — override if you want.
-- On first boot, the app writes a random `data/.auth-secret` (mode 600) used to sign session cookies. Back it up alongside `data/db.sqlite`; deleting it logs everyone out.
-- Sessions last 30 days. Sign out from the floating button at the top-right of any screen.
-- Changing `AUTH_PASSWORD` and restarting takes effect on the next login attempt; existing sessions stay valid until the cookie expires or `data/.auth-secret` is regenerated.
+- **First-boot sign-up.** The first time you open the app, a sign-up form appears (the SQLite DB has no user yet). Pick a username + password; the password is hashed with scrypt and stored in `data/panels.db`. Subsequent visits go to the login screen.
+- **No env vars to set.** There is no `AUTH_PASSWORD` — credentials live in the DB, not the environment.
+- **Change password from the app.** Click the floating Account chip at the top-right of any screen → Change password modal.
+- **`data/.auth-secret`** is auto-generated on first boot (mode 600) and used to sign session cookies. Back it up alongside `data/panels.db`. Deleting it invalidates every active session (user row is untouched — they sign back in with the same password).
+- **Forgot your password?** Sessions are 30 days. To reset, stop the container, delete the row: `sqlite3 data/panels.db "DELETE FROM app_users"`, then start the container — first visit shows sign-up again. (No e-mail-based recovery flow, by design.)
 
-There is no public sign-up, no password reset, no "forgot password" flow. This is a single-user app on a LAN — the username + password protect the data from a casual visitor on your network, not from a determined attacker. Put it behind HTTPS (see below) before exposing it to the internet.
+There is no public sign-up beyond the first user, no second account, no roles. This is a single-user app on a LAN — the password protects the data from a casual visitor on your network, not from a determined attacker. Put it behind HTTPS (see below) before exposing it to the internet.
 
 ## Configuration
 
@@ -80,10 +75,8 @@ Set under `environment:` in `compose.yaml` or in a sibling `.env` file.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `AUTH_PASSWORD` | **(required)** | Password for the login gate. Container refuses to start without it. |
-| `AUTH_USERNAME` | `admin` | Username for the login gate. |
 | `HOST_PORT` | `8070` | Host port the container binds to. Change the left side of `ports:` to match. |
-| `DATA_PATH` | `./data` | Host directory holding the SQLite DB, floor-plan uploads, and the auto-generated `.auth-secret`. Back this up. |
+| `DATA_PATH` | `./data` | Host directory holding the SQLite DB (including the `app_users` row), floor-plan uploads, and the auto-generated `.auth-secret`. Back this up. |
 | `IMAGE` | `ghcr.io/antoinebriseboisroy/house-electricals:latest` | Pin to a commit SHA (e.g. `:a1b2c3d…`) or a `vX.Y.Z` tag for a stable rollback target. |
 
 ## HTTPS

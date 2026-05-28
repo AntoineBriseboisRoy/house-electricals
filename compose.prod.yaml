@@ -37,6 +37,9 @@ services:
       PUBLIC_DIR: /app/public
       PORT: 3000
       HOST: 0.0.0.0
+      # Auth: no AUTH_USERNAME / AUTH_PASSWORD here. First-time setup
+      # is a sign-up screen the first time you open the app — the
+      # backend stores the (one) user row in /data/panels.db.
     ports:
       # Your reverse proxy (Caddy / Cloudflare Tunnel / Nginx / Traefik)
       # forwards to this host port.

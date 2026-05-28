@@ -786,3 +786,67 @@ export type ServiceEntryInputParsed = z.infer<typeof serviceEntryInputSchema>;
 export type ServiceEntryListQueryParsed = z.infer<
   typeof serviceEntryListQuerySchema
 >;
+
+// ── App user (single-user login gate — sign-up flow) ────────────────────────
+
+/**
+ * The single account row in `app_users`. Created via the first-time
+ * sign-up flow. There is exactly 0 or 1 row at any moment — sign-up
+ * is rejected with 409 when a user already exists.
+ *
+ * `passwordHash` is a scrypt-encoded string (see backend/src/password.ts).
+ * The repo never returns it from `list`-style reads — only internally
+ * for `verifyPassword(supplied, row.passwordHash)`.
+ */
+export type AppUser = {
+  id: string;
+  username: string;
+  /** scrypt-encoded password hash. Never exposed over the network. */
+  passwordHash: string;
+  createdAt: number;
+};
+
+export interface AppUserRepository {
+  /** True iff the table has >=1 row. Drives the sign-up vs login pivot. */
+  hasAnyUser(): boolean;
+  /** The single user, if one exists. */
+  getSingle(): AppUser | null;
+  /** Fetch by username — used by the /auth/login route. */
+  getByUsername(username: string): AppUser | null;
+  /** Create the (one and only) user. Throws if a user already exists. */
+  create(input: { username: string; passwordHash: string }): AppUser;
+  /** Replace the stored passwordHash for an existing user. */
+  updatePasswordHash(id: string, passwordHash: string): void;
+}
+
+export const usernameSchema = z
+  .string()
+  .trim()
+  .min(1, 'Username must not be empty.')
+  .max(120, 'Username is too long.');
+
+// Min 8 chars — reasonable for a single-user LAN PWA. The signup form
+// surfaces this as a hint so users aren't surprised by the rejection.
+export const passwordSchema = z
+  .string()
+  .min(8, 'Password must be at least 8 characters.')
+  .max(512, 'Password is too long.');
+
+export const signupInputSchema = z
+  .object({
+    username: usernameSchema,
+    password: passwordSchema,
+  })
+  .strict();
+
+export const changePasswordInputSchema = z
+  .object({
+    currentPassword: z.string().min(1).max(512),
+    newPassword: passwordSchema,
+  })
+  .strict();
+
+export type SignupInputParsed = z.infer<typeof signupInputSchema>;
+export type ChangePasswordInputParsed = z.infer<
+  typeof changePasswordInputSchema
+>;

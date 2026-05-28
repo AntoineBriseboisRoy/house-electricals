@@ -117,6 +117,71 @@ export const submitLogout = async (): Promise<void> => {
   await fetch('/api/v1/auth/logout', { method: 'POST' });
 };
 
+export type SetupStatus = { needsSetup: boolean };
+
+/** Public probe — does the backend already have a user, or do we need
+ *  to show the sign-up screen? Drives the AuthContext state machine on
+ *  app mount. */
+export const fetchSetupStatus = async (): Promise<SetupStatus> => {
+  const res = await fetch('/api/v1/auth/setup-status');
+  if (!res.ok) {
+    // Network glitch or unexpected response — be safe and assume the
+    // backend already has a user. The login screen will surface any
+    // real outage on the next request.
+    throw new ApiHttpError(res.status, await res.text().catch(() => ''));
+  }
+  const body = (await res.json()) as ApiEnvelope<SetupStatus>;
+  return body.data;
+};
+
+/** Create the first (and only) user. Server returns 409 if a user
+ *  already exists, in which case the caller should pivot to the login
+ *  screen. Auto-logs the user in on success (cookie is set). */
+export const submitSignup = async (
+  username: string,
+  password: string
+): Promise<AuthUser> => {
+  const res = await fetch('/api/v1/auth/signup', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const body = (await res.json()) as { error?: { message?: string } };
+      detail = body.error?.message ?? '';
+    } catch {
+      detail = await res.text().catch(() => '');
+    }
+    throw new ApiHttpError(res.status, detail);
+  }
+  const body = (await res.json()) as ApiEnvelope<AuthUser>;
+  return body.data;
+};
+
+/** Change the signed-in user's password. Server verifies the current
+ *  password before updating. Returns 204 on success. */
+export const submitChangePassword = async (
+  currentPassword: string,
+  newPassword: string
+): Promise<void> => {
+  const res = await fetch('/api/v1/auth/password', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  if (res.status === 204) return;
+  let detail = '';
+  try {
+    const body = (await res.json()) as { error?: { message?: string } };
+    detail = body.error?.message ?? '';
+  } catch {
+    detail = await res.text().catch(() => '');
+  }
+  throw new ApiHttpError(res.status, detail);
+};
+
 export const listPanels = async (): Promise<Panel[]> => {
   const res = await fetch('/api/v1/panels');
   return unwrap<Panel[]>(res);

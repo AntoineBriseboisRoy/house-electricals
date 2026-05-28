@@ -85,4 +85,58 @@ test.describe('auth gate @feat-auth-gate', () => {
     await expect(page.getByTestId('login-submit')).toBeVisible();
   });
 
+  test('change password: account button → modal → new password works on next login', async ({
+    page,
+  }, info) => {
+    skipMobile(info);
+    const NEW_PASSWORD = 'rotated-e2e-password';
+
+    // Log in with the original password.
+    await page.goto('/');
+    await page.getByTestId('login-username').fill(USERNAME);
+    await page.getByTestId('login-password').fill(PASSWORD);
+    await page.getByTestId('login-submit').click();
+    await expect(page.getByText('Main Panel')).toBeVisible();
+
+    // Open the floating Account button → ChangePasswordModal.
+    await page.getByTestId('account-button').click();
+    const modal = page.getByTestId('change-password-modal');
+    await expect(modal).toBeVisible();
+
+    // Submit the change.
+    await modal.getByTestId('change-password-current').fill(PASSWORD);
+    await modal.getByTestId('change-password-new').fill(NEW_PASSWORD);
+    await modal.getByTestId('change-password-confirm').fill(NEW_PASSWORD);
+    await modal.getByTestId('change-password-submit').click();
+
+    // Modal closes on success.
+    await expect(modal).not.toBeVisible();
+
+    // Sign out and verify the OLD password no longer works AND the NEW
+    // one does.
+    await page.getByTestId('logout-button').click();
+    await expect(page.getByTestId('login-submit')).toBeVisible();
+
+    // Old password rejected.
+    await page.getByTestId('login-username').fill(USERNAME);
+    await page.getByTestId('login-password').fill(PASSWORD);
+    await page.getByTestId('login-submit').click();
+    await expect(page.getByRole('alert')).toContainText(/invalid/i);
+
+    // New password accepted.
+    await page.getByTestId('login-password').fill(NEW_PASSWORD);
+    await page.getByTestId('login-submit').click();
+    await expect(page.getByText('Main Panel')).toBeVisible();
+
+    // Cleanup — rotate the password BACK so other specs that hard-code
+    // the e2e creds (this file's earlier tests, on re-run) keep working.
+    await page.getByTestId('account-button').click();
+    const cleanupModal = page.getByTestId('change-password-modal');
+    await expect(cleanupModal).toBeVisible();
+    await cleanupModal.getByTestId('change-password-current').fill(NEW_PASSWORD);
+    await cleanupModal.getByTestId('change-password-new').fill(PASSWORD);
+    await cleanupModal.getByTestId('change-password-confirm').fill(PASSWORD);
+    await cleanupModal.getByTestId('change-password-submit').click();
+    await expect(cleanupModal).not.toBeVisible();
+  });
 });

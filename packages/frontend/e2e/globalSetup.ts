@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loginForSeed, seedFixtures } from './seed.js';
+import { seedFixtures, signupForSeed } from './seed.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -79,9 +79,9 @@ const spawnBackend = (
       PORT: String(E2E_BACKEND_PORT),
       // Quiet the backend's own startup noise in CI logs (but keep errors).
       NODE_ENV: 'test',
-      // feat/auth-gate — the backend refuses to start without these.
-      AUTH_USERNAME: 'e2e-user',
-      AUTH_PASSWORD: 'e2e-password',
+      // feat/auth-gate (sign-up flow) — no AUTH_USERNAME/AUTH_PASSWORD
+      // here; the test user is created via POST /auth/signup once the
+      // backend is ready. See signupForSeed() below.
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: isWin,
@@ -150,6 +150,13 @@ export default async function globalSetup(): Promise<void> {
     await waitForBackend(E2E_BACKEND_URL, 30_000);
     console.log(`[e2e globalSetup] backend ready on ${E2E_BACKEND_URL}`);
 
+    // feat/auth-gate (sign-up flow) — fresh backend has no user; mint
+    // the e2e account once via /auth/signup. seedFixtures then logs in
+    // with the same credentials. The cookie we'll write into
+    // storageState comes from this initial signup response so every
+    // spec starts pre-authed.
+    const seedCookie = await signupForSeed(E2E_BACKEND_URL);
+
     const seeded = await seedFixtures(E2E_BACKEND_URL);
     console.log(
       `[e2e globalSetup] seeded: panel=${seeded.panelId} breakers=${seeded.breakerIds.length} floor=${seeded.floorId} components=${seeded.componentIds.length}`
@@ -160,7 +167,6 @@ export default async function globalSetup(): Promise<void> {
     // this, every spec would have to navigate to the login screen first.
     // The cookie is stored against the Vite-dev origin (127.0.0.1:5180);
     // Vite's proxy forwards it to the backend on /api/v1/* calls.
-    const seedCookie = await loginForSeed(E2E_BACKEND_URL);
     const tokenValue = seedCookie.replace(/^he_auth=/, '');
     const storageState = {
       cookies: [

@@ -91,6 +91,7 @@ describe('breaker_tests (G36)', () => {
       roomRepository: new SqliteRoomRepository(db),
       serviceEntryRepository: new SqliteServiceEntryRepository(db),
       db,
+      appUserRepository: null,
       auth: null,
     });
     panel = await createPanel('Main');

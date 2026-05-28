@@ -37,6 +37,7 @@ describe('room routes (G12)', () => {
       roomRepository: new SqliteRoomRepository(db),
       serviceEntryRepository: new SqliteServiceEntryRepository(db),
       db,
+      appUserRepository: null,
       auth: null,
     });
     const r = await app.request('/api/v1/floors', {

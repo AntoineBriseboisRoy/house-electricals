@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { serve } from '@hono/node-server';
 import {
+  SqliteAppUserRepository,
   SqliteBreakerRepository,
   SqliteBreakerTestRepository,
   SqliteComponentRepository,
@@ -21,8 +22,9 @@ const HOST = process.env.HOST ?? '0.0.0.0';
 
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
-// feat/auth-gate — fail-fast on missing AUTH_PASSWORD so the operator
-// can't accidentally boot a wide-open instance.
+// feat/auth-gate — load (or auto-generate) the JWT signing secret.
+// Credentials themselves live in the `app_users` SQLite table — first
+// boot lands users on the sign-up screen via /auth/setup-status.
 const auth = loadAuthConfig();
 
 const db = openDatabase(DB_PATH);
@@ -34,6 +36,7 @@ const floorRepository = new SqliteFloorRepository(db);
 const wallRepository = new SqliteWallRepository(db);
 const roomRepository = new SqliteRoomRepository(db);
 const serviceEntryRepository = new SqliteServiceEntryRepository(db);
+const appUserRepository = new SqliteAppUserRepository(db);
 const app = buildApp({
   panelRepository,
   breakerRepository,
@@ -44,6 +47,7 @@ const app = buildApp({
   roomRepository,
   serviceEntryRepository,
   db,
+  appUserRepository,
   auth,
 });
 

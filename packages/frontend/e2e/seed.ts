@@ -15,17 +15,52 @@
 
 type Json = Record<string, unknown> | unknown[];
 
-/** feat/auth-gate — login + return the `he_auth=…` cookie value. The
- *  caller passes this verbatim as the `cookie:` request header on
- *  subsequent fetches. The username + password match the env vars
- *  injected by globalSetup. */
+// feat/auth-gate (sign-up flow) — pinned e2e credentials. The e2e
+// user is created on every globalSetup run via POST /auth/signup
+// against a fresh isolated backend.
+export const E2E_USERNAME = 'e2e-user';
+export const E2E_PASSWORD = 'e2e-password';
+
+const extractCookie = (setCookie: string, label: string): string => {
+  const m = setCookie.match(/he_auth=[^;]+/);
+  if (m === null) {
+    throw new Error(`[seed] ${label} succeeded but no he_auth cookie returned`);
+  }
+  return m[0];
+};
+
+/** Sign up the (one and only) e2e user. Returns the `he_auth=…` cookie
+ *  value. globalSetup calls this against a brand-new isolated backend
+ *  on every run — the app_users table starts empty, so this is the
+ *  canonical "first-time setup" path the new flow expects. */
+export const signupForSeed = async (baseUrl: string): Promise<string> => {
+  const res = await fetch(`${baseUrl}/api/v1/auth/signup`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      username: E2E_USERNAME,
+      password: E2E_PASSWORD,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `[seed] signup failed: ${res.status} ${res.statusText} — ${text}`
+    );
+  }
+  return extractCookie(res.headers.get('set-cookie') ?? '', 'signup');
+};
+
+/** Login with the e2e credentials and return the cookie. Used by
+ *  `seedFixtures` (which runs AFTER globalSetup's signup, when the
+ *  user already exists). */
 export const loginForSeed = async (baseUrl: string): Promise<string> => {
   const res = await fetch(`${baseUrl}/api/v1/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      username: 'e2e-user',
-      password: 'e2e-password',
+      username: E2E_USERNAME,
+      password: E2E_PASSWORD,
     }),
   });
   if (!res.ok) {
@@ -34,12 +69,7 @@ export const loginForSeed = async (baseUrl: string): Promise<string> => {
       `[seed] login failed: ${res.status} ${res.statusText} — ${text}`
     );
   }
-  const setCookie = res.headers.get('set-cookie') ?? '';
-  const m = setCookie.match(/he_auth=[^;]+/);
-  if (m === null) {
-    throw new Error('[seed] login succeeded but no he_auth cookie returned');
-  }
-  return m[0];
+  return extractCookie(res.headers.get('set-cookie') ?? '', 'login');
 };
 
 const post = async <T = unknown>(

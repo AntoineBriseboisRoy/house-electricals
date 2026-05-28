@@ -1,32 +1,34 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 
 /**
- * Single-user JWT-cookie auth (feat/auth-gate).
+ * Single-user JWT-cookie auth (feat/auth-gate + sign-up flow).
  *
- * Configuration is via environment variables — no DB-backed user store
- * (this is a single-homeowner self-hosted app, not a multi-tenant SaaS):
+ * Credentials live in the SQLite `app_users` table — minted on first
+ * boot via the public `POST /auth/signup` endpoint. There is exactly 0
+ * or 1 user row at any moment. AUTH_USERNAME / AUTH_PASSWORD env vars
+ * are NO LONGER consumed — earlier feat/auth-gate cycles read them
+ * directly; that path is gone.
  *
- *   AUTH_USERNAME  — defaults to "admin"
- *   AUTH_PASSWORD  — REQUIRED. The backend fails to start without it
- *                    with a clear error.
- *   AUTH_SECRET    — optional. If not set, generated on first start
- *                    and persisted to `${DATA_DIR}/.auth-secret`
- *                    so existing sessions survive restarts. The file
- *                    is chmod 600 so only the container's nonroot UID
- *                    can read it.
+ * The only env-derivable secret left is:
+ *
+ *   AUTH_SECRET  — optional. If not set, auto-generated on first start
+ *                  and persisted to `${DATA_DIR}/.auth-secret` so
+ *                  existing sessions survive restarts. The file is
+ *                  chmod 600 so only the container's nonroot UID can
+ *                  read it. Deleting the file is the canonical
+ *                  "log everyone out" lever (cookies become unverifiable
+ *                  even though the user row is untouched).
  *
  * Token: JWT (HS256), 30-day expiry, httpOnly cookie named "he_auth".
- * Constant-time password compare to defeat timing oracles.
  */
 
 const COOKIE_NAME = 'he_auth';
 const TOKEN_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 export type AuthConfig = {
-  username: string;
-  password: string; // raw (compared timing-safe)
+  /** HMAC secret for signing the `he_auth` JWT cookie. */
   secret: string;
 };
 
@@ -34,28 +36,6 @@ const DATA_DIR_DEFAULT = '/data';
 const AUTH_SECRET_FILENAME = '.auth-secret';
 
 export const loadAuthConfig = (): AuthConfig => {
-  const username = process.env.AUTH_USERNAME?.trim() || 'admin';
-  const password = process.env.AUTH_PASSWORD ?? '';
-  if (password.length === 0) {
-    throw new Error(
-      [
-        '',
-        '─────────────────────────────────────────────────────────────',
-        '  AUTH_PASSWORD is not set.',
-        '─────────────────────────────────────────────────────────────',
-        '  House Electricals refuses to start without a login',
-        '  password. Set it in your compose.yaml or .env:',
-        '',
-        '    environment:',
-        '      AUTH_PASSWORD: pick-a-strong-password-here',
-        '',
-        '  Optional: AUTH_USERNAME (defaults to "admin").',
-        '─────────────────────────────────────────────────────────────',
-        '',
-      ].join('\n')
-    );
-  }
-
   const explicitSecret = process.env.AUTH_SECRET?.trim();
   let secret: string;
   if (explicitSecret !== undefined && explicitSecret.length > 0) {
@@ -63,7 +43,7 @@ export const loadAuthConfig = (): AuthConfig => {
   } else {
     secret = loadOrGenerateSecret();
   }
-  return { username, password, secret };
+  return { secret };
 };
 
 const loadOrGenerateSecret = (): string => {
@@ -88,35 +68,6 @@ const loadOrGenerateSecret = (): string => {
     // file system honors it.
   }
   return fresh;
-};
-
-export const verifyCredentials = (
-  cfg: AuthConfig,
-  username: string,
-  password: string
-): boolean => {
-  // Length-prefixed comparison to keep `timingSafeEqual` constant-time
-  // even when the inputs differ in length.
-  const okUsername = constantTimeStringEqual(cfg.username, username);
-  const okPassword = constantTimeStringEqual(cfg.password, password);
-  return okUsername && okPassword;
-};
-
-const constantTimeStringEqual = (a: string, b: string): boolean => {
-  const aBuf = Buffer.from(a, 'utf8');
-  const bBuf = Buffer.from(b, 'utf8');
-  if (aBuf.length !== bBuf.length) {
-    // Equalize length first so timingSafeEqual doesn't throw; XOR
-    // result is always !== 0 below.
-    const max = Math.max(aBuf.length, bBuf.length);
-    const aPad = Buffer.alloc(max);
-    const bPad = Buffer.alloc(max);
-    aBuf.copy(aPad);
-    bBuf.copy(bPad);
-    timingSafeEqual(aPad, bPad);
-    return false;
-  }
-  return timingSafeEqual(aBuf, bBuf);
 };
 
 export const AUTH_COOKIE_NAME = COOKIE_NAME;

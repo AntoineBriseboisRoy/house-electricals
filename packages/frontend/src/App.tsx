@@ -11,6 +11,7 @@ import { FloorEditScreen } from './screens/FloorEditScreen.js';
 import { PrintableDiagramScreen } from './screens/PrintableDiagramScreen.js';
 import { AuditScreen } from './screens/AuditScreen.js';
 import { LoginScreen } from './screens/LoginScreen.js';
+import { SignupScreen } from './screens/SignupScreen.js';
 import { useAuth } from './contexts/AuthContext.js';
 
 /**
@@ -31,13 +32,19 @@ export const App = (): JSX.Element => {
   const [location] = useLocation();
   const { state: authState } = useAuth();
 
-  // feat/auth-gate — gate everything behind login.
+  // feat/auth-gate — gate everything behind sign-up / login.
   //
-  //   loading  → tiny splash while /api/v1/auth/me is in-flight.
-  //   unauthed → LoginScreen (full-bleed, no AppShell chrome).
-  //   authed   → fall through to the normal router below.
+  //   loading      → tiny splash while /api/v1/auth/setup-status (+ /me)
+  //                  is in-flight.
+  //   needs-setup  → SignupScreen (first-time setup, exactly once per
+  //                  deployment — the backend's app_users table is empty).
+  //   unauthed     → LoginScreen (full-bleed, no AppShell chrome).
+  //   authed       → fall through to the normal router below.
   if (authState.phase === 'loading') {
     return <div className="app-auth-splash" aria-label="Loading" />;
+  }
+  if (authState.phase === 'needs-setup') {
+    return <SignupScreen />;
   }
   if (authState.phase === 'unauthed') {
     return <LoginScreen />;

@@ -94,22 +94,40 @@ body {
 /* feat/auth-gate — LogoutButton: sibling of ThemeToggle, sits just to
    its LEFT in the top-right cluster. Shares the visible-pill styling
    so the two controls read as a related toolbar. */
-.logout-button {
+/* feat/auth-gate (sign-up flow) — 3-button floating top-right cluster.
+   Order right-to-left: ThemeToggle, AccountButton, LogoutButton.
+   Each chip is touch-target wide with space-2 between siblings.
+
+   Right offsets:
+     ThemeToggle:   space-3 from edge          (already declared above)
+     AccountButton: 1*touch-target + space-3 + 1*space-2
+     LogoutButton:  2*touch-target + space-3 + 2*space-2
+*/
+.account-button {
   position: fixed;
   top: calc(env(safe-area-inset-top) + var(--space-3));
-  /* Sits to the LEFT of ThemeToggle (44px touch-target + space-3 gap +
-     the right inset). */
   right: calc(
     env(safe-area-inset-right) + var(--touch-target) + var(--space-3) +
       var(--space-2)
   );
   z-index: 60;
 }
+.logout-button {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + var(--space-3));
+  right: calc(
+    env(safe-area-inset-right) + 2 * var(--touch-target) + var(--space-3) +
+      2 * var(--space-2)
+  );
+  z-index: 60;
+}
+.account-button .icon-btn,
 .logout-button .icon-btn {
   background: var(--color-bg-surface);
   border-color: var(--color-border-subtle);
   box-shadow: var(--shadow-sm);
 }
+.account-button .icon-btn:hover:not(:disabled),
 .logout-button .icon-btn:hover:not(:disabled) {
   background: var(--color-bg-surface-raised);
   border-color: var(--color-border-strong);
@@ -503,15 +521,20 @@ body:has(.modal-overlay) .bottom-tabs {
   gap: var(--space-2);
   margin: 0 0 var(--space-4) 0;
   min-height: var(--touch-target);
-  /* G28 cycle-34: reserve space on the right for the fixed top-right
-     ThemeToggle (44px wide + space-3 from viewport edge). Without this
-     padding, header action buttons like "Floor plan" slip behind the
-     toggle and get cropped on narrow viewports. Refactor 2026-05 follow-up:
-     dropped on wide desktops (>=1280px) where the toggle floats outside
-     the 1200px max-content area — keeping the padding there pushes the
-     Add CTA visibly LEFT of the body cards' right edge (the user-reported
-     "every page mis-aligns" issue). */
-  padding-right: calc(var(--touch-target) + var(--space-3));
+  /* G28 cycle-34 (extended for feat/auth-gate sign-up flow):
+     reserve space on the right for the 3-button floating cluster —
+     ThemeToggle + AccountButton + LogoutButton. Each chip is
+     touch-target wide with space-2 gaps; the right inset is space-3.
+     Without this padding, header action buttons like "Floor plan"
+     slip behind the cluster and get cropped on narrow viewports.
+     Refactor 2026-05 follow-up: dropped on wide desktops (>=1280px)
+     where the cluster floats outside the 1200px max-content area —
+     keeping the padding there pushes the Add CTA visibly LEFT of the
+     body cards' right edge (the user-reported "every page mis-aligns"
+     issue). */
+  padding-right: calc(
+    3 * var(--touch-target) + var(--space-3) + 2 * var(--space-2)
+  );
 }
 @media (min-width: 1280px) {
   .screen-header {

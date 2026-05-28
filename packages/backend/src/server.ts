@@ -3,6 +3,7 @@ import { jwt } from 'hono/jwt';
 import type { DatabaseSync } from 'node:sqlite';
 import type {
   ApiError,
+  AppUserRepository,
   BreakerRepository,
   BreakerTestRepository,
   ComponentRepository,
@@ -45,6 +46,10 @@ export type AppDeps = {
   /** Raw DB handle — switch_controls is a thin join table, easier to
    *  query directly than via a full repo class for G19 scope. */
   db: DatabaseSync;
+  /** feat/auth-gate (sign-up flow) — single-user account table. The
+   *  JWT-protected auth routes read this; sign-up writes the (one)
+   *  row. May be null in tests that don't exercise auth. */
+  appUserRepository: AppUserRepository | null;
   /** feat/auth-gate — single-user JWT-cookie auth config. When null,
    *  the JWT middleware + auth routes are NOT mounted. Production passes
    *  a real config (loaded from env in `index.ts`); tests pass `null` so
@@ -62,17 +67,20 @@ export const buildApp = (deps: AppDeps): Hono => {
   app.route('/api/v1', healthRoutes);
 
   // ── AUTH (opt-in) ────────────────────────────────────────────────────
-  // Production always passes a real `deps.auth`; tests pass null to
-  // bypass the gate and keep the `app.request(...)` calls cookie-free.
-  if (deps.auth !== null) {
-    // Login + logout are public — mounted BEFORE the JWT middleware.
-    app.route('/api/v1', buildPublicAuthRoutes(deps.auth));
+  // Production always passes a real `deps.auth` + `deps.appUserRepository`;
+  // tests pass null to bypass the gate and keep the `app.request(...)`
+  // calls cookie-free.
+  if (deps.auth !== null && deps.appUserRepository !== null) {
+    const users = deps.appUserRepository;
+    // Sign-up, login, logout, setup-status are public — mounted BEFORE
+    // the JWT middleware.
+    app.route('/api/v1', buildPublicAuthRoutes(deps.auth, users));
     // Every other /api/v1/* path requires a valid `he_auth` cookie.
     // Returns JSON 401 on missing/invalid token so the frontend pivots
     // to the login screen cleanly. /files/* and /* (SPA assets) stay
     // UNGATED at the HTTP layer — the SPA itself decides what to render
-    // based on /auth/me, and floor-plan filenames are 8-char content
-    // hashes so unauth scraping is impractical.
+    // based on /auth/me + /auth/setup-status, and floor-plan filenames
+    // are 8-char content hashes so unauth scraping is impractical.
     app.use(
       '/api/v1/*',
       jwt({
@@ -93,8 +101,8 @@ export const buildApp = (deps: AppDeps): Hono => {
       }
       throw err;
     });
-    // /auth/me sits inside the JWT gate.
-    app.route('/api/v1', buildProtectedAuthRoutes());
+    // /auth/me + /auth/password sit inside the JWT gate.
+    app.route('/api/v1', buildProtectedAuthRoutes(users));
   }
 
   // ── PROTECTED API ROUTES ─────────────────────────────────────────────

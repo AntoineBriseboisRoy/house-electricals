@@ -79,6 +79,7 @@ describe('floor-plan routes (now scoped to floors, G13)', () => {
       roomRepository: new SqliteRoomRepository(db),
       serviceEntryRepository: new SqliteServiceEntryRepository(db),
       db,
+      appUserRepository: null,
       auth: null,
     });
     const r = await app.request('/api/v1/floors', {

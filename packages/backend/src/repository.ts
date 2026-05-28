@@ -1,6 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import {
   newId,
+  type AppUser,
+  type AppUserRepository,
   type Breaker,
   type BreakerInput,
   type BreakerRepository,
@@ -379,6 +381,22 @@ export const openDatabase = (dbPath: string): DatabaseSync => {
   db.exec(
     `CREATE INDEX IF NOT EXISTS idx_service_entries_parent
      ON service_entries(parent_type, parent_id, occurred_at DESC);`
+  );
+
+  // feat/auth-gate (sign-up flow) — app_users table.
+  // Holds the single account row created via POST /auth/signup. There
+  // is exactly 0 or 1 row at any moment; sign-up returns 409 when a
+  // row already exists. UNIQUE(username) is belt-and-suspenders for
+  // the "exactly one" invariant — without it, a future multi-user
+  // migration only needs to drop the hasAnyUser() guard. password_hash
+  // is the scrypt-encoded PHC-ish string from backend/src/password.ts.
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS app_users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );`
   );
 
   // G42(a) cycle-49 — UNIQUE name constraints on panels(name), floors(name),
@@ -2267,5 +2285,98 @@ export class SqliteServiceEntryRepository implements ServiceEntryRepository {
       .prepare('DELETE FROM service_entries WHERE id = ?')
       .run(id);
     return result.changes > 0;
+  }
+}
+
+// ── SqliteAppUserRepository (single-user login sign-up flow) ──────────────
+
+type AppUserRow = {
+  id: string;
+  username: string;
+  password_hash: string;
+  created_at: number;
+};
+
+const rowToAppUser = (row: AppUserRow): AppUser => ({
+  id: row.id,
+  username: row.username,
+  passwordHash: row.password_hash,
+  createdAt: row.created_at,
+});
+
+export class SqliteAppUserRepository implements AppUserRepository {
+  constructor(private readonly db: DatabaseSync) {}
+
+  hasAnyUser(): boolean {
+    const row = this.db
+      .prepare('SELECT COUNT(*) AS n FROM app_users')
+      .get() as { n: number };
+    return row.n > 0;
+  }
+
+  getSingle(): AppUser | null {
+    const row = this.db
+      .prepare(
+        'SELECT id, username, password_hash, created_at FROM app_users LIMIT 1'
+      )
+      .get() as AppUserRow | undefined;
+    return row === undefined ? null : rowToAppUser(row);
+  }
+
+  getByUsername(username: string): AppUser | null {
+    const row = this.db
+      .prepare(
+        'SELECT id, username, password_hash, created_at FROM app_users WHERE username = ?'
+      )
+      .get(username) as AppUserRow | undefined;
+    return row === undefined ? null : rowToAppUser(row);
+  }
+
+  create(input: { username: string; passwordHash: string }): AppUser {
+    // Wrap in a transaction so the "no user yet" check + INSERT can't
+    // race with a parallel sign-up. SQLite serializes writes, but the
+    // explicit transaction makes the invariant load-bearing and
+    // greppable.
+    this.db.exec('BEGIN');
+    try {
+      const existing = this.db
+        .prepare('SELECT COUNT(*) AS n FROM app_users')
+        .get() as { n: number };
+      if (existing.n > 0) {
+        this.db.exec('ROLLBACK');
+        throw new Error('A user already exists.');
+      }
+      const id = newId();
+      const createdAt = Date.now();
+      this.db
+        .prepare(
+          `INSERT INTO app_users (id, username, password_hash, created_at)
+           VALUES (?, ?, ?, ?)`
+        )
+        .run(id, input.username, input.passwordHash, createdAt);
+      this.db.exec('COMMIT');
+      return {
+        id,
+        username: input.username,
+        passwordHash: input.passwordHash,
+        createdAt,
+      };
+    } catch (e) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        // already rolled back
+      }
+      throw e;
+    }
+  }
+
+  updatePasswordHash(id: string, passwordHash: string): void {
+    const result = this.db
+      .prepare('UPDATE app_users SET password_hash = ? WHERE id = ?')
+      .run(passwordHash, id);
+    if (result.changes === 0) {
+      throw new Error('User not found.');
+    }
   }
 }
