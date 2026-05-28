@@ -1,0 +1,36 @@
+# Never ship host node_modules into the build context — pnpm's per-package
+# symlinks use ABSOLUTE host paths on Windows, so copying them into the
+# container produces broken symlinks that overwrite the install-created
+# relative ones. The container's pnpm install will recreate node_modules
+# inside the image.
+node_modules
+**/node_modules
+
+# Build outputs
+dist
+**/dist
+*.tsbuildinfo
+
+# Local runtime data (mounted at runtime, not baked into image)
+data
+caddy-data
+caddy-config
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Test outputs
+*.log
+
+# Local env
+.env
+.env.*
+!.env.example

@@ -1,0 +1,5601 @@
+:root {
+  /* G22 cycle-25 — legacy aliases. The cycle-3 bootstrap shipped these
+     short names; cycle-11 introduced the --color-* tokens.css system but
+     never migrated the legacy refs (floor-plan pins, etc.) so the swap
+     to sage in cycle-23 left them sky-blue. Aliases now point at the
+     canonical tokens so EVERY style respects the active theme. */
+  --bg: var(--color-bg-canvas);
+  --bg-elev: var(--color-bg-surface);
+  --fg: var(--color-fg-default);
+  --muted: var(--color-fg-muted);
+  --accent: var(--color-accent);
+  --danger: var(--color-danger);
+  --radius: var(--radius-md);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100vh;
+  margin: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 1.25rem;
+  padding-top: max(1.25rem, env(safe-area-inset-top));
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+}
+
+/* === AppShell + BottomTabs + ScreenHeader (G11 cycle-11 US-002) === */
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-shell__content {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: var(--layout-max-w);
+  margin: 0 auto;
+  padding: var(--space-5);
+  padding-top: max(var(--space-5), env(safe-area-inset-top));
+  /* reserve room for the bottom tabs + iOS home-bar inset */
+  padding-bottom: calc(
+    var(--layout-bottom-tabs-h) + var(--space-4) + env(safe-area-inset-bottom)
+  );
+}
+
+.app-shell__content--full-bleed {
+  max-width: 100%;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* G22 cycle-23 — floating theme toggle, fixed top-right. Avoids modifying
+   every ScreenHeader; reachable from any screen. */
+.theme-toggle {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + var(--space-3));
+  right: calc(env(safe-area-inset-right) + var(--space-3));
+  z-index: 60; /* above bottom-tabs (50) and content but below modals (70+) */
+}
+
+/* Cycle-70 polish-pass-2 P2 #11 — give the floating ThemeToggle a visible
+   pill surface in BOTH themes. Previously the IconButton ghost variant
+   rendered a bare moon/sun icon with no background — easy to miss in dark
+   mode where the icon blends into the canvas. Override the ghost variant
+   inside .theme-toggle so the floating control reads as a tappable chip
+   with a clear hit-target boundary. Uses existing tokens only. */
+.theme-toggle .icon-btn {
+  background: var(--color-bg-surface);
+  border-color: var(--color-border-subtle);
+  box-shadow: var(--shadow-sm);
+}
+.theme-toggle .icon-btn:hover:not(:disabled) {
+  background: var(--color-bg-surface-raised);
+  border-color: var(--color-border-strong);
+}
+
+/* Cycle-68 — VersionPill: tiny floating "v <sha>" chip in the BOTTOM-LEFT
+   corner, sitting just above the bottom-tabs. Tapping opens a confirm
+   modal with "Force refresh" (unregisters SW + clears caches + reloads).
+   Backup escape hatch for users stuck on a stale PWA build —
+   vite-plugin-pwa autoUpdate remains the PRIMARY update path (cycle-22/54
+   ADR).
+
+   Positioned bottom-left (NOT top-right) because:
+   1. The top-right column is already crowded with the floating
+      ThemeToggle + the cycle-34 G28 ScreenHeader right-padding reserve
+      for header action buttons (e.g. "Add panel"). A second floating
+      affordance there would intercept clicks on those buttons.
+   2. The bottom-tabs occupy the full footer strip — but the bottom-left
+      gutter (left of the leftmost tab on narrow viewports, OR left of
+      the centered max-width tabs container on desktop) is unused.
+   3. Subtle (low-opacity, muted foreground, small font) so it doesn't
+      compete with primary chrome — it's an escape hatch, not a primary
+      action. */
+.version-pill {
+  position: fixed;
+  /* Sits just above bottom-tabs (height var(--layout-bottom-tabs-h) plus
+     the safe-area inset). +space-2 lifts the pill clear of the top
+     border-line for visual breathing room. */
+  bottom: calc(env(safe-area-inset-bottom) + var(--layout-bottom-tabs-h) + var(--space-2));
+  left: calc(env(safe-area-inset-left) + var(--space-3));
+  z-index: 55; /* above content (default), below bottom-tabs (50) — wait,
+                  actually we want ABOVE tabs so user can tap it. Bottom-
+                  tabs are z-50; pill is z-55 sits above. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  min-width: 44px;
+  padding: 0 var(--space-2);
+  background: var(--color-bg-surface);
+  color: var(--color-fg-muted);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-sm);
+  font-family: var(--text-family-mono);
+  font-size: 10px;
+  font-weight: var(--text-weight-medium);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  opacity: 0.55;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    opacity var(--motion-duration-fast) var(--motion-ease-out);
+}
+.version-pill:hover {
+  background: var(--color-bg-surface-raised);
+  color: var(--color-fg-default);
+  border-color: var(--color-border-strong);
+  opacity: 1;
+}
+.version-pill:focus-visible {
+  outline: none;
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-focus);
+  opacity: 1;
+}
+
+/* Selection bar (cycle-50 bulk-actions) replaces bottom-tabs while
+   active. Hide the version-pill alongside so it doesn't float above the
+   selection chrome. */
+body:has(.selection-bar) .version-pill {
+  display: none;
+}
+
+/* G22 cycle-23 — smooth theme transition. ThemeProvider adds
+   .theme-transitioning to <html> for 850ms after a theme change. We
+   transition the three properties most affected by a palette swap
+   (background, color, border-color). Carve-outs below kill the
+   transition on heavy surfaces so they don't stutter (Lockin #4). */
+html.theme-transitioning,
+html.theme-transitioning * {
+  transition:
+    background-color 800ms ease,
+    color 800ms ease,
+    border-color 800ms ease !important;
+}
+html.theme-transitioning .floor-plan,
+html.theme-transitioning .floor-plan *,
+html.theme-transitioning .panel-viz,
+html.theme-transitioning .panel-viz *,
+html.theme-transitioning svg,
+html.theme-transitioning svg * {
+  transition: none !important;
+}
+
+.bottom-tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  /* Cycle-83 polish: was a translucent 92% mix + heavy backdrop blur,
+     but underlying text (component names, breaker chips, footnotes)
+     visibly punched through on mobile — the user flagged it. Switching
+     to a fully-opaque surface so the nav stays legible on every screen.
+     Tab labels are the load-bearing content here; chrome legibility
+     beats the aesthetic blur. */
+  background: var(--color-bg-surface);
+  /* G21: stronger top border + upward shadow so the nav reads as a
+     floating surface above the scroll area rather than melting into it. */
+  border-top: 1px solid var(--color-border-strong);
+  box-shadow: var(--shadow-tabs);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.bottom-tabs__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  /* Refactor 2026-05 — column count is driven by the tab list length via a
+     CSS var set on the parent .bottom-tabs (--bottom-tabs-count). Old 3-tab
+     and new 4-tab shells both work without a media-query fork. Falls back
+     to 4 for older snapshots when the var is absent. */
+  grid-template-columns: repeat(var(--bottom-tabs-count, 4), 1fr);
+  height: var(--layout-bottom-tabs-h);
+  max-width: var(--layout-max-w);
+  margin: 0 auto;
+}
+
+.bottom-tabs__item {
+  display: flex;
+}
+
+.bottom-tabs__link {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: var(--touch-target);
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-fg-muted);
+  text-decoration: none;
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-medium);
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.bottom-tabs__link:active {
+  color: var(--color-accent-hover);
+}
+
+.bottom-tabs__link--active {
+  color: var(--color-accent);
+  font-weight: var(--text-weight-semibold);
+}
+
+/* Cycle-65 P1 — in light mode the active tab's sage-on-cream contrast is
+   nearly identical to muted-on-cream. Add a top-edge accent border + a
+   subtle accent-subtle background to anchor the active state visually. */
+:root.light .bottom-tabs__link--active {
+  box-shadow: inset 0 2px 0 0 var(--color-accent);
+  background: var(--color-accent-subtle);
+}
+
+.bottom-tabs__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.bottom-tabs__label {
+  display: block;
+}
+
+/* SelectionBar (G42(f) cycle-50) — bottom-of-screen toolbar shown when
+   ≥1 row is selected on ComponentsScreen. Same footprint as bottom-tabs
+   (--layout-bottom-tabs-h + safe-area). When mounted, the bottom-tabs
+   gets display:none via the :has() selector below so the layout doesn't
+   stack two bars on top of each other. */
+.selection-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60; /* above bottom-tabs (50) but below modals (70+) */
+  background: var(--color-bg-surface-raised);
+  border-top: 1px solid var(--color-border-strong);
+  box-shadow: var(--shadow-tabs);
+  padding-bottom: env(safe-area-inset-bottom);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-left: var(--space-3);
+  padding-right: var(--space-3);
+  min-height: var(--layout-bottom-tabs-h);
+}
+
+/* Hide the bottom-tabs while the SelectionBar is mounted — they share
+   the same footprint at the bottom of the viewport. CSS :has() is a
+   load-bearing modern-browser feature; supported in Chromium 105+ which
+   covers the LAN-deployed target. */
+body:has(.selection-bar) .bottom-tabs {
+  display: none;
+}
+
+/* Cycle-83 polish: also hide bottom-tabs when ANY modal is open. The
+   cycle-73 mobile bottom-sheet (presentation="sheet") docks to the
+   viewport bottom and on phones the tabs were peeking out below the
+   sheet's safe-area — flagged by the user. Same `:has()` pattern as
+   the SelectionBar rule above. The classic centered-Modal variant
+   also benefits: bottom-tabs are pointer-blocked by the overlay
+   anyway, hiding them removes a visual fight with the scrim. */
+body:has(.modal-overlay) .bottom-tabs {
+  display: none;
+}
+
+.selection-bar__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-fg-muted);
+  cursor: pointer;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+.selection-bar__clear:hover,
+.selection-bar__clear:focus-visible {
+  background: var(--color-bg-hover);
+  color: var(--color-fg-default);
+  outline: none;
+}
+.selection-bar__clear:focus-visible {
+  box-shadow: var(--shadow-focus);
+}
+
+.selection-bar__count {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--color-fg-default);
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-medium);
+}
+.selection-bar__count strong {
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-strong);
+}
+
+.selection-bar__actions {
+  display: flex;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+
+/* Checkbox primitive (G42(f) cycle-50) — token-driven; the entire <label>
+   is the >=44px hit area via padding (not the box itself). */
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+  min-height: var(--touch-target);
+}
+.checkbox--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+/* Visually hide the native input while keeping it screen-reader accessible
+   + reachable via tab. Standard sr-only-ish pattern. */
+.checkbox__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.checkbox__box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  background: var(--color-bg-input);
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-fg-on-accent);
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-out);
+}
+.checkbox:hover .checkbox__box {
+  border-color: var(--color-accent);
+}
+/* Focus halo flows from the hidden input through the label via :has(). */
+.checkbox:has(.checkbox__input:focus-visible) .checkbox__box {
+  box-shadow: var(--shadow-focus);
+  border-color: var(--color-accent);
+}
+/* Checked state — accent fill + check glyph. */
+.checkbox__input:checked + .checkbox__box {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.checkbox__check {
+  font-size: 14px;
+  line-height: 1;
+  font-weight: var(--text-weight-bold);
+}
+.checkbox__label {
+  color: var(--color-fg-default);
+  font-size: var(--text-size-sm);
+}
+
+/* ScreenHeader */
+.screen-header {
+  display: grid;
+  grid-template-columns: var(--touch-target) 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4) 0;
+  min-height: var(--touch-target);
+  /* G28 cycle-34: reserve space on the right for the fixed top-right
+     ThemeToggle (44px wide + space-3 from viewport edge). Without this
+     padding, header action buttons like "Floor plan" slip behind the
+     toggle and get cropped on narrow viewports. Refactor 2026-05 follow-up:
+     dropped on wide desktops (>=1280px) where the toggle floats outside
+     the 1200px max-content area — keeping the padding there pushes the
+     Add CTA visibly LEFT of the body cards' right edge (the user-reported
+     "every page mis-aligns" issue). */
+  padding-right: calc(var(--touch-target) + var(--space-3));
+}
+@media (min-width: 1280px) {
+  .screen-header {
+    padding-right: 0;
+  }
+}
+
+.screen-header__back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-fg-default);
+  cursor: pointer;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.screen-header__back:hover,
+.screen-header__back:focus-visible {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-subtle);
+}
+
+/* Cycle-83 polish: on root-tab screens (PanelList / MapLanding /
+   Audit) ScreenHeader renders a 44px cosmetic spacer where the back
+   button would be, pushing the title ~80px from the screen-left
+   while h2 section headers below sit at --space-3 (~16px) — visible
+   rhythm break the user flagged. Hide the spacer entirely so the
+   titles slide left and align with body content. Combined declaration
+   so source order beats the earlier `.screen-header__back { display:
+   inline-flex }` rule. */
+.screen-header__back--spacer {
+  display: none;
+  pointer-events: none;
+  cursor: default;
+}
+.screen-header:has(.screen-header__back--spacer) {
+  grid-template-columns: 1fr auto;
+}
+
+.screen-header__titles {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.screen-header__title {
+  margin: 0;
+  font-size: var(--text-size-xl);
+  font-weight: var(--text-weight-semibold);
+  line-height: var(--text-leading-tight);
+  letter-spacing: var(--text-tracking-tight);
+  color: var(--color-fg-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screen-header__subtitle {
+  margin: 0;
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-muted);
+  /* Cycle-83 polish: long subtitles like PanelTest's
+     "Verify: toggle a breaker to dim its components" were getting
+     ellipsized mid-word on mobile because the title cell is starved
+     by the right-actions reserve. Allow 2 lines via line-clamp; longer
+     than 2 still ellipsizes cleanly. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: var(--text-leading-snug);
+}
+
+.screen-header__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-self: end;
+}
+
+/* === Primitives (G11 cycle-11 US-003) === */
+
+/* Card. G17: subtle top-edge highlight (color-mix with fg at low alpha) for
+ * the lifted-from-canvas feel. Pseudo-element so the existing JSX is
+ * untouched. */
+.card {
+  position: relative;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: var(--radius-lg);
+  right: var(--radius-lg);
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    color-mix(in srgb, var(--color-fg-default) 12%, transparent) 50%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+.card--default {
+  box-shadow: var(--shadow-sm);
+}
+
+.card--flat {
+  box-shadow: none;
+  border-color: transparent;
+}
+
+.card--flat::before {
+  display: none;
+}
+
+.card + .card {
+  margin-top: var(--space-3);
+}
+
+/* Cycle-72 — Card compound primitives (CardHeader / CardTitle /
+   CardSubtitle / CardActions). Sibling exports from ui/Card.tsx for
+   in-card composition. Existing `.section-title` class stays for
+   non-Card surfaces. NO new token NAMES (cycle-11/17/20 rule). */
+.card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.card__title {
+  margin: 0;
+  font-size: var(--text-size-lg);
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-default);
+  line-height: var(--text-leading-snug);
+}
+
+.card__subtitle {
+  margin: var(--space-1) 0 0 0;
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-muted);
+  line-height: var(--text-leading-snug);
+}
+
+.card__actions {
+  margin-left: auto;
+  display: flex;
+  flex-direction: row;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* Button */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--touch-target);
+  min-width: var(--touch-target);
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-family: var(--text-family);
+  font-size: var(--text-size-base);
+  font-weight: var(--text-weight-semibold);
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    transform var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn--sm {
+  min-height: 36px;
+  min-width: 36px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-size-sm);
+}
+
+.btn--block {
+  width: 100%;
+}
+
+/* Refactor 2026-05 follow-up — when two block buttons stack (e.g. the
+   FloorEditScreen drawer's "Edit details" + "Delete component" pair),
+   give them a vertical gap so they don't visually fuse. Global rule;
+   benefits every site that stacks block CTAs. */
+.btn--block + .btn--block {
+  margin-top: var(--space-2);
+}
+
+.btn--primary {
+  /* G22 cycle-25 — sage primary needs more visual presence than a flat
+     fill. Subtle vertical gradient (lighter top → accent bottom) gives a
+     tactile, "raised pill" feel; semibold text bumps perceived contrast
+     of fg-on-accent over the mid-tone sage. Inset highlight stays. */
+  background: linear-gradient(
+    180deg,
+    var(--color-accent-hover) 0%,
+    var(--color-accent) 100%
+  );
+  color: var(--color-fg-on-accent);
+  font-weight: var(--text-weight-semibold);
+  border-color: var(--color-accent-active);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 25%, transparent),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-accent-hover) 88%, white) 0%,
+    var(--color-accent-hover) 100%
+  );
+}
+
+.btn--primary:active:not(:disabled) {
+  background: var(--color-accent-active);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
+    0 1px 1px rgba(0, 0, 0, 0.25);
+}
+
+.btn--secondary {
+  background: var(--color-bg-surface-raised);
+  color: var(--color-fg-default);
+  border-color: var(--color-border-strong);
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  border-color: color-mix(in srgb, var(--color-border-strong) 70%, var(--color-accent));
+}
+
+.btn--danger {
+  background: var(--color-danger-subtle);
+  color: var(--color-danger);
+  border-color: var(--color-danger-border);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--color-fg-default);
+  border-color: transparent;
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.btn__leading {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+
+/* Cycle-74 — in-flight spinner inside a `<Button busy>`. The icon
+   inherits the Button's foreground via `currentColor` so primary /
+   secondary / danger / ghost all stay legible. NOT pointer-events:none
+   on .btn--busy — caller owns disabled (cycle-74 ADR). */
+.btn__spinner {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+  color: currentColor;
+  animation: he-spin 1.2s linear infinite;
+}
+
+.btn--busy {
+  opacity: 0.92;
+  cursor: progress;
+}
+
+/* Cycle-74 — standalone inline spinner primitive (ui/Spinner.tsx). Used
+   for non-Button surfaces where a bare "Loading…" text was previously
+   displayed. The wrapper itself is inline-flex; only the inner svg
+   spins so the role="status" element doesn't rotate with the icon. */
+.spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  color: var(--color-fg-muted);
+  line-height: 0;
+}
+
+.spinner svg {
+  animation: he-spin 1.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn__spinner,
+  .spinner svg {
+    animation: none;
+  }
+}
+
+@keyframes he-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* IconButton */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-fg-default);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.icon-btn--default:hover:not(:disabled),
+.icon-btn--ghost:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.icon-btn--primary {
+  color: var(--color-accent);
+}
+
+.icon-btn--primary:hover:not(:disabled) {
+  background: var(--color-accent-subtle);
+}
+
+.icon-btn--danger {
+  color: var(--color-danger);
+}
+
+.icon-btn--danger:hover:not(:disabled) {
+  background: var(--color-danger-subtle);
+}
+
+.icon-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+/* Input */
+.input {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.input__label {
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-fg-muted);
+}
+
+.input__control {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input__leading {
+  position: absolute;
+  left: var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-fg-muted);
+  pointer-events: none;
+  line-height: 0;
+}
+
+.input__field {
+  width: 100%;
+  min-height: var(--touch-target);
+  padding: 0 var(--space-4);
+  background: var(--color-bg-input);
+  color: var(--color-fg-default);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-family: var(--text-family);
+  font-size: var(--text-size-md);
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.input--with-leading .input__field {
+  padding-left: calc(var(--space-4) + var(--space-5));
+}
+
+.input__field::placeholder {
+  color: var(--color-fg-subtle);
+}
+
+.input__field:focus-visible {
+  outline: none;
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-focus);
+}
+
+.input--error .input__field {
+  border-color: var(--color-danger);
+}
+
+.input__error {
+  margin: 0;
+  font-size: var(--text-size-xs);
+  color: var(--color-danger);
+}
+
+.input__hint {
+  margin: 0;
+  font-size: var(--text-size-xs);
+  color: var(--color-fg-muted);
+}
+
+/* Textarea (cycle-71) — mirrors .input shape for multi-line input. */
+.textarea {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.textarea__label {
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-fg-muted);
+}
+
+.textarea__control {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.textarea__field {
+  width: 100%;
+  min-height: var(--touch-target);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-input);
+  color: var(--color-fg-default);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  /* Inherit the app font (NOT the browser monospace default). */
+  font-family: var(--text-family);
+  font-size: var(--text-size-md);
+  line-height: var(--text-leading-normal);
+  resize: vertical;
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.textarea__field::placeholder {
+  color: var(--color-fg-subtle);
+}
+
+.textarea__field:focus-visible {
+  outline: none;
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-focus);
+}
+
+.textarea--error .textarea__field {
+  border-color: var(--color-danger);
+}
+
+.textarea__error {
+  margin: 0;
+  font-size: var(--text-size-xs);
+  color: var(--color-danger);
+}
+
+.textarea__hint {
+  margin: 0;
+  font-size: var(--text-size-xs);
+  color: var(--color-fg-muted);
+}
+
+/* Select (cycle-71) — controlled-API native <select> with custom chevron. */
+.select {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.select__label {
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-fg-muted);
+}
+
+.select__control {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.select__field {
+  width: 100%;
+  min-height: var(--touch-target);
+  /* Extra right padding so the value text doesn't collide with the chevron. */
+  padding: 0 var(--space-8) 0 var(--space-4);
+  background: var(--color-bg-input);
+  color: var(--color-fg-default);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  font-family: var(--text-family);
+  font-size: var(--text-size-md);
+  /* Disable the native arrow so we can render a lucide ChevronDown. */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.select__field::-ms-expand {
+  display: none;
+}
+
+.select__field:focus-visible {
+  outline: none;
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-focus);
+}
+
+.select__field:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.select__chevron {
+  position: absolute;
+  right: var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-fg-muted);
+  pointer-events: none;
+  line-height: 0;
+}
+
+.select--error .select__field {
+  border-color: var(--color-danger);
+}
+
+.select__error {
+  margin: 0;
+  font-size: var(--text-size-xs);
+  color: var(--color-danger);
+}
+
+.select__hint {
+  margin: 0;
+  font-size: var(--text-size-xs);
+  color: var(--color-fg-muted);
+}
+
+/* Section / form utilities (G11 cycle-11 US-005) */
+.section {
+  margin-bottom: var(--space-5);
+  /* G21: when a .section follows a sibling block (Card, form, etc.) the
+     heading needs breathing room — cycle-11's 0-top-margin felt cramped
+     on PanelList ("Panels" heading flush against the Add-a-panel Card). */
+  margin-top: var(--space-6);
+}
+
+.section:first-child {
+  /* First section in a screen doesn't need the extra top margin — the
+     ScreenHeader provides the breathing room. */
+  margin-top: 0;
+}
+
+.section-title {
+  margin: 0 0 var(--space-3) 0;
+  font-size: var(--text-size-md);
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-default);
+}
+
+.form-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.form-row > .input {
+  flex: 1 1 200px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-3);
+}
+
+.form-grid--wide {
+  grid-column: 1 / -1;
+}
+
+.form-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  margin-top: var(--space-3);
+}
+
+/* Cycle-84 (P2 #11) — at <720px stack form actions full-width so the
+   primary submit (Save / Update breaker / etc.) is a fat thumb-target
+   spanning the form. Desktop stays flex-end row. */
+@media (max-width: 720px) {
+  .form-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .form-actions .btn {
+    width: 100%;
+  }
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.row-actions {
+  display: inline-flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.panel-list__ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* EmptyState */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-5);
+  color: var(--color-fg-muted);
+}
+
+/* G29 cycle-36 — compact empty-state on mobile. The cycle-21 design used
+ * generous space-8 padding + 56px icon — fine on desktop, but on a 390px
+ * phone it eats ~200-260px of vertical space for a single empty card. Drop
+ * padding, shrink the icon, tighten the type ramp. */
+@media (max-width: 719px) {
+  .empty-state {
+    padding: var(--space-4) var(--space-3);
+    gap: var(--space-1);
+  }
+  .empty-state__icon {
+    width: 36px;
+    height: 36px;
+    margin-bottom: 0;
+  }
+  /* cycle-76 — illustration mobile-compact override (cycle-36 G29 contract). */
+  .empty-state__illustration {
+    width: 96px;
+    height: 96px;
+    margin-bottom: var(--space-3);
+  }
+  .empty-state__title {
+    font-size: var(--text-size-base);
+  }
+  .empty-state__description {
+    font-size: var(--text-size-sm);
+  }
+}
+
+.empty-state__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+/* cycle-76 G42 polish — bespoke SVG illustration slot. Mutually exclusive
+ * with .empty-state__icon. `color: var(--color-fg-muted)` sets the
+ * inheritable currentColor that SVG strokes pick up; sage accents are
+ * applied per-path via `stroke="var(--color-accent)"`. NO new token names
+ * (cycle-11/17/20 rule). */
+.empty-state__illustration {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 140px;
+  height: 140px;
+  margin-bottom: var(--space-4);
+  color: var(--color-fg-muted);
+}
+.empty-state__illustration > svg {
+  width: 100%;
+  height: 100%;
+}
+
+.empty-state__title {
+  margin: 0;
+  font-size: var(--text-size-lg);
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-strong);
+}
+
+.empty-state__description {
+  margin: 0;
+  font-size: var(--text-size-base);
+  line-height: var(--text-leading-normal);
+  max-width: 36ch;
+}
+
+.empty-state__action {
+  margin-top: var(--space-3);
+}
+
+/* Skeleton + shimmer */
+.shimmer {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  background: var(--color-bg-surface-raised);
+  border-radius: var(--radius-sm);
+}
+
+.shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--color-fg-default) 6%, transparent) 50%,
+    transparent 100%
+  );
+  animation: he-shimmer 1.2s var(--motion-ease-in-out) infinite;
+}
+
+@keyframes he-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer::after {
+    animation: none;
+    background: color-mix(in srgb, var(--color-fg-default) 4%, transparent);
+    transform: none;
+  }
+}
+
+.skeleton-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.skeleton-row {
+  height: var(--touch-target);
+  width: 100%;
+}
+
+.skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.skeleton-card__title {
+  height: 1.25rem;
+  width: 40%;
+}
+
+.skeleton-card__line {
+  height: 0.875rem;
+  width: 100%;
+}
+
+.skeleton-card__line--short {
+  width: 70%;
+}
+
+.skeleton-bar {
+  height: 1rem;
+  width: 100%;
+}
+
+/* Native select inside the same form context */
+.input__field[as='select'],
+select.input__field {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--color-fg-muted) 50%),
+    linear-gradient(135deg, var(--color-fg-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 50%,
+    calc(100% - 12px) 50%;
+  background-size:
+    6px 6px,
+    6px 6px;
+  background-repeat: no-repeat;
+  padding-right: var(--space-8);
+}
+
+.app__header h1 {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.75rem;
+}
+
+.app__sub {
+  margin: 0 0 1.5rem 0;
+  color: var(--muted);
+}
+
+h2 {
+  font-size: 1.1rem;
+  margin: 0 0 0.75rem 0;
+}
+
+.panel-create,
+.panel-list {
+  background: var(--bg-elev);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.panel-create__form {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.panel-create__form input {
+  flex: 1 1 240px;
+  min-height: 44px;
+  padding: 0 0.875rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  font-size: 1rem;
+}
+
+.panel-create__form input:focus {
+  /* Cycle-73: normalized to the canonical focus-ring pattern used
+     elsewhere (box-shadow: var(--shadow-focus)). */
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.panel-create__form button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 1.25rem;
+  background: var(--accent);
+  color: #0f172a;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.panel-create__form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.panel-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.panel-list__item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  /* G22 cycle-25 — cards on the warm canvas, not flat-on-canvas. */
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  min-height: var(--touch-target);
+}
+
+.panel-list__name {
+  font-weight: 500;
+  /* Cycle-70 polish-pass-2 P2 #12/13 — name takes only its natural width;
+     the right-side metadata (meta + summary) is pushed to the far right
+     via margin-left:auto on the meta/summary so the row content actually
+     fills the card. Previously meta + chev hugged the name on the left
+     leaving a big dead zone in the middle. */
+}
+
+.panel-list__meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+  /* Cycle-70 polish-pass-2 P2 #13 — when meta is the only right-side item
+     (MapLanding rows), push it to the right edge. PanelList rows ALSO
+     have a .panel-list__summary which takes precedence below; meta there
+     stays next to the name as a feeder hint (subpanel rows). */
+  margin-left: auto;
+}
+
+/* When BOTH meta + summary are present (subpanel rows on PanelList), the
+   summary owns the right-edge slot and meta stays inline with name (as a
+   feeder hint, e.g. "Slot 6: Garage 60A"). The :has() guard scopes the
+   override; falls back gracefully on browsers without :has() (chevron's
+   margin-left:auto still claims the right edge). */
+.panel-list__link:has(.panel-list__summary) .panel-list__meta {
+  margin-left: 0;
+}
+
+/* Cycle-70 polish-pass-2 P2 #12 — row summary chip pinned to the right
+   of the .panel-list__link card. Eliminates the empty dead-zone between
+   the name and the chevron on wide viewports. Token-driven; mono-numeric
+   for tabular alignment across rows. Hidden at narrow viewports where
+   the name already fills the row. */
+.panel-list__summary {
+  color: var(--color-fg-muted);
+  font-size: var(--text-size-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  margin-left: auto;
+}
+@media (max-width: 519px) {
+  .panel-list__summary {
+    display: none;
+  }
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  color: var(--danger);
+  background: var(--color-danger-subtle);
+  padding: 0.625rem 0.75rem;
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.panel-list__link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  /* G22 cycle-25 — visible card row on the warm canvas. */
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  min-height: var(--touch-target);
+  text-decoration: none;
+  color: inherit;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.panel-list__link:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
+}
+
+.panel-list__link:active {
+  background: var(--color-bg-surface-raised);
+}
+
+.panel-list__chev {
+  /* Cycle-70 polish-pass-2 P2 #12/13 — chev no longer claims its own
+     margin-left:auto. The right-edge slot is now owned by either the
+     summary (PanelList) or the meta (MapLanding), and chev sits naturally
+     after that with the flex gap. Two competing margin-left:autos used
+     to distribute the free space evenly which left both items adrift in
+     the middle of the row. */
+  color: var(--muted);
+  font-size: 1.25rem;
+}
+/* Fallback: when a row has neither a summary nor a meta to claim the
+   right edge (defensive — no current call site renders this shape), the
+   chev still floats right via this auto so the layout doesn't suddenly
+   left-bunch. */
+.panel-list__link:not(:has(.panel-list__summary)):not(:has(.panel-list__meta)) .panel-list__chev {
+  margin-left: auto;
+}
+
+.app__back {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--accent);
+  text-decoration: none;
+  margin-bottom: 0.25rem;
+}
+
+.breaker-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+.breaker-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.breaker-form__field--wide {
+  grid-column: 1 / -1;
+}
+
+.breaker-form__field input,
+.breaker-form__field select {
+  min-height: 44px;
+  padding: 0 0.75rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  font-size: 1rem;
+}
+
+.breaker-form__field input:focus,
+.breaker-form__field select:focus {
+  /* Cycle-73: normalized to the canonical focus-ring pattern. */
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.breaker-form__error {
+  color: var(--danger);
+  font-style: normal;
+  font-size: 0.8rem;
+}
+
+.breaker-form__actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+.breaker-form__actions button {
+  min-height: 44px;
+  min-width: 96px;
+  padding: 0 1rem;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  background: var(--accent);
+  color: #0f172a;
+}
+
+.breaker-form__actions .secondary {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid #334155;
+}
+
+.breaker-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--bg);
+  border-radius: 8px;
+  min-height: 44px;
+}
+
+.breaker-row--editing {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.breaker-row__slot {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.4rem;
+  font-weight: 600;
+  min-width: 80px;
+}
+
+.breaker-row__pos {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.8rem;
+}
+
+/* G36 cycle-61 — "Last verified: X ago" hint below the slot label.
+   Muted by default; warn-orange + leading AlertCircle dot when verification
+   is stale (never tested OR >12 months ago). */
+.breaker-row__verified {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-basis: 100%;
+  font-weight: 400;
+  font-size: 0.78rem;
+  color: var(--color-fg-muted, var(--muted));
+}
+
+.breaker-row__verified--warn {
+  color: var(--color-warning, #d97706);
+}
+
+.breaker-row__verified-dot {
+  flex: 0 0 auto;
+}
+
+.breaker-row__meta {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 140px;
+}
+
+.breaker-row__label {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.breaker-row__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.breaker-row__actions button {
+  min-height: 44px;
+  min-width: 64px;
+  padding: 0 0.875rem;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.breaker-row__actions .danger,
+.panel-danger button.danger {
+  background: var(--color-danger-subtle);
+  color: var(--danger);
+  border-color: var(--color-danger-border);
+}
+
+.panel-danger {
+  margin-top: 1rem;
+  text-align: right;
+}
+
+.panel-danger button {
+  min-height: 44px;
+  padding: 0 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.home-nav {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0 0 1rem 0;
+}
+
+.home-nav__link {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 1rem;
+  background: var(--bg-elev);
+  color: var(--fg);
+  text-decoration: none;
+  border-radius: 8px;
+  font-weight: 500;
+  border: 1px solid #334155;
+}
+
+.home-nav__link--active {
+  background: var(--accent);
+  color: #0f172a;
+  border-color: var(--accent);
+}
+
+/* G25 cycle-28 — Compact 2-row component row.
+   Row 1 (primary): icon + name + unassigned-badge + type · room.
+   Row 2 (secondary): breaker chip + map icon + Edit/Delete buttons.
+   Previously 5-7 vertical blocks per row created mobile chaos.
+   G42(f) cycle-50: a Checkbox precedes the icon (--space-3 gap is shared). */
+.component-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+/* G42(f) cycle-50 — visual lift when a row is in the multi-select set. */
+.component-row--selected {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent-border);
+}
+
+/* G42(f) cycle-50 — tighter checkbox inside the row (no need for the
+   default 44px hit area-padding to dominate the row layout; the parent
+   row is already large + clickable via its inner controls). */
+.component-row__select {
+  flex: 0 0 auto;
+  margin: calc(-1 * var(--space-2)) 0;
+}
+
+.component-row--editing {
+  /* Edit mode shows the full ComponentForm — let it breathe. */
+  padding: var(--space-4);
+}
+
+.component-row__primary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.component-row__icon {
+  flex: 0 0 auto;
+  color: var(--color-accent);
+  display: flex;
+  align-items: center;
+}
+
+.component-row__identity {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.component-row__name-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.component-row__name {
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-default);
+}
+
+.component-row__meta {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  color: var(--color-fg-muted);
+  font-size: var(--text-size-sm);
+}
+
+.component-row__secondary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.component-row__breaker-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-accent);
+  text-decoration: none;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out);
+}
+.component-row__breaker-chip:hover {
+  background: color-mix(in srgb, var(--color-accent-subtle) 60%, var(--color-accent-hover));
+}
+.component-row__breaker-chip-label {
+  color: var(--color-fg-default);
+  font-weight: var(--text-weight-medium);
+}
+.component-row__breaker-chip-amp {
+  color: var(--color-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.component-row__breaker-chip--unwired {
+  background: transparent;
+  border-color: var(--color-border-subtle);
+  border-style: dashed;
+  color: var(--color-fg-muted);
+}
+
+.component-row__map-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  color: var(--color-fg-muted);
+  background: transparent;
+  border: 1px solid var(--color-border-subtle);
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+.component-row__map-link:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-fg-default);
+}
+
+.component-row__actions {
+  display: flex;
+  /* Refactor 2026-05 follow-up — vertically center the cluster so the
+     `btn--sm` Edit button (36px) sits centered against the `icon-btn`
+     Trash (44px). Without this they baseline-stretch and read as
+     mis-aligned on the row. */
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  /* Cycle-84 polish (P1 #6) — small inline-end nudge so the Edit + Trash
+     IconButton cluster doesn't hug the row card's right edge on mobile. */
+  padding-inline-end: var(--space-1);
+}
+
+.badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.badge--warn {
+  background: var(--color-danger-subtle);
+  color: var(--danger);
+  border: 1px solid var(--color-danger-border);
+}
+
+.badge--count {
+  background: var(--color-accent-subtle);
+  color: var(--accent);
+  border: 1px solid var(--color-accent-border);
+}
+
+/* G35 Part 2 cycle-59 — critical flag badge. Warn-orange family (separate
+   token family from --color-danger so coral and amber both stay legible
+   side-by-side). Optional inline icon (lucide AlertTriangle) renders as
+   inline-flex; this layout supports both icon+text and text-only badges. */
+.badge--critical {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--color-warning-subtle);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning-border);
+}
+
+.badge--critical svg {
+  flex: 0 0 auto;
+}
+
+/* G37 cycle-68 — GFCI/AFCI/dual safety badge for in-row contexts
+   (ComponentsScreen rows, PanelDetailScreen components-on-panel items,
+   TestPanelScreen visible-when-off list). Uses the cycle-59 warning amber
+   family — safety indicator → warn tier, NOT danger (red is destructive)
+   or accent (sage is brand). NO new token NAMES per cycle-11/17/20 rule. */
+.badge--protection {
+  display: inline-flex;
+  align-items: center;
+  background: var(--color-warning-subtle);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning-border);
+}
+
+/* G37 Part 2 cycle-69 — monthly aggregate card on PanelListScreen.
+   Sits ABOVE the panel tree; hidden entirely when no protected breaker
+   is untested this month. Uses --color-warning* (cycle-59 amber family)
+   like the inline ProtectionBadge — same safety semantics, same palette.
+   NO new token NAMES added. */
+.protection-aggregate-card {
+  margin-bottom: var(--space-4);
+  background: var(--color-warning-subtle);
+  border-color: var(--color-warning-border);
+}
+.protection-aggregate-card__inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  flex-wrap: wrap;
+}
+.protection-aggregate-card__icon {
+  display: inline-flex;
+  color: var(--color-warning);
+  flex-shrink: 0;
+}
+.protection-aggregate-card__body {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.protection-aggregate-card__title {
+  margin: 0;
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-default);
+}
+.protection-aggregate-card__subtitle {
+  margin: 0;
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-muted);
+}
+
+.breaker-picker {
+  min-height: 44px;
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0 0.75rem;
+  background: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.breaker-picker:focus {
+  /* Cycle-73: normalized to the canonical focus-ring pattern. */
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.component-row__assign {
+  width: 100%;
+}
+
+.breaker-row__count {
+  margin-left: 0.5rem;
+}
+
+.breaker-row__expand {
+  margin-left: auto;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 0.75rem;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.breaker-row__expanded {
+  width: 100%;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #334155;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.breaker-row__expanded-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  background: var(--bg-elev);
+  border-radius: 6px;
+}
+
+.component-row__callout {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  margin-top: 0.35rem;
+  padding: 0.35rem 0.625rem;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 8px;
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.component-row__callout:active {
+  background: rgba(56, 189, 248, 0.18);
+}
+
+.component-row__callout--unwired {
+  color: var(--muted);
+  background: transparent;
+  border-style: dashed;
+}
+
+.breaker-row[data-highlight='true'] {
+  animation: he-pulse 1.5s var(--motion-ease-out);
+}
+
+/* G23 cycle-22: when a deep link arrives at /panels/:id#breaker-<id> AND
+   the panel-view toggle is 'viz', the slot cell pulses with an accent
+   outline + shadow. Same 1.5s self-clearing window as the row pulse.
+   Animation is scoped (token-driven) so prefers-reduced-motion zeroes it
+   via the existing --motion-duration-* override. */
+.panel-viz__slot[data-highlight='true'] {
+  animation: he-slot-pulse 1.5s var(--motion-ease-out);
+  /* Force the highlighted slot in front of its neighbors during the pulse
+     so the shadow halo isn't clipped by adjacent grid cells. */
+  position: relative;
+  z-index: 2;
+}
+
+/* Refactor 2026-05 — `panel-viz__slot--active` is a STATIC sibling to the
+   1.5s self-clearing `data-highlight` pulse. It marks "this is THE slot
+   controlling the selected component" in the Map drawer's breaker-context
+   mini-viz. Solid accent ring + slight lift; persists until the parent
+   changes the prop (e.g. user selects a different pin). */
+.panel-viz__slot--active {
+  border-color: var(--color-accent);
+  box-shadow:
+    0 0 0 2px var(--color-accent),
+    var(--shadow-md);
+  position: relative;
+  z-index: 2;
+}
+.panel-viz__slot--active.panel-viz__slot--breaker {
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+/* Refactor 2026-05 — `.panel-viz--mini` is a constrained scrolling wrapper
+   for embedding PanelVisualization inside a narrow drawer (the Map tab's
+   selected-component sidebar). Caps height and scrolls vertically so a
+   24+ slot grid doesn't push the rest of the drawer off-screen. The active
+   slot scrolls into view via JS in the consumer (FloorEditScreen). */
+.panel-viz--mini {
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  background: var(--color-bg-surface);
+}
+.panel-viz--mini .panel-viz__slot {
+  min-height: 44px;
+  padding: var(--space-1) var(--space-2);
+}
+.panel-viz--mini .panel-viz__slot-label {
+  font-size: var(--text-size-xs);
+}
+
+@keyframes he-slot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 transparent;
+    outline: 0 solid transparent;
+  }
+  25% {
+    box-shadow:
+      0 0 0 4px var(--color-accent-subtle),
+      0 0 24px 2px var(--color-accent);
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    outline: 0 solid transparent;
+  }
+}
+
+/* G23 cycle-22 + G13 cycle-13 highlight pulse. Theme-aware via
+ * --color-accent-* tokens (cycle-78 fix — was bootstrap sky-blue
+ * literals which didn't adapt to the cycle-23 G22 sage palette or the
+ * cycle-23 light theme). Used by .breaker-row[data-highlight] +
+ * .floor-plan__pin[data-highlight] + the .test-breaker--tracked
+ * infinite pulse. The ring uses --color-accent-border (~0.4 alpha) so
+ * the halo reads on both dark and cream canvases. */
+@keyframes he-pulse {
+  0% {
+    background: var(--bg);
+    box-shadow: 0 0 0 0 transparent;
+  }
+  20% {
+    background: var(--color-accent-subtle);
+    box-shadow: 0 0 0 6px var(--color-accent-border);
+  }
+  100% {
+    background: var(--bg);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.app__action {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: 0.5rem;
+  padding: 0 0.875rem;
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--accent);
+  text-decoration: none;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.test-breaker {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--bg);
+  border-radius: 8px;
+  border: 1px solid transparent;
+  min-height: 44px;
+}
+
+.test-breaker--off {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-subtle);
+}
+
+.test-breaker--tracked {
+  border-color: var(--accent);
+  background: rgba(56, 189, 248, 0.12);
+  animation: he-pulse 2s var(--motion-ease-in-out) infinite;
+}
+
+.test-breaker__main {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.test-breaker__label {
+  font-weight: 500;
+}
+
+/* G36 cycle-61 — verified hint in TestPanelScreen breaker row. */
+.test-breaker__verified {
+  font-size: 0.78rem;
+}
+
+.test-breaker__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Cycle-70 polish-pass-2 P2 #17 — the legacy `.test-breaker__actions
+   button { background: var(--bg-elev); border: 1px solid #334155; ... }`
+   override blanket-flattened every Button variant in this row. As a
+   result, the primary/secondary/ghost visual hierarchy never reached
+   the user — Mark off, Track, and Mark verified all rendered identically.
+   Removed in cycle-70 so the Button primitive's variant styles can
+   actually paint. The min-width:96px previously enforced here is no
+   longer needed: the Button primitive's `sm` size handles min-height +
+   sensible padding, and the cycle-65 mobile wrap (below 720px) lets the
+   three buttons flow naturally. Dead `.danger` and `.tracking` class
+   selectors (referenced no JSX) removed at the same time. */
+
+/* Cycle-65 P0 — at narrow viewports the three action buttons crush the
+   label container to a 1-2 char column. Wrap the row so the label takes
+   its own line above the actions. Cycle-83 polish: at narrow viewports
+   the three actions further wrapped to 2-per-row + a third button
+   below — let CSS grid carry that so each button gets a true 50%
+   column (and the trailing odd one stretches full-width). */
+@media (max-width: 719px) {
+  .test-breaker {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .test-breaker__main {
+    flex: 1 1 100%;
+  }
+  .test-breaker__actions {
+    flex: 1 1 100%;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-2);
+  }
+  .test-breaker__actions .btn {
+    flex: initial;
+    min-width: 0;
+    width: 100%;
+  }
+  /* Third (odd) button spans the row to avoid the orphan slot */
+  .test-breaker__actions .btn:nth-child(3):last-child {
+    grid-column: span 2;
+  }
+}
+
+.test-component {
+  background: var(--bg);
+  border-radius: 8px;
+  margin-bottom: 0.4rem;
+}
+
+.test-component__btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: var(--touch-target);
+  padding: var(--space-3);
+  background: transparent;
+  color: inherit;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-weight: var(--text-weight-regular);
+  text-align: left;
+  cursor: default;
+}
+
+.test-breaker-list,
+.test-component-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Link-style action chips (used on PanelDetailScreen header) */
+.link-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.link-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--touch-target);
+  padding: 0 var(--space-4);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  color: var(--color-accent);
+  text-decoration: none;
+  font-size: var(--text-size-base);
+  font-weight: var(--text-weight-medium);
+  transition: background var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.link-action:hover,
+.link-action:focus-visible {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  outline: none;
+}
+
+/* Danger section spacing */
+.section--danger {
+  margin-top: var(--space-6);
+}
+
+/* Component list under ComponentsScreen */
+.component-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Floor switcher (G13 cycle-12 US-005) */
+.floor-switcher {
+  margin-bottom: var(--space-4);
+}
+
+.floor-switcher__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* FloorEditScreen — escape-hatch route, rendered without AppShell chrome.
+ * Mirrors the .map-screen / .map-screen__body pattern so the content area
+ * has the same constrained max-width and safe-area padding as in-shell
+ * screens. No bottom-tab spacer is needed because no bottom tabs render. */
+.floor-edit {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  background: var(--color-bg-canvas);
+}
+
+.floor-edit__body {
+  width: 100%;
+  max-width: var(--layout-max-w);
+  margin: 0 auto;
+  padding: var(--space-5);
+  padding-top: max(var(--space-5), env(safe-area-inset-top));
+  padding-bottom: max(var(--space-5), env(safe-area-inset-bottom));
+}
+
+.floor-edit__caption {
+  margin-top: var(--space-2);
+}
+
+.floor-edit__hint {
+  margin-top: var(--space-3);
+  font-size: var(--text-size-sm);
+}
+
+/* G25 cycle-24 — PanelDetailScreen split layout. Desktop ≥960px shows
+   Components-on-panel left + Breakers (viz) right side-by-side; below
+   960px it stacks. Click a component → cycle-22 hash consumer pulses
+   the slot on the right without navigating. */
+.panel-detail__split {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-5);
+  margin-block: var(--space-5) var(--space-6);
+  /* G25 cycle-26 — cap so a 24-slot horizontal viz doesn't let the
+     page spread edge-to-edge on a 1920px monitor. 1200px keeps
+     comfortable line-lengths in the components-on-panel list AND
+     gives the viz scroller enough room for ~12 visible columns. */
+  max-width: 1200px;
+  margin-inline: auto;
+}
+@media (min-width: 960px) {
+  .panel-detail__split {
+    /* `minmax(0, 1fr)` is load-bearing — the default 1fr resolves to
+       `minmax(min-content, 1fr)` which lets a wide-content child (the
+       horizontal panel viz with max-content width) blow the grid track
+       out past the column boundary. minmax(0, 1fr) forces the track to
+       respect its share of available width; the .panel-viz--horizontal-
+       scroll wrapper then handles overflow with horizontal scroll. */
+    grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+    align-items: start;
+  }
+  .panel-detail__left {
+    position: sticky;
+    top: var(--space-4);
+    max-height: calc(100vh - var(--space-12));
+    overflow-y: auto;
+  }
+}
+.panel-detail__left,
+.panel-detail__right {
+  margin-bottom: 0;  /* sections inside the split don't need bottom-margin */
+}
+
+.components-on-panel {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.components-on-panel__group {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.components-on-panel__group-header {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-surface-raised);
+  color: var(--color-fg-default);
+  border: 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+  font: inherit;
+  font-weight: var(--text-weight-semibold);
+  font-size: var(--text-size-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+.components-on-panel__group-header:hover {
+  background: var(--color-bg-hover);
+}
+.components-on-panel__slot {
+  color: var(--color-fg-muted);
+  font-size: var(--text-size-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.components-on-panel__label {
+  flex: 1;
+  color: var(--color-fg-strong);
+}
+.components-on-panel__amp {
+  color: var(--color-accent);
+  font-variant-numeric: tabular-nums;
+}
+.components-on-panel__items {
+  list-style: none;
+  padding: var(--space-2);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.components-on-panel__item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  color: var(--color-fg-default);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-size-sm);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out);
+  min-height: var(--touch-target);
+}
+.components-on-panel__item:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-subtle);
+}
+.components-on-panel__item:focus-visible {
+  outline: 0;
+  box-shadow: var(--shadow-focus);
+}
+.components-on-panel__icon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent);
+}
+.components-on-panel__name {
+  flex: 1;
+  font-weight: var(--text-weight-medium);
+}
+.components-on-panel__room {
+  font-size: var(--text-size-xs);
+}
+
+/* G25 cycle-24 — PanelDetailScreen footer chrome. */
+.panel-detail__footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.panel-detail__footer-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+/* Cycle-68 mobile fix — the 3 footer actions (Configure / Walk-through /
+   Print) wrap awkwardly with `space-between` on narrow viewports: a single
+   leftover item gets shoved to one edge with a yawning gap. Below the
+   720px breakpoint (cycle-36 G29 narrow-fold), stack each action as its
+   own full-width row so the trio reads as a tidy vertical menu. */
+@media (max-width: 720px) {
+  .panel-detail__footer-row {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+  .panel-detail__footer-row > * {
+    align-self: stretch;
+    width: 100%;
+  }
+}
+/* G39 cycle-57 — quiet opt-in link to mark a root panel as a subpanel.
+   Lives between the footer-row (Configure / Test / Print) and the
+   danger section. Muted by default so it doesn't compete with the
+   primary actions; only visible when this panel currently has no
+   parent. */
+.panel-detail__footer-aside {
+  margin: 0;
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-muted);
+  text-align: center;
+}
+.text-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  cursor: pointer;
+}
+.text-link:hover {
+  text-decoration-color: var(--color-accent);
+  color: var(--color-accent-hover);
+}
+.text-link:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+  border-radius: var(--radius-sm);
+}
+.link-action--footer {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--color-fg-default);
+  text-decoration: none;
+  font-size: var(--text-size-sm);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+.link-action--footer:hover {
+  background: var(--color-bg-hover);
+}
+.link-action__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.link-action__hint {
+  font-size: var(--text-size-xs);
+  color: var(--color-fg-muted);
+}
+.link-action--header {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--color-fg-default);
+  text-decoration: none;
+  font-size: var(--text-size-sm);
+  /* G28 cycle-34: don't let the label mid-word break at narrow widths. */
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+.link-action--header:hover {
+  background: var(--color-bg-hover);
+}
+
+/* G30 cycle-38 — at very-narrow viewports the header title competes with
+ * the action button + the fixed top-right ThemeToggle. Drop the action's
+ * text label and let it become an icon-only chip, freeing ~70px so the
+ * title doesn't ellipsis-truncate. The icon stays a real link with the
+ * accessible name carried by aria-label on the underlying <a>. Also
+ * tighten the header's right-padding reserve from `--touch-target +
+ * --space-3` (~56px) to ~48px so a bit more title fits. */
+@media (max-width: 480px) {
+  .screen-header {
+    padding-right: calc(var(--touch-target) + var(--space-1));
+  }
+  /* Hide text label inside .link-action--header (Link variant). */
+  .link-action--header > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .link-action--header {
+    width: var(--touch-target);
+    padding: 0;
+    justify-content: center;
+  }
+  /* Hide text label inside Button primitives placed in .screen-header
+   * (e.g. FloorEdit's "Rename"). The leadingIcon stays visible. */
+  .screen-header .btn .btn__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .screen-header .btn {
+    min-width: var(--touch-target);
+    padding-inline: 0;
+    justify-content: center;
+  }
+  /* Cycle-65 P0 — at very narrow viewports (<= 480px) the title still
+     overruns even with the icon-only action chip + tightened right-pad.
+     Step down the title size so longer brand strings ("House Electricals")
+     fit without ellipsis. */
+  .screen-header__title {
+    font-size: var(--text-size-lg);
+  }
+  .screen-header__subtitle {
+    font-size: var(--text-size-xs);
+  }
+}
+
+/* G30 cycle-38 — fallback: even at 360–480px, ensure the title can
+ * ellipsis cleanly when the action remains a chip. */
+.screen-header__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* G25 cycle-30 — Panel viz section on PanelMapScreen. Click a pin on the
+   floor map → see the controlling breaker's slot pulse in the panel viz
+   below. Header shows "Highlighting slot X: <label>" when a pin is selected. */
+.panel-map__panel-viz-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.panel-map__panel-viz-header .section-title {
+  margin: 0;
+}
+.panel-map__panel-viz-hint {
+  font-size: var(--text-size-sm);
+  color: var(--color-accent);
+  font-weight: var(--text-weight-medium);
+}
+.panel-map__panel-viz-hint.muted {
+  color: var(--color-fg-muted);
+  font-weight: var(--text-weight-regular);
+}
+
+/* G25 cycle-29 — collapsible Add-breaker form header inside its Card.
+   Cycle-72 — migrated to `<CardHeader>` + `<CardActions>` compound
+   primitives; rule removed. The `.card__header` rule above provides
+   the equivalent flex layout. */
+
+/* Cycle-84 (P2 #10) — Audit "Tests" h2 anchoring. When the section
+   renders an EmptyState (not the audit-table list), tighten the gap
+   below the h2 on mobile so the heading reads as belonging to the
+   empty-state card directly underneath. h2 STAYS in DOM (cycle-82
+   a11y baseline — aria-labelledby="audit-heading" is load-bearing). */
+@media (max-width: 720px) {
+  section[aria-labelledby='audit-heading']:has(> .empty-state) .section-title {
+    margin-bottom: var(--space-2);
+  }
+}
+
+/* Cycle-84 (P2 #9) — PanelMap upload Card chrome reduce at <720px.
+   The Card here wraps only the Upload-floor-plan Button + an optional
+   Remove-plan Button. On mobile the full card chrome (background +
+   border + padding) is visually heavy for a single CTA. Lighten it
+   without restructuring TSX (Lockin FATAL #3 alternative — additive
+   styling only). NO element nesting changes. */
+@media (max-width: 720px) {
+  .panel-map__upload-card {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    padding-inline: 0;
+  }
+}
+
+/* === G24 cycle-27 — Printable breaker diagram ===
+ * Dual-mode CSS: paper-like white card on screen (so 'Print to PDF' looks
+ * good without involving a real printer) + crisp black-on-white in print.
+ *
+ * Pins (in CLAUDE.md G24 section):
+ * - /panels/:id/print is an AppShell escape-hatch route (no chrome).
+ * - @page size: letter; margin: 0.5in.
+ * - Dark-theme tokens are hard-overridden inside .printable-page so the
+ *   active app theme doesn't leak.
+ * - No interactive elements — this is a static artifact.
+ */
+.printable-page {
+  background: #ffffff;
+  color: #111111;
+  font-family: var(--text-family);
+  max-width: 8.5in;
+  margin: 0.5in auto;
+  padding: 0.5in;
+  border-radius: 6px;
+  box-shadow: var(--shadow-lg);
+  min-height: calc(11in - 1in);
+}
+
+.printable-page__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24pt;
+  padding-bottom: 12pt;
+  border-bottom: 2px solid #111;
+  margin-bottom: 16pt;
+}
+.printable-page__title {
+  margin: 0;
+  font-size: 22pt;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #111;
+}
+.printable-page__subtitle {
+  margin: 4pt 0 0 0;
+  font-size: 10pt;
+  color: #555;
+}
+.printable-page__meta {
+  font-size: 9pt;
+  color: #555;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.printable-slots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6pt;
+}
+.printable-slot {
+  border: 1px solid #999;
+  border-radius: 4px;
+  padding: 6pt 8pt;
+  page-break-inside: avoid;
+  background: #fff;
+}
+.printable-slot--double {
+  border-color: #444;
+  background: #f5f5f5;
+}
+.printable-slot--tandem { border-style: dashed; }
+
+/* Cycle-65 P1 — tandem slot stacks two half cells inside ONE outer .printable-slot.
+   Each half gets the same header layout; a thin divider separates them. */
+.printable-slot__tandem-half {
+  padding-bottom: 4pt;
+}
+.printable-slot__tandem-half--second {
+  margin-top: 4pt;
+  padding-top: 4pt;
+  border-top: 1px dashed #999;
+}
+.printable-slot--empty {
+  border-style: dashed;
+  border-color: #bbb;
+  background: transparent;
+}
+
+.printable-slot__header {
+  display: flex;
+  align-items: baseline;
+  gap: 8pt;
+  font-size: 10pt;
+}
+.printable-slot__n {
+  display: inline-block;
+  min-width: 28pt;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #111;
+}
+.printable-slot__amp {
+  font-weight: 600;
+  color: #444;
+  font-variant-numeric: tabular-nums;
+}
+.printable-slot__amp--spare {
+  color: #999;
+  font-style: italic;
+  font-weight: 400;
+}
+.printable-slot__label {
+  flex: 1;
+  font-weight: 600;
+  color: #111;
+}
+
+/* G37 Part 2 cycle-69 — protection chip on the print diagram.
+   Print-only monochrome chip. Uses literal hex values (NOT
+   --color-warning* tokens — those are screen amber per the cycle-27
+   G24 ADR #4: print view always renders the same artifact regardless
+   of theme). Lives inside the .printable-page scope so it inherits
+   the hard-overridden font + color stack. */
+.printable-page .printable-slot__protection-chip {
+  display: inline-block;
+  font-size: 7.5pt;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: 1.5pt 4pt;
+  border: 1px solid #555;
+  border-radius: 3pt;
+  color: #333;
+  background: transparent;
+  font-variant-numeric: tabular-nums;
+}
+/* Component-row chip — slightly tighter to fit the dense row line. */
+.printable-page .printable-slot__components .printable-slot__protection-chip {
+  font-size: 7pt;
+  padding: 1pt 3pt;
+}
+
+.printable-slot__components {
+  list-style: none;
+  margin: 4pt 0 0 0;
+  padding: 4pt 0 0 0;
+  border-top: 1px solid #ddd;
+  display: flex;
+  flex-direction: column;
+  gap: 2pt;
+}
+.printable-slot__components > li {
+  display: flex;
+  align-items: center;
+  gap: 4pt;
+  font-size: 9pt;
+  color: #333;
+}
+.printable-slot__component-icon {
+  display: inline-flex;
+  width: 12pt;
+  height: 12pt;
+  color: #555;
+}
+.printable-slot__component-icon > svg { width: 100%; height: 100%; }
+.printable-slot__component-name { font-weight: 600; color: #111; }
+.printable-slot__component-room { color: #555; }
+.printable-slot__component-type {
+  color: #888;
+  font-style: italic;
+  margin-left: auto;
+  font-size: 8pt;
+}
+
+.printable-page__footer {
+  margin-top: 18pt;
+  padding-top: 8pt;
+  border-top: 1px solid #ccc;
+  display: flex;
+  justify-content: space-between;
+  font-size: 8pt;
+  color: #777;
+}
+
+@media print {
+  @page { size: letter; margin: 0.5in; }
+  body {
+    background: #fff !important;
+    color: #000 !important;
+    margin: 0;
+  }
+  .printable-page {
+    box-shadow: none !important;
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+  }
+  .printable-slot { padding: 4pt 6pt; }
+}
+
+/* G18 panel visualization — grid of slots that mirrors the physical panel */
+.panel-viz {
+  display: grid;
+  gap: var(--space-2);
+  background: var(--color-bg-canvas);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+}
+
+/* G25 cycle-24 — horizontal-orientation panels with many slots produce a wide
+   grid (12+ columns for a 24-slot panel). On narrow viewports the right edge
+   was clipping. Wrap in an overflow-x scroller so users can pan instead. */
+.panel-viz--horizontal-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-inline: calc(-1 * var(--space-1));
+  padding-block: var(--space-1);
+}
+.panel-viz--horizontal-scroll .panel-viz--horizontal {
+  /* The inner grid keeps its intrinsic width (cols × min(96px, 1fr)). */
+  width: max-content;
+  min-width: 100%;
+}
+
+.panel-viz__slot {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--color-fg-default);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* G37 cycle-68 — anchor for absolutely-positioned protection badge
+     (corner pill) so it can sit in the top-right inside the slot. */
+  position: relative;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    transform var(--motion-duration-fast) var(--motion-ease-out);
+  min-height: 56px;  /* G25 cycle-26 — compact so empty 24-slot grids feel less dominant */
+}
+
+.panel-viz__slot:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
+}
+
+.panel-viz__slot:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.panel-viz__slot--empty {
+  background: transparent;
+  border-style: dashed;
+  color: var(--color-fg-subtle);
+}
+
+.panel-viz__slot--empty:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+  border-color: var(--color-accent-border);
+  color: var(--color-fg-muted);
+}
+
+.panel-viz__slot--breaker {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent-border);
+}
+
+.panel-viz__slot--breaker:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.panel-viz__slot--double {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+.panel-viz__slot--tandem {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--color-accent-subtle) 0 8px,
+    color-mix(in srgb, var(--color-accent) 20%, transparent) 8px 16px
+  );
+}
+
+/* G34 cycle-42 — tandem pair container. PURELY STRUCTURAL: a 2-row grid
+ * that occupies one slot's footprint in the panel-viz grid. The pair now
+ * draws its OWN border + radius (cycle-70 polish-pass-2 P2 #15), and the
+ * inner halves are seamless sub-cells with only a thin divider between
+ * them. Previously each half drew its own border and a 4px gap, producing
+ * a "doubled border" thicker than the neighbour single-pole cells — the
+ * tandem slot read as visually NARROWER than its siblings. */
+.panel-viz__slot--tandem-pair {
+  padding: 0;
+  /* Cycle-70 polish-pass-2 P2 #15 — the pair owns the outer border; the
+     inner halves shed theirs so the tandem cell aligns 1:1 with neighbour
+     single-pole cells. */
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: default;
+  display: grid;
+  /* Default (vertical orientation): half-a on top, half-b on bottom. */
+  grid-template-rows: 1fr 1fr;
+  gap: 0;
+  min-height: 56px;  /* match base .panel-viz__slot for grid alignment */
+  transition: none;
+  box-shadow: none;
+}
+/* G34 followup: when the parent panel-viz is in horizontal orientation,
+   tandem halves go SIDE-BY-SIDE (left = a, right = b) so the pair sits
+   in the same column as the other slots in that row. */
+.panel-viz--horizontal .panel-viz__slot--tandem-pair {
+  grid-template-rows: none;
+  grid-template-columns: 1fr 1fr;
+}
+.panel-viz__slot--tandem-pair:hover,
+.panel-viz__slot--tandem-pair:focus-within {
+  /* The container itself is non-interactive — hover/focus styling belongs
+   * on the inner sub-cells. Suppress any inherited :hover effects. */
+  background: var(--color-bg-surface-raised);
+  border-color: var(--color-border-subtle);
+}
+.panel-viz__slot--tandem-half {
+  /* Cycle-70 polish-pass-2 P2 #15 — inner halves render BORDERLESS +
+     UNRADIUSED so the pair reads as one cell with a thin divider line
+     between halves. The :hover background still applies (inherited from
+     the .panel-viz__slot--empty / --breaker base classes) so each half
+     is independently interactive. */
+  min-height: 0;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-size-xs);
+  gap: 1px;
+  border: none;
+  border-radius: 0;
+}
+/* Thin divider between the two halves (vertical pair: bottom edge of
+   half-a; horizontal pair: right edge of half-a). */
+.panel-viz__slot--tandem-pair .panel-viz__slot--tandem-half:first-child {
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.panel-viz--horizontal .panel-viz__slot--tandem-pair .panel-viz__slot--tandem-half:first-child {
+  border-bottom: none;
+  border-right: 1px solid var(--color-border-subtle);
+}
+.panel-viz__slot--tandem-half .panel-viz__slot-amp {
+  font-size: var(--text-size-xs);
+}
+.panel-viz__slot--tandem-half .panel-viz__slot-label {
+  /* Half-cells are tighter — ellipsis long labels rather than line-wrap. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--text-size-xs);
+}
+
+/* Cycle-65 P1 — slot label hierarchy rebalanced. The slot NUMBER is the
+   physical-panel primary identifier (the user scans for "slot 7" when
+   matching a row to the breaker on the wall). Previously amperage
+   dominated visually. Bump the slot-n to text-size-sm + default fg;
+   demote amperage to medium weight so it reads as secondary. */
+.panel-viz__slot-n {
+  font-family: var(--text-family-mono);
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-default);
+  font-weight: var(--text-weight-semibold);
+}
+
+.panel-viz__slot-amp {
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-fg-muted);
+}
+
+.panel-viz__slot-label {
+  font-size: var(--text-size-xs);
+  color: var(--color-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* G37 cycle-68 — GFCI/AFCI/dual safety pill in the top-right corner of
+ * a filled slot cell. Absolutely positioned (anchored by .panel-viz__slot's
+ * position: relative). Uses the cycle-59 --color-warning* amber family
+ * (safety indicator → warn tier). NO new token names — values via existing
+ * --color-warning tokens (cycle-11/17/20 pin). */
+.panel-viz__protection-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 0 var(--space-1);
+  min-height: 14px;
+  line-height: 14px;
+  font-size: 9px;
+  font-weight: var(--text-weight-semibold);
+  letter-spacing: 0.04em;
+  background: var(--color-warning-subtle);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-pill);
+  pointer-events: none;
+}
+
+/* G39 cycle-56 — subpanel feeder badge rendered inside a slot cell when
+ * its breaker feeds a subpanel. role="link" span (not anchor) so we don't
+ * nest interactive elements inside the slot button. Tap → wouter setLocation
+ * to the subpanel's detail page; click is stopPropagation'd so the slot
+ * button's own onClick doesn't fire. */
+.panel-viz__subpanel-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 2px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: var(--text-weight-medium);
+  line-height: 1.2;
+  background: var(--color-accent);
+  color: var(--color-fg-on-accent);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  max-width: 100%;
+  text-decoration: none;
+  transition: background var(--motion-duration-fast) var(--motion-ease-out);
+}
+.panel-viz__subpanel-chip:hover {
+  background: var(--color-accent-hover);
+}
+.panel-viz__subpanel-chip:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+.panel-viz__subpanel-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 80px;
+}
+
+/* G39 cycle-56 — "Fed by" card on PanelDetailScreen. Shows whether this
+ * panel is a subpanel of another (and which), with a button to change. */
+.panel-detail__fedby {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.panel-detail__fedby-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.panel-detail__fedby-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+.panel-detail__fedby-label {
+  margin: 0;
+  font-size: var(--text-size-xs);
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.panel-detail__fedby-value {
+  margin: 0;
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-fg-default);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* G39 cycle-56 — PanelListScreen indented hierarchy. Subpanels nest under
+ * their parent panel row with a left indent and a leading marker. */
+.panel-list__subpanels {
+  list-style: none;
+  margin: 0 0 0 var(--space-5);
+  padding: var(--space-2) 0 0 var(--space-3);
+  border-left: 2px solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.panel-list__sub-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--color-fg-muted);
+  font-size: var(--text-size-xs);
+  margin-right: var(--space-2);
+}
+
+/* Panel-view toggle (visualization vs list) */
+.panel-view-toggle {
+  display: flex;
+  gap: var(--space-1);
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  margin-bottom: var(--space-3);
+  width: fit-content;
+}
+
+.panel-view-toggle button {
+  border: none;
+  background: transparent;
+  color: var(--color-fg-muted);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-medium);
+  cursor: pointer;
+}
+
+.panel-view-toggle button[aria-pressed='true'] {
+  background: var(--color-bg-canvas);
+  color: var(--color-fg-strong);
+}
+
+/* G15 desktop canvas — 3-column layout on >=960px, single column below */
+.floor-edit__layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+@media (min-width: 960px) {
+  .floor-edit__layout {
+    grid-template-columns: 240px 1fr 320px;
+    align-items: start;
+  }
+  /* On desktop the body should fill the viewport, not collapse to mobile width. */
+  .floor-edit__body {
+    max-width: none;
+  }
+}
+
+.floor-edit__tools {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+}
+
+.floor-edit__canvas {
+  position: relative;
+}
+
+.floor-edit__props {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Refactor 2026-05 follow-up — `.section` has space-6 top + space-5 bottom
+   margins (G21 rule). Inside the floor-edit properties sidebar these
+   stack on top of the flex container's `gap`, producing ~64px between
+   sections (user-flagged "too much spacing"). Zero the per-section
+   margins here so the parent gap (16px) is the single source of truth
+   for rhythm. The global rule remains for other screens. */
+.floor-edit__props > .section {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+/* Tool palette — vertical on desktop, horizontal on phone */
+.tool-palette {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+@media (max-width: 959px) {
+  .tool-palette {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+  /* G28 cycle-34: each tool button shrinks to content, button label loses
+     the kbd-shortcut badge (no keyboard on a phone anyway), and the
+     full-width dividers stop forcing wrap rows. Result: 4-5 tools per row
+     at 390px instead of 2 + lonely-tool-on-its-own-row. */
+  .tool-palette > li {
+    flex: 0 1 auto;
+  }
+  .tool-palette > li .kbd-badge {
+    display: none;
+  }
+  .tool-palette > li .button {
+    padding: 0 var(--space-3);
+  }
+  .tool-palette__divider {
+    display: none;
+  }
+  /* Cycle-83 polish: the last item in the palette is an unlabeled
+     IconButton (Reset zoom) — without a divider in between, it
+     squatted next to "Switch" looking like an orphan. Force it
+     onto its own row, right-aligned, so it reads as a viewport
+     control rather than another tool. */
+  .tool-palette > li:last-child {
+    flex: 0 0 100%;
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--space-1);
+  }
+}
+
+.tool-palette__divider {
+  height: 1px;
+  background: var(--color-border-subtle);
+  margin: var(--space-1) 0;
+}
+
+/* Cycle-84 (P2 #8) — FloorEdit tool-palette active state via data-active
+   attribute on the .btn--ghost Button. Replaces the prior dominant
+   variant="primary" treatment. Uses existing accent-subtle tokens
+   (cycle-23 G22) — no new token NAMES. */
+.tool-palette > li .btn[data-active] {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+.tool-palette > li .btn[data-active]:hover {
+  background: color-mix(
+    in srgb,
+    var(--color-accent-subtle) 70%,
+    var(--color-accent-hover)
+  );
+}
+
+/* Tooltip primitive (cycle-75).
+ *
+ * Portal-mounted to document.body — escapes overflow:hidden scroll
+ * containers (e.g. panel-viz scroll wrapper). z-index > modal (1000)
+ * so a tooltip activated above a modal stays visible. Fade-only enter
+ * animation respects the existing prefers-reduced-motion carve-out
+ * via --motion-duration-fast (the global reduced-motion media-query
+ * zeroes the duration token).
+ *
+ * Tokens reused: --color-bg-surface-raised, --color-fg-default,
+ * --color-border-strong, --radius-md, --shadow-md, --space-2/-3,
+ * --text-size-sm, --text-leading-snug, --motion-duration-fast. NO
+ * new token NAMES (cycle-11/17/20 rule). */
+.tooltip {
+  position: fixed;
+  z-index: 1100;
+  max-width: 240px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-surface-raised);
+  color: var(--color-fg-default);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-size-sm);
+  line-height: var(--text-leading-snug);
+  pointer-events: none;
+  animation: he-fade-in var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+/* G20 Modal primitives.
+ * G42 cycle-43: modal polish — overlay blur 6→4 (mobile GPU), rise 8→12px,
+ * title lg→xl, footer padding tightened, top-edge highlight inset on the
+ * card shell (matches Card primitive G17 polish). */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: var(--color-bg-overlay);
+  backdrop-filter: blur(4px) saturate(110%);
+  -webkit-backdrop-filter: blur(4px) saturate(110%);
+  animation: he-fade-in var(--motion-duration-base) var(--motion-ease-out);
+}
+
+@keyframes he-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes he-modal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.modal {
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100vh - var(--space-8));
+  overflow-y: auto;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, white 6%, transparent) inset,
+    var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  animation: he-modal-rise var(--motion-duration-base) var(--motion-ease-out);
+}
+
+.modal__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.modal__title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: var(--text-size-xl);
+  font-weight: var(--text-weight-semibold);
+  letter-spacing: var(--text-tracking-tight);
+  color: var(--color-fg-strong);
+}
+
+.modal__body {
+  padding: var(--space-5);
+}
+
+.modal__message {
+  margin: 0 0 var(--space-3) 0;
+  color: var(--color-fg-default);
+  line-height: var(--text-leading-normal);
+}
+
+.modal__body > .modal__message:last-child {
+  margin-bottom: 0;
+}
+
+.modal__footer {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-surface-raised);
+  border-bottom-left-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
+}
+
+/* Cycle-73 — mobile bottom-sheet Modal variant.
+ *
+ * Opt-in via `<Modal presentation="sheet">`. Default `'centered'` is
+ * byte-identical to cycle-20 G20 (rules above untouched). Sheet only
+ * pivots below 720px viewport; above that breakpoint Modal.tsx emits
+ * the base classes and these modifiers are unused — so desktop falls
+ * back to the centered visuals automatically.
+ *
+ * The drag-handle is decorative ONLY — Modal.tsx attaches zero pointer
+ * handlers (Lockin FATAL #2 alternative). Dismissal still goes through
+ * Close button + overlay click + ESC.
+ *
+ * NO new token NAMES (cycle-11/17/20 rule). NO new token values either —
+ * border-radius / colors / spacing all reuse existing tokens. */
+.modal-overlay--sheet {
+  align-items: flex-end;
+  padding: 0;
+}
+
+.modal--sheet {
+  width: 100%;
+  max-width: none;
+  max-height: 85vh;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  /* iPhone home-indicator safe-area inset so the sheet content + footer
+     don't sit under the OS gesture bar. */
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  animation: he-modal-slide-up 220ms var(--motion-ease-out);
+}
+
+.modal--sheet .modal__footer {
+  /* Sheet uses square bottom corners; override the cycle-20 G20
+     .modal__footer rounded bottom corners so the sheet edge stays
+     flush with the viewport edge. */
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.modal__drag-handle {
+  width: 40px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-fg-muted);
+  margin: var(--space-2) auto var(--space-3);
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+@keyframes he-modal-slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* Picker list inside PickerModal */
+.picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.picker-list__item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-3);
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  font: inherit;
+  color: var(--color-fg-default);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.picker-list__item:hover,
+.picker-list__item:focus-visible {
+  background: var(--color-bg-hover);
+  border-color: var(--color-accent-border);
+  outline: none;
+}
+
+.picker-list__label {
+  font-weight: var(--text-weight-medium);
+}
+
+.picker-list__hint {
+  font-size: var(--text-size-xs);
+  color: var(--color-fg-muted);
+}
+
+/* G19 gang controls + chip list */
+.gang-controls {
+  margin: var(--space-3) 0;
+}
+
+.gang-row {
+  margin-bottom: var(--space-2);
+}
+
+.gang-row__label {
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-fg-muted);
+  margin-bottom: var(--space-1);
+}
+
+.gang-row__chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-size-xs);
+  color: var(--color-fg-default);
+}
+
+.chip__x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background: transparent;
+  border: none;
+  color: var(--color-fg-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.chip__x:hover {
+  color: var(--color-danger);
+}
+
+.kbd-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: var(--space-2);
+  padding: 0 var(--space-1);
+  background: color-mix(in srgb, var(--color-fg-default) 14%, transparent);
+  color: var(--color-fg-muted);
+  border-radius: var(--radius-sm);
+  font-family: var(--text-family-mono);
+  font-size: 0.7rem;
+  font-weight: var(--text-weight-semibold);
+}
+
+/* Properties list */
+.prop-list {
+  margin: 0 0 var(--space-3) 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-size-sm);
+}
+
+.prop-list > div {
+  display: contents;
+}
+
+.prop-list dt {
+  color: var(--color-fg-muted);
+  font-weight: var(--text-weight-medium);
+}
+
+.prop-list dd {
+  margin: 0;
+  color: var(--color-fg-default);
+  font-family: var(--text-family-mono);
+}
+
+/* When the floor-plan canvas hosts a transformed image, the image's
+ * transform must apply on top of any layout. */
+.floor-plan__img--transformed {
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+/* PanelMapScreen — top-level wrapper for fullBleed shell. The screen itself
+ * controls horizontal padding around its non-map content so the floor-plan
+ * canvas can paint edge-to-edge below (or beside) it on wider viewports. */
+.map-screen {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.map-screen__body {
+  width: 100%;
+  max-width: var(--layout-max-w);
+  margin: 0 auto;
+  padding: var(--space-5);
+  padding-top: max(var(--space-5), env(safe-area-inset-top));
+  padding-bottom: calc(
+    var(--layout-bottom-tabs-h) + var(--space-4) + env(safe-area-inset-bottom)
+  );
+}
+
+/* Breaker list under PanelDetailScreen */
+.breaker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.test-component--tappable .test-component__btn {
+  border-color: rgba(56, 189, 248, 0.4);
+  cursor: pointer;
+}
+
+.test-component--tappable .test-component__btn:active {
+  background: rgba(56, 189, 248, 0.18);
+}
+
+.test-component--off .test-component__btn {
+  opacity: 0.5;
+  text-decoration-line: line-through;
+  text-decoration-color: var(--danger);
+}
+
+.test-component--unassigned .test-component__btn {
+  background: rgba(248, 113, 113, 0.06);
+}
+
+.test-component--pending .test-component__btn {
+  opacity: 0.85;
+}
+
+.test-component__icon {
+  flex: 0 0 auto;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+}
+
+.test-component__main {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.test-component__name {
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* G35 Part 2 cycle-59 — inline critical badge next to the component name
+ * in test mode. Slightly smaller padding so it doesn't dominate the row. */
+.test-component__critical-badge {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.4rem;
+}
+
+.test-component__state {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* G39 Part 2 (cycle-57) — "via <Subpanel>" attribution chip on
+ * cascade-off components. Muted styling (not the alarming red of
+ * the "Currently off" badge) — the user's mental model: the
+ * component is off because of an UPSTREAM flip, not its own
+ * breaker. Direct-off precedence suppresses this chip. */
+.test-component__cascade-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.125rem var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-size-xs);
+  color: var(--color-fg-muted);
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border-subtle);
+  white-space: nowrap;
+}
+
+.linklike {
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  font: inherit;
+}
+
+.app__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.map-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.map-actions__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 1rem;
+  background: var(--accent);
+  color: #0f172a;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.map-actions__btn.danger {
+  background: var(--color-danger-subtle);
+  color: var(--danger);
+  border-color: var(--color-danger-border);
+}
+
+.floor-plan {
+  position: relative;
+  width: 100%;
+  max-height: 70vh;
+  background: var(--bg);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #334155;
+}
+
+.floor-plan__img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  display: block;
+}
+
+.floor-plan__pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  /* G26 cycle-32: visual size 44 → 32px (less bulky icon). Tap target
+     stays ≥ 44px via the ::before invisible expansion below — so the
+     hit area still passes WCAG 2.5.5 / iOS HIG. */
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  /* G22 cycle-25: sage accent, ~85% alpha for legibility over the canvas.
+     fg-on-accent for the icon stroke so contrast holds across themes. */
+  background: color-mix(in srgb, var(--color-accent) 88%, transparent);
+  color: var(--color-fg-on-accent);
+  border: 2px solid var(--color-bg-canvas);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* G26 cycle-32: invisible touch-target expansion. The visual pin is 32px
+ * but pointer-events through the ::before make the effective hit ~44px.
+ * No layout impact — the pseudo is positioned inside the button's bounds. */
+.floor-plan__pin::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+}
+
+.floor-plan__pin--selected {
+  background: var(--color-accent);
+  outline: 3px solid var(--color-bg-canvas);
+  outline-offset: 2px;
+}
+
+.floor-plan__pin--dragging {
+  opacity: 0.3;
+}
+
+/* G26 — pins rendered in 'room' tool mode during a translate. Read-only
+ * preview so the user sees what's about to move; they don't accept taps. */
+.floor-plan__pin--inert {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.floor-plan__pin--ghost {
+  position: static;
+  transform: none;
+}
+
+.floor-plan,
+.floor-plan__pin {
+  touch-action: none;
+}
+
+/* G12 walls overlay — absolutely positioned, fills the .floor-plan box.
+ * preserveAspectRatio="none" on the SVG itself; the CSS just ensures the
+ * SVG covers exactly the same rectangle the underlay image covers. */
+.floor-plan__vector {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.floor-plan__vector--interactive {
+  pointer-events: auto;
+}
+
+.floor-plan__edit-capture {
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.floor-plan__wall {
+  stroke: var(--color-fg-default);
+  stroke-width: 60;
+  stroke-linecap: round;
+  fill: none;
+  /* SVG inherits the .floor-plan container's aspect-ratio stretch, so a
+   * stroke that's 60 in the 0-10000 viewBox is ~6/100 of the rendered
+   * dimension — visually crisp on phone + tablet. */
+}
+
+.floor-plan__wall--selected {
+  stroke: var(--color-accent);
+  stroke-width: 90;
+}
+
+.floor-plan__wall--ghost {
+  stroke: var(--color-accent);
+  stroke-dasharray: 200 150;
+  opacity: 0.85;
+}
+
+.floor-plan__wall-handle {
+  fill: var(--color-accent);
+  stroke: var(--color-fg-on-accent);
+  stroke-width: 16;
+  cursor: grab;
+}
+
+.floor-plan__wall-handle:active {
+  cursor: grabbing;
+}
+
+/* Wall hit-target — invisible thick stroke for easier finger taps. */
+.floor-plan__wall-hit {
+  stroke: transparent;
+  stroke-width: 400;
+  fill: none;
+  cursor: pointer;
+}
+
+/* G12 rooms */
+.floor-plan__room-rect {
+  fill: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  stroke: color-mix(in srgb, var(--color-accent) 50%, transparent);
+  stroke-width: 30;
+}
+
+.floor-plan__room--selected .floor-plan__room-rect {
+  fill: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  stroke: var(--color-accent);
+  stroke-width: 60;
+}
+
+.floor-plan__room-rect--ghost {
+  fill: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  stroke: var(--color-accent);
+  stroke-width: 40;
+  stroke-dasharray: 150 100;
+}
+
+.floor-plan__room-label {
+  fill: var(--color-fg-muted);
+  font-family: var(--text-family);
+  /* G26 cycle-32: dropped 320 → 200 vbu (~2%), text-transform: uppercase
+     + tracked, weight 600 → 500 so labels feel like room "tags" rather
+     than block typography. Halo stroke trimmed 80 → 60 to match. */
+  font-size: 200px;
+  font-weight: 500;
+  letter-spacing: 28px; /* viewbox-units; ~0.14em rendered */
+  text-transform: uppercase;
+  pointer-events: none;
+  user-select: none;
+  /* Cycle-83 polish: tone the label down so pins read above it as
+     foreground. Audit found "KITCHE" / "LIVING ROOM" labels visibly
+     crossing through pin glyphs on narrow phones. The opacity drop
+     keeps the halo + stroke for crisp readability when pins aren't
+     overlapping, but lets the pins win when they do. */
+  opacity: 0.55;
+  /* G21: outline the label with the canvas background so it stays
+     legible when pins or other layers cross underneath the text.
+     paint-order draws the stroke first, then the fill, giving a
+     clean halo without "double-edge" anti-aliasing artifacts. */
+  paint-order: stroke fill;
+  stroke: var(--color-bg-canvas);
+  stroke-width: 60px;
+  stroke-linejoin: round;
+}
+
+.floor-plan__room--selected .floor-plan__room-label {
+  fill: var(--color-accent);
+  /* Cycle-83 polish: when the room IS the selection, the label is a
+     load-bearing identity signal — restore full opacity. */
+  opacity: 1;
+}
+
+/* G32 cycle-40 — Pointer-mode universal manipulation layer. Same visual
+ * shape as the wall/room edit-capture layers (positioned absolute, fills
+ * the floor-plan container, captures pointer events) but with cursor:
+ * default since clicking/dragging happens on element-level handlers, not
+ * on the background canvas (drawing is gated behind the wall/room tool
+ * modes only). */
+.floor-plan__pointer-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
+  cursor: default;
+  touch-action: none;
+}
+
+/* G31 cycle-39 — ComponentForm Wiring section: bordered card-within-form
+ * grouping the Panel + Breaker dropdowns. Visually separates wiring
+ * controls from identity (Type, Room, Name, Notes). */
+.component-form__wiring {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+.component-form__wiring-heading {
+  margin: 0 0 var(--space-2) 0;
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Cycle-65 P1 — at narrow widths the 2-col Panel + Breaker pickers in the
+   Wiring section split the modal in half — both <select> placeholders
+   ("Unassigned (not wired)" / "Pick a panel first") truncate to ellipsis.
+   Stack vertically below ~520px so each picker gets the full width. */
+@media (max-width: 520px) {
+  .component-form__wiring .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* G35 Part 2 cycle-59 — critical flag block: Checkbox + helper text
+ * stacked beneath the Notes field, before the Wiring section. */
+.component-form__critical {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+.component-form__critical-help {
+  margin: 0;
+  padding-left: calc(20px + var(--space-2)); /* align under the label text */
+  font-size: var(--text-size-xs);
+  color: var(--color-fg-muted);
+  line-height: var(--text-leading-snug);
+}
+
+/* G30 cycle-38 — at narrow viewports the canvas is portrait-tall and the
+ * room rects render narrower in CSS pixels (preserveAspectRatio="none"
+ * distorts x more than y). A 200vbu label with 28vbu tracking overflows
+ * narrow rooms. Drop label font-size + tracking proportionally on phones. */
+@media (max-width: 719px) {
+  .floor-plan__room-label {
+    font-size: 140px;
+    letter-spacing: 12px;
+    stroke-width: 40px;
+  }
+}
+
+.floor-plan__room-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+/* G26 — when the room is already selected, the hit-rect is the grab
+ * surface for the translate gesture. Slight tint so the user knows the
+ * gesture is available. */
+.floor-plan__room-hit--selected {
+  cursor: grab;
+  fill: color-mix(in srgb, var(--color-accent) 4%, transparent);
+}
+
+.floor-plan__room-hit--selected:active {
+  cursor: grabbing;
+}
+
+.floor-plan__corner-handle {
+  fill: var(--color-accent);
+  stroke: var(--color-fg-on-accent);
+  stroke-width: 16;
+  cursor: grab;
+}
+
+.floor-plan__corner-handle:active {
+  cursor: grabbing;
+}
+
+/* Wall editor toolbar (G12 cycle-13) */
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  min-height: var(--touch-target);
+}
+
+.map-hint {
+  margin-top: var(--space-3);
+}
+
+/* Vector-only floor (no image underlay): force 1:1 canvas aspect.
+ * Pinned in CLAUDE.md "Wall editor (G12 walls)" — do not gate wall
+ * drawing on image presence. */
+.floor-plan--vector-only {
+  aspect-ratio: 1 / 1;
+}
+
+/* G28 cycle-34: on narrow viewports the 1:1 aspect-ratio gives a ~360px
+ * canvas which crowds pins and hides the layout. Override to a tall
+ * portrait canvas instead — capped at 600px so it doesn't dwarf the page,
+ * but easily ≥ the previous 360px on any modern phone. */
+@media (max-width: 959px) {
+  .floor-edit__canvas .floor-plan--vector-only {
+    aspect-ratio: auto;
+    min-height: min(70vh, 600px);
+  }
+  /* The properties sidebar's "Nothing selected" empty state used to fill
+   * a giant flex column — on mobile that leaves a huge blank gap below
+   * the canvas. When nothing is selected the user can re-tap the canvas;
+   * hide the placeholder entirely. The card variants (selectedWall,
+   * selectedRoom, selectedComponent) still render normally. */
+  .floor-edit__props > .empty-state {
+    display: none;
+  }
+}
+
+.floor-plan__pin[data-highlight='true'] {
+  animation: he-pulse 1.5s var(--motion-ease-out);
+}
+
+.unplaced-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* G42(f) cycle-51 — Unplaced sidebar row is a 2-column flex: a checkbox
+   column (sibling of the drag-target Button so the drag's pointer capture
+   can't swallow the checkbox click) + the draggable Button. */
+.unplaced-item {
+  background: var(--bg);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+/* Cycle-51 — visual lift when a row is in the multi-select set. Mirrors
+   the cycle-50 .component-row--selected treatment. */
+.unplaced-item--selected {
+  background: var(--color-accent-subtle);
+  outline: 1px solid var(--color-accent-border);
+  outline-offset: -1px;
+}
+
+.unplaced-item__select {
+  flex: 0 0 auto;
+  /* Cancel the Checkbox label's default --space-2 padding-Y so the row
+     hugs the 44px touch target without the extra outer padding stacking
+     vertical space — the .checkbox min-height already enforces 44px. */
+  margin: calc(-1 * var(--space-2)) 0;
+}
+
+.unplaced-item__btn {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.625rem 0.75rem;
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 8px;
+  font: inherit;
+  text-align: left;
+  cursor: grab;
+  touch-action: none;
+}
+
+.unplaced-item__btn:active {
+  cursor: grabbing;
+  background: rgba(56, 189, 248, 0.15);
+}
+
+.map-ghost {
+  user-select: none;
+}
+
+/* G26 cycle-32 — room properties sidebar numeric inputs.
+ * 2x2 grid of small Input primitives for x/y/w/h editing on a selected
+ * room. The hint text sits below as a translate-gesture affordance. */
+.room-dim-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 var(--space-2) 0;
+}
+
+.room-dim-input {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.room-dim-input__label {
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* The wrapping <Input> primitive already controls its inner sizing. The
+ * column reflows because grid-template-columns: 1fr 1fr. We don't override
+ * the input field's height/padding — token defaults stay in charge. */
+
+.room-dim-hint {
+  margin: 0 0 var(--space-3) 0;
+  font-size: var(--text-size-xs);
+}
+
+/* === G20 gang→light drag-to-link =========================================
+ *
+ * The link layer is an SVG positioned over the floor plan (matching the
+ * .floor-plan__vector geometry rules). pointer-events: none — purely
+ * decorative; pointer interactions happen on the gang handles + pins.
+ *
+ * Stroke widths are in viewbox units (0-10000). A 40-unit stroke at 1:1 in
+ * a ~600px-wide canvas renders at ~2.4px screen, which reads as "thin."
+ * Dashes ARE proportional to stroke too. Keep these tuned together. */
+
+.floor-plan__link-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 4; /* above edit-capture (2) + pin overlay (3 implicit), below toasts */
+}
+
+/* US-005 — control lines from switch to its controlled lights/outlets.
+ * Subtle: accent color at low alpha + thin dashes, so a crowded floor
+ * doesn't read as cluttered.
+ * G26 cycle-32: user feedback "big ugly bar" → reduced stroke 40 → 16,
+ * tighter dash 200/120 → 60/40, slightly lower opacity. Now reads as a
+ * dotted wire rather than a highlighted band. */
+.floor-plan__control-line {
+  stroke: var(--color-accent);
+  stroke-width: 16;
+  stroke-dasharray: 60 40;
+  stroke-linecap: round;
+  opacity: 0.55;
+  fill: none;
+  vector-effect: non-scaling-stroke; /* keep stroke px-ish on zoom */
+}
+
+/* US-004 — in-flight drag line. Slightly thicker dash, brighter, animated
+ * to communicate "live drag" — turns solid+success-tinted when over a
+ * valid drop target. */
+/* G26 cycle-32: thinner + tighter dash so the in-flight drag matches
+ * the tinier control lines. Valid-target state still pops via stroke +
+ * dash density (not by gaining weight). */
+.floor-plan__link-drag {
+  stroke: var(--color-fg-muted);
+  stroke-width: 14;
+  stroke-dasharray: 50 30;
+  stroke-linecap: round;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  animation: he-link-drag-march 0.6s linear infinite;
+  /* G42 cycle-43: ease the stroke/opacity flip when the --valid modifier
+     toggles, so the drag line eases into success-tinted instead of
+     snapping. stroke-width + dasharray are NOT in the transition list
+     (cycle-32 G26 ADR — the e2e asserts stroke-width literal value). */
+  transition:
+    stroke 160ms var(--motion-ease-out),
+    opacity 160ms var(--motion-ease-out);
+}
+
+.floor-plan__link-drag--valid {
+  stroke: var(--color-success);
+  stroke-dasharray: 80 20;
+  stroke-width: 18;
+  opacity: 1;
+}
+
+@keyframes he-link-drag-march {
+  to {
+    stroke-dashoffset: -260;
+  }
+}
+
+/* Highlight a pin when it's the current drop target.
+ * G42 cycle-43: softened from a static 3px outline + flat shadow ring to a
+ * subtle 2px outline + pulsing glow halo. The pulse re-affirms "this is the
+ * live target" without the abruptness of the cycle-20 outline flip. */
+.floor-plan__pin--link-target {
+  outline: 2px solid var(--color-success);
+  outline-offset: 2px;
+  animation: he-link-target-pulse 1.6s var(--motion-ease-in-out) infinite alternate;
+  transition:
+    outline-color var(--motion-duration-fast) var(--motion-ease-out),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+@keyframes he-link-target-pulse {
+  from {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-success) 35%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 12px color-mix(in srgb, var(--color-success) 35%, transparent);
+  }
+}
+
+/* Gang handles — small numbered badges that float just outside the
+ * selected switch pin. Press-drag from a badge to draw the link line. */
+.gang-link-handles {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  pointer-events: none; /* container is purely positional; children re-enable */
+  /* Push handles below the pin by a CSS-pixel amount so they never overlap
+   * the pin glyph regardless of viewbox-coord zoom. */
+  padding-top: 56px;
+  width: max-content;
+  z-index: 5;
+}
+
+.gang-link-handle {
+  pointer-events: auto;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 6px;
+  background: var(--color-bg-surface-raised);
+  color: var(--color-fg-default);
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-semibold);
+  line-height: 1;
+  cursor: grab;
+  touch-action: none;
+  box-shadow: var(--shadow-sm);
+  transition:
+    transform var(--motion-duration-fast) var(--motion-ease-out),
+    background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.gang-link-handle:hover {
+  transform: translateY(-1px);
+  background: var(--color-bg-hover);
+}
+
+.gang-link-handle:active,
+.gang-link-handle--active {
+  cursor: grabbing;
+  background: var(--color-accent);
+  color: var(--color-fg-on-accent);
+  transform: scale(1.08);
+}
+
+/* G38 cycle-64 — wrapper around a gang handle so we can dock a "3-way"
+ * badge next to it without breaking the flex-wrap layout of the parent. */
+.gang-link-handle-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  pointer-events: auto; /* re-enable for the children */
+}
+
+/* G38 cycle-64 — "3-way" co-controlled badge. Subtle muted pill that
+ * sits just to the right of the gang handle. Tokens only (no new
+ * names) — cycle-21 ADR pin preserved. */
+.three-way-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px var(--space-1);
+  background: var(--color-accent-subtle);
+  color: var(--color-fg-muted);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-semibold);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none; /* purely decorative; gang button still owns drag */
+  user-select: none;
+}
+
+.three-way-badge svg {
+  flex: 0 0 auto;
+}
+
+/* On narrow viewports (cycle-36 mobile-fold breakpoint 720px) the gang
+ * handles already wrap; collapse the badge to icon-only to keep the row
+ * tight. Council Devil OBJ4 — mobile clutter mitigation. */
+@media (max-width: 720px) {
+  .three-way-badge__text {
+    display: none;
+  }
+}
+
+/* Refactor 2026-05 — TestHomeScreen list of panels. Card-style tappable
+ * rows; each is a >=44px touch target with name + meta + CTA. */
+.test-home__list {
+  list-style: none;
+  margin: 0 0 var(--space-4) 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.test-home__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--touch-target);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--color-fg-default);
+  text-decoration: none;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+.test-home__row:hover,
+.test-home__row:focus-visible {
+  background: var(--color-bg-hover);
+  border-color: var(--color-accent-border);
+  outline: none;
+}
+.test-home__row-icon {
+  color: var(--color-accent);
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+.test-home__row-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.test-home__row-name {
+  font-weight: var(--text-weight-semibold);
+  font-size: var(--text-size-base);
+}
+.test-home__row-meta {
+  color: var(--color-fg-muted);
+  font-size: var(--text-size-xs);
+}
+.test-home__row-cta {
+  color: var(--color-accent);
+  font-weight: var(--text-weight-medium);
+  font-size: var(--text-size-sm);
+  flex: 0 0 auto;
+}
+.test-home__audit-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  text-decoration: none;
+  color: var(--color-fg-default);
+  font-size: var(--text-size-sm);
+  min-height: var(--touch-target);
+}
+.test-home__audit-link svg {
+  color: var(--color-accent);
+}
+.test-home__audit-link:hover {
+  color: var(--color-accent);
+}
+
+/* Refactor 2026-05 — `component-breaker-context` is the inline drawer
+ * section that shows the controlling breaker (panel name + slot + amperage
+ * + label + protection) and a mini panel-viz with the controlling slot
+ * statically highlighted. Closes the user's #1 daily-driver complaint:
+ * "I have no clear page where I can click on a component on the map and
+ * see which breaker slot it uses." */
+.component-breaker-context {
+  margin: var(--space-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.component-breaker-context__summary {
+  margin: 0;
+  font-size: var(--text-size-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+.component-breaker-context__summary svg {
+  color: var(--color-accent);
+  flex: 0 0 auto;
+}
+.component-breaker-context__label {
+  margin: 0;
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-default);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.component-breaker-context--unwired .muted {
+  font-size: var(--text-size-sm);
+  margin: 0;
+}
+.component-breaker-context__cta {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-accent);
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-medium);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  min-height: var(--touch-target);
+}
+.component-breaker-context__cta:hover,
+.component-breaker-context__cta:focus-visible {
+  background: var(--color-bg-hover);
+  outline: none;
+}
+
+/* Refactor 2026-05 follow-up — inline BreakerPicker block inside the
+   selected-component drawer. Compact two-line layout (small label + the
+   Select primitive). Mirrors the .input layout so it visually rhymes
+   with the rest of the drawer's form controls. */
+.component-breaker-context__picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.component-breaker-context__picker-label {
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* G38 cycle-64 — "Controlled by" sidebar section for a selected
+ * light/outlet. Tokens only; mirrors the existing prop-list spacing. */
+.controlled-by {
+  margin: var(--space-3) 0;
+}
+
+.controlled-by__single {
+  margin: 0;
+  font-size: var(--text-size-sm);
+}
+
+.controlled-by__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.controlled-by__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-size-sm);
+}
+
+.controlled-by__arrow {
+  flex: 0 0 auto;
+  color: var(--color-fg-muted);
+}
+
+/* G35 Part 1 (cycle-58) — Impact modal styling.
+ *
+ * Grouped by floor → room. Items render with a type icon + name; cascade
+ * items get a small muted "via <Subpanel>" badge.
+ */
+.impact-modal__subtitle {
+  margin-bottom: var(--space-3);
+  color: var(--color-fg-muted);
+}
+
+.impact-modal__scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.impact-modal__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.impact-modal__floor-name {
+  margin: 0;
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-semibold);
+  letter-spacing: var(--text-tracking-tight);
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+}
+
+.impact-modal__room {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.impact-modal__room-name {
+  margin: 0;
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-fg-default);
+}
+
+.impact-modal__items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.impact-modal__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--color-fg-default);
+  min-height: var(--touch-target);
+}
+
+.impact-modal__item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-fg-muted);
+  flex: 0 0 auto;
+}
+
+.impact-modal__item-name {
+  flex: 1 1 auto;
+  font-size: var(--text-size-base);
+}
+
+.impact-modal__cascade-via {
+  flex: 0 0 auto;
+  padding: 0 var(--space-2);
+  background: var(--color-accent-subtle);
+  color: var(--color-fg-muted);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-medium);
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+/* G35 Part 1 (cycle-58) — Impact button on BreakerRow.
+ *
+ * Mitigates Devil OBJ3 (BreakerRow row-wrap pressure at narrow widths):
+ * below 720px the button is icon-only (label visually-hidden); the
+ * lucide Zap icon + aria-label keep accessibility intact. At ≥720px the
+ * label "Impact" is visible alongside the icon.
+ */
+@media (max-width: 719px) {
+  .breaker-row__impact-btn {
+    min-width: var(--touch-target);
+    padding: 0 var(--space-2);
+  }
+  .breaker-row__impact-btn .btn__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/* =========================================================================
+   Cycle-60 — Filter + sort UX primitives (ported from HousesTracker)
+   ========================================================================= */
+
+/* Pill trigger button used for Filter/Sort/Preset surfaces. */
+.filter-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-3);
+  min-height: 32px;
+  background: var(--color-bg-surface-raised);
+  color: var(--color-fg-muted);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  font-family: var(--text-family);
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out),
+    background var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.filter-trigger-btn:hover {
+  color: var(--color-fg-default);
+  border-color: var(--color-border-strong);
+}
+
+.filter-trigger-btn:focus-visible {
+  outline: none;
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-focus);
+}
+
+.filter-trigger-btn--active {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+
+.filter-trigger-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+
+.filter-trigger-btn__label {
+  display: inline-flex;
+  align-items: center;
+}
+
+.filter-trigger-btn__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-fg-on-accent);
+  font-size: 10px;
+  font-weight: var(--text-weight-bold);
+  line-height: 1;
+}
+
+/* Filter popover panel — fixed-positioned, viewport-clamped.
+   Cycle-68: bumped to Modal-tier styling — surface-raised + border-strong +
+   --radius-lg + --shadow-lg + top-edge inset highlight (same recipe as
+   .modal). At narrow viewports the popover stays floating but with a
+   16px viewport-edge clamp; mobile bottom-sheet treatment deferred to a
+   future cycle due to sheet-inside-sheet conflict with nested Combobox
+   (cycle-60 ADR #4 — Combobox is portal-mounted with data-portal-popover
+   for outside-click skip; plus FilterPopover uses its own
+   useFilterPopover outside-click hook, NOT Modal, so cycle-73 Modal
+   presentation="sheet" does not apply without a refactor). */
+.filter-popover {
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  padding: var(--space-4);
+  background: var(--color-bg-surface-raised);
+  color: var(--color-fg-default);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, white 6%, transparent) inset,
+    var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.filter-popover__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.filter-popover__section-title {
+  margin: 0;
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.filter-popover__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.filter-popover__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-bg-surface);
+  color: var(--color-fg-muted);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-pill);
+  font-family: var(--text-family);
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-medium);
+  cursor: pointer;
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out),
+    background var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.filter-popover__chip:hover {
+  color: var(--color-fg-default);
+  border-color: var(--color-border-strong);
+}
+
+.filter-popover__chip--active {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+
+.filter-popover__chip:focus-visible {
+  outline: none;
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-focus);
+}
+
+.filter-popover__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+/* Combobox — single-select typeahead with portal-mounted listbox. */
+.combobox {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.combobox__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--touch-target);
+  padding: 0 var(--space-3);
+  background: var(--color-bg-input);
+  color: var(--color-fg-default);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  font-family: var(--text-family);
+  font-size: var(--text-size-md);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.combobox__trigger:hover {
+  border-color: var(--color-border-focus);
+}
+
+.combobox__trigger:focus-visible {
+  outline: none;
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-focus);
+}
+
+.combobox__trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.combobox__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combobox__value--placeholder {
+  color: var(--color-fg-subtle);
+}
+
+.combobox__trigger-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  color: var(--color-fg-muted);
+}
+
+.combobox__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--color-fg-muted);
+  transition:
+    color var(--motion-duration-fast) var(--motion-ease-out),
+    background var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.combobox__clear:hover {
+  color: var(--color-fg-default);
+  background: var(--color-bg-hover);
+}
+
+.combobox__chevron {
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.combobox__chevron--open {
+  transform: rotate(180deg);
+}
+
+/* Portal-mounted listbox — token-driven.
+   Cycle-68: bumped from --radius-md to --radius-lg (modal-tier) and gained
+   the same top-edge inset highlight as .modal so the surface reads as a
+   proper raised dialog instead of a flat dropdown. Animates in via the
+   shared he-modal-rise keyframe so it feels of-a-piece with Modal. */
+.combobox__listbox {
+  background: var(--color-bg-surface-raised);
+  color: var(--color-fg-default);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, white 6%, transparent) inset,
+    var(--shadow-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: he-modal-rise var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.combobox__search-wrap {
+  position: relative;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border-subtle);
+  flex-shrink: 0;
+}
+
+.combobox__search-icon {
+  position: absolute;
+  left: calc(var(--space-2) + var(--space-2));
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-fg-muted);
+  pointer-events: none;
+  line-height: 0;
+}
+
+.combobox__search {
+  width: 100%;
+  padding: var(--space-1) var(--space-2) var(--space-1) calc(var(--space-2) + 16px);
+  background: var(--color-bg-input);
+  color: var(--color-fg-default);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  font-family: var(--text-family);
+  font-size: var(--text-size-sm);
+  min-height: 28px;
+}
+
+.combobox__search::placeholder {
+  color: var(--color-fg-subtle);
+}
+
+.combobox__search:focus-visible {
+  outline: none;
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-focus);
+}
+
+.combobox__options {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-1) 0;
+}
+
+.combobox__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  color: var(--color-fg-default);
+  border: none;
+  font-family: var(--text-family);
+  font-size: var(--text-size-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.combobox__option:hover {
+  background: var(--color-bg-hover);
+}
+
+.combobox__option--active {
+  background: var(--color-bg-hover);
+}
+
+.combobox__option--selected {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  font-weight: var(--text-weight-medium);
+}
+
+.combobox__option--disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.combobox__empty {
+  padding: var(--space-3);
+  text-align: center;
+  color: var(--color-fg-muted);
+  font-size: var(--text-size-xs);
+}
+
+/* Cycle-68 mobile polish — the portal-mounted listbox is the de-facto
+   "dropdown" surface on phones. Below the 720px breakpoint (cycle-36 G29):
+   - Option rows grow to >=44px tall (--touch-target) so they're tappable.
+   - Font scales up to --text-size-base so the legibility matches the rest
+     of the mobile UI.
+   - The search input also lifts to --touch-target with a larger font so
+     iOS doesn't zoom the viewport on focus (16px floor).
+   - The whole listbox gains a touch more padding so it doesn't feel
+     cramped, and the empty-state message renders at --text-size-sm. */
+@media (max-width: 720px) {
+  .combobox__option {
+    min-height: var(--touch-target);
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-size-base);
+  }
+  .combobox__search {
+    min-height: var(--touch-target);
+    padding-top: var(--space-2);
+    padding-bottom: var(--space-2);
+    font-size: var(--text-size-base);
+  }
+  .combobox__search-icon {
+    top: 50%;
+  }
+  .combobox__empty {
+    padding: var(--space-4);
+    font-size: var(--text-size-sm);
+  }
+  /* cycle-79: G8 touch-target floor on the other two filter primitives —
+     SortDropdown option rows + FilterPopover chips. Desktop density
+     preserved at >720px. cycle-68 already shipped 44px on
+     .combobox__option — NOT touched here. */
+  .filter-popover__chip {
+    min-height: var(--touch-target);
+    padding: var(--space-2) var(--space-3);
+  }
+  .sort-dropdown__option {
+    min-height: var(--touch-target);
+    padding: var(--space-2) var(--space-4);
+  }
+}
+
+/* Sort dropdown — absolute-positioned menu under the trigger. */
+.sort-dropdown {
+  position: relative;
+}
+
+.sort-dropdown__menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 50;
+  min-width: 180px;
+  padding: var(--space-1) 0;
+  margin: 0;
+  list-style: none;
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  /* cycle-79: parity with .combobox__listbox (which had the same since
+     cycle-60). Reuses the existing he-modal-rise keyframe — NO new
+     keyframe name. Reduced-motion override (styles.css:1128) zeroes
+     the duration automatically. */
+  animation: he-modal-rise var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.sort-dropdown__option {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  color: var(--color-fg-default);
+  border: none;
+  font-family: var(--text-family);
+  font-size: var(--text-size-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.sort-dropdown__option:hover {
+  background: var(--color-bg-hover);
+}
+
+.sort-dropdown__option--active {
+  color: var(--color-accent);
+  font-weight: var(--text-weight-medium);
+}
+
+/* Filter toolbar — horizontal row of pill triggers. */
+.filter-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* Refactor 2026-05 follow-up — when the filter toolbar follows the
+   search Input inside a Card (Library + Audit screens), give them a
+   vertical gap so the pills don't hug the bottom of the input. */
+.input + .filter-toolbar {
+  margin-top: var(--space-3);
+}
+
+/* === G36 Part 2 (cycle-63) — /audit screen === */
+
+.audit-date-range {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.audit-date-range__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.audit-date-range__label {
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.audit-date-range__input {
+  min-height: var(--touch-target);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--color-fg-default);
+  font-family: var(--text-family);
+  font-size: var(--text-size-sm);
+  color-scheme: dark light;
+}
+
+.audit-date-range__input:focus {
+  outline: none;
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-focus);
+}
+
+.audit-overflow-hint {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-surface);
+  border: 1px dashed var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--color-fg-muted);
+  font-size: var(--text-size-sm);
+}
+
+.audit-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.audit-row {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.audit-row__link {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  color: inherit;
+  text-decoration: none;
+  transition: background var(--motion-duration-fast) var(--motion-ease-out);
+  min-height: var(--touch-target);
+}
+
+.audit-row__link:hover {
+  background: var(--color-bg-hover);
+}
+
+.audit-row__link--disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.audit-row__link--disabled:hover {
+  background: var(--color-bg-surface);
+}
+
+.audit-row__primary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.audit-row__date {
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-default);
+  font-size: var(--text-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.audit-row__relative {
+  font-size: var(--text-size-xs);
+}
+
+.audit-row__breaker {
+  color: var(--color-fg-default);
+  font-size: var(--text-size-base);
+}
+
+.audit-row__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.audit-row__outcome {
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-accent-border);
+  color: var(--color-accent);
+}
+
+/* Cycle-65 P1 — semantic-color heuristic for free-text outcomes.
+   Default (success — sage) for "OK"-like outcomes. The --warn variant
+   uses the G35 amber token family for trip/fault/fail/error keywords. */
+.audit-row__outcome--success {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent);
+}
+.audit-row__outcome--warn {
+  background: var(--color-warning-subtle);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning);
+}
+
+.audit-row__notes {
+  color: var(--color-fg-muted);
+  font-size: var(--text-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* TestPanelScreen "View audit log" footer link (cycle-63). */
+.test-panel__audit-footer {
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+  display: flex;
+  justify-content: center;
+}
+
+@media (max-width: 719px) {
+  .audit-date-range {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* G40 Part 1 cycle-66 — service-log badge on BreakerRow + ServiceLogModal.
+ * G40 Part 2 cycle-67 — same look reused on ComponentRow (parallel class).
+ *
+ * Badge sits on the same row as the "Last verified" hint (cycle-61) so the
+ * row doesn't grow taller. Below 720px (cycle-34/36 mobile pin) the text
+ * stays short ("Log · N") so the badge fits without wrapping. The button
+ * is a token-driven pill matching the cycle-22/cycle-60 affordance look.
+ *
+ * Component-row variant grouped here so future tweaks stay in lockstep —
+ * the two surfaces share the same visual contract.
+ */
+.breaker-row__service-log,
+.component-row__service-log {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: var(--space-2);
+  padding: 2px var(--space-2);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-medium);
+  line-height: 1.6;
+  cursor: pointer;
+  transition: background var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.breaker-row__service-log:hover,
+.breaker-row__service-log:focus-visible,
+.component-row__service-log:hover,
+.component-row__service-log:focus-visible {
+  background: var(--color-accent);
+  color: var(--color-fg-on-accent);
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.breaker-row__service-log--empty,
+.component-row__service-log--empty {
+  background: transparent;
+  color: var(--color-fg-muted);
+  border-color: var(--color-border-subtle);
+}
+
+.breaker-row__service-log--empty:hover,
+.breaker-row__service-log--empty:focus-visible,
+.component-row__service-log--empty:hover,
+.component-row__service-log--empty:focus-visible {
+  background: var(--color-bg-hover);
+  color: var(--color-fg-default);
+  border-color: var(--color-border-strong);
+}
+
+.breaker-row__service-log-icon,
+.component-row__service-log-icon {
+  flex: 0 0 auto;
+}
+
+/* G40 ServiceLogModal — scrollable list + add-entry form. */
+
+.service-log-modal__subtitle {
+  margin-bottom: var(--space-3);
+  color: var(--color-fg-muted);
+}
+
+.service-log-modal__list {
+  list-style: none;
+  margin: 0 0 var(--space-4) 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+.service-log-modal__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.service-log-modal__item-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.service-log-modal__item-date {
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-default);
+}
+
+.service-log-modal__item-relative {
+  font-size: var(--text-size-xs);
+  flex: 1 1 auto;
+}
+
+.service-log-modal__item-note {
+  margin: 0;
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-default);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.service-log-modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.service-log-modal__form-title {
+  margin: 0;
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--text-tracking-tight);
+  color: var(--color-fg-muted);
+}
+
+.service-log-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.service-log-modal__field-label {
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-fg-default);
+}
+
+.service-log-modal__date-input,
+.service-log-modal__note-input {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-input);
+  color: var(--color-fg-default);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: var(--text-size-base);
+  min-height: var(--touch-target);
+}
+
+.service-log-modal__note-input {
+  resize: vertical;
+  min-height: calc(var(--touch-target) * 2);
+}
+
+.service-log-modal__date-input:focus,
+.service-log-modal__note-input:focus {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 1px;
+  border-color: var(--color-border-focus);
+}
+
+.service-log-modal__form-actions {
+  display: flex;
+  justify-content: flex-end;
+}

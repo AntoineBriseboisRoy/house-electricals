@@ -1,0 +1,40 @@
+{
+  "name": "@he/frontend",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && pnpm run lint:illustrations && pnpm run lint:motion && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint:illustrations": "node scripts/check-illustration-hex.mjs",
+    "lint:motion": "node scripts/check-motion-literals.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:report": "playwright show-report",
+    "test:a11y": "playwright test e2e/a11y-contrast.spec.ts",
+    "test:a11y:bootstrap": "node -e \"process.env.A11Y_BOOTSTRAP='1';require('child_process').execSync('playwright test e2e/a11y-contrast.spec.ts',{stdio:'inherit',env:process.env})\""
+  },
+  "dependencies": {
+    "@fontsource/plus-jakarta-sans": "^5.2.8",
+    "@he/shared": "workspace:*",
+    "@hookform/resolvers": "^3.9.1",
+    "lucide-react": "^0.469.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.54.0",
+    "sonner": "^1.7.1",
+    "wouter": "^3.3.5"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.0",
+    "@playwright/test": "^1.60.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vite-plugin-pwa": "^0.21.1"
+  }
+}

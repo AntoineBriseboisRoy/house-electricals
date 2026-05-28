@@ -1,0 +1,36 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# House Electricals — Local Docker Compose (build-from-source)
+# ─────────────────────────────────────────────────────────────────────────────
+# Builds the unified image from this repo's source and runs it. Use for
+# local testing or before CI/registry wiring is set up.
+#
+#   docker compose up -d --build
+#
+# For production self-hosting (pull pre-built images from GHCR), use
+# compose.prod.yaml — see DEPLOYMENT.md.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
+    container_name: house-electricals
+    restart: unless-stopped
+    volumes:
+      - ${DATA_PATH:-./data}:/data
+    environment:
+      NODE_ENV: production
+      DB_PATH: /data/panels.db
+      FLOOR_PLAN_DIR: /data/floor-plans
+      PUBLIC_DIR: /app/public
+      PORT: 3000
+      HOST: 0.0.0.0
+    ports:
+      - "${HOST_PORT:-8070}:3000"
+    healthcheck:
+      test: ["CMD", "/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:3000/api/v1/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s

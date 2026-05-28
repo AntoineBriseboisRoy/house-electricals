@@ -1,0 +1,47 @@
+# Node / pnpm
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+npm-debug.log*
+yarn-error.log*
+
+# Builds
+dist/
+build/
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Runtime data (bind-mounted into containers)
+data/
+caddy-data/
+caddy-config/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Claude Code — local overrides + runtime state
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# Logs
+*.log
+
+# Playwright (G21)
+playwright-report/
+test-results/
+packages/frontend/e2e/.screenshots/
+packages/frontend/e2e/.state.json
+.playwright/
+
+
+# Internal-only dev process artifacts (kept out of public history)
+scripts/meta-ralph/
+scripts/ralph/
+tasks/

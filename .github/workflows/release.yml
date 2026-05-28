@@ -1,0 +1,88 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# House Electricals — Build & Publish to GitHub Container Registry (GHCR)
+# ─────────────────────────────────────────────────────────────────────────────
+# Builds the unified backend + frontend Docker image and pushes it to GHCR
+# under the repository owner's namespace, e.g.:
+#
+#   ghcr.io/antoinebriseboisroy/house-electricals:latest
+#   ghcr.io/antoinebriseboisroy/house-electricals:<commit-sha>
+#   ghcr.io/antoinebriseboisroy/house-electricals:<git-tag>      (only on v*.*.* tags)
+#
+# Self-hosters pull this single image via compose.prod.yaml — see
+# DEPLOYMENT.md.
+#
+# Required permissions: `packages: write` (granted below — no PAT needed;
+# the default GITHUB_TOKEN is used).
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Build and publish image
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*.*.*']
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+      - 'LICENSE'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASENAME: house-electricals
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set lowercase owner
+        # GHCR requires the image path to be lowercase; the GitHub owner
+        # may not be.
+        id: meta
+        run: |
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "image=$OWNER_LC/${{ env.IMAGE_BASENAME }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: image_meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.meta.outputs.image }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') || github.ref == format('refs/heads/{0}', 'master') }}
+            type=sha,format=long
+            type=semver,pattern={{version}}
+
+      - name: Build & push
+        # GIT_SHA build-arg surfaces in the frontend bundle as a version
+        # pill (Vite's VITE_GIT_SHA convention). DO NOT use `git rev-parse`
+        # inside the build — alpine base lacks git and .dockerignore
+        # excludes .git.
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/backend/Dockerfile
+          push: true
+          tags: ${{ steps.image_meta.outputs.tags }}
+          labels: ${{ steps.image_meta.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,21 @@
+{
+  "name": "house-electricals",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "A personal-use breaker-panel mapper. Deploy as a Docker Compose stack on your home server; use it from your phone over LAN or via your existing reverse proxy / Cloudflare Tunnel.",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/*\" run build",
+    "typecheck": "pnpm -r --filter \"./packages/*\" run typecheck",
+    "test": "pnpm -r --filter \"./packages/*\" run test",
+    "predev": "pnpm --filter @he/shared build && node scripts/dev/ensure-data-dir.mjs",
+    "dev": "pnpm -r --parallel --filter \"./packages/*\" run dev"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

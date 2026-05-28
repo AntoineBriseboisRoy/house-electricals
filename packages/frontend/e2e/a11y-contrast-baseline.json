@@ -1,0 +1,9 @@
+{
+  "/panels": [
+    {
+      "ruleId": "color-contrast",
+      "selector": ".version-pill",
+      "impact": "serious"
+    }
+  ]
+}

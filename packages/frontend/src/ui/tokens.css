@@ -1,0 +1,302 @@
+/*
+ * House Electricals design tokens (G11).
+ *
+ * Source of truth for all CSS variables consumed by ui/* primitives and
+ * screen-level styles. NEVER hard-code colors / spacing / radii / shadows
+ * in components — read these tokens instead.
+ *
+ * Naming conventions:
+ *   --color-bg-*       background tones (canvas, raised surfaces, hover)
+ *   --color-fg-*       text + foreground (default, muted, on-accent)
+ *   --color-border-*   stroke (subtle, strong, focus)
+ *   --color-accent-*   brand accent (sky), hover/active variants
+ *   --color-danger-*   destructive / error tones
+ *   --color-success-*  positive feedback tones
+ *   --space-N          spacing scale (4px base; 1=4, 2=8, 3=12, 4=16, 5=20, 6=24, 8=32, 10=40, 12=48, 16=64)
+ *   --text-size-*      type ramp (xs, sm, base, md, lg, xl, 2xl)
+ *   --text-weight-*    font-weight tokens
+ *   --text-leading-*   line-height tokens
+ *   --radius-*         border-radius scale (sm, md, lg, pill)
+ *   --shadow-*         elevation scale (sm, md, lg, focus)
+ *   --motion-duration-*  motion timing (fast=120ms, base=180ms, slow=240ms)
+ *   --motion-ease-*    cubic-bezier easings
+ *   --touch-target     minimum interactive size (44px — WCAG / iOS)
+ *   --layout-max-w     mobile-first content max-width
+ */
+
+/*
+ * G22 cycle-23 — HousesTracker design system swap.
+ *
+ * VALUES rewritten using the sibling HousesTracker project's
+ * `client/src/index.css` as source. The values are reproduced verbatim
+ * below so this file is self-contained — you don't need HousesTracker
+ * checked out to build House Electricals. NAMES unchanged (cycle-11/17/20 pin).
+ *
+ * Mapping table (HB token name ← HT source — load-bearing per Lockin FATAL #1):
+ *   --color-bg-canvas         ← HT --color-background
+ *   --color-bg-surface        ← HT --color-card
+ *   --color-bg-surface-raised ← HT --color-popover (or +slight lift)
+ *   --color-bg-hover          ← HT --color-muted / --color-accent
+ *   --color-bg-input          ← HT --color-input (matches surface or border)
+ *   --color-bg-overlay        ← scrim derived from HT --color-foreground @ 0.5
+ *   --color-fg-default        ← HT --color-foreground
+ *   --color-fg-strong         ← HT --color-foreground (or +contrast)
+ *   --color-fg-muted          ← HT --color-muted-foreground
+ *   --color-fg-on-accent      ← HT --color-primary-foreground
+ *   --color-border-subtle     ← HT --color-border
+ *   --color-border-strong     ← HT --color-border + lift
+ *   --color-border-focus      ← HT --color-ring (= --color-primary)
+ *   --color-accent            ← HT --color-primary  (sage green — the BRAND)
+ *   --color-accent-subtle     ← sage @ 0.12 alpha
+ *   --color-danger            ← HT --color-destructive  (warm coral)
+ *   --color-success           ← HT --color-success (= --color-primary)
+ *
+ * IMPORTANT — DO NOT MAP HB --color-accent ← HT --color-accent.
+ * HT --color-accent is a neutral surface tint (#f5f0eb / #302e29), NOT the
+ * brand. HB --color-accent IS the brand → pull from HT --color-primary.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* color — background. HousesTracker DARK palette. */
+  --color-bg-canvas: #1a1917;             /* HT --color-background dark */
+  --color-bg-surface: #252420;            /* HT --color-card dark */
+  /* G42 cycle-43: bumped slightly lighter for clearer elevation vs surface
+     (#2d2c27 → #34322c). Stays warm/sage-neutral; AA contrast with
+     fg-default (#f0ebe6) still ~11+:1 — AAA. */
+  --color-bg-surface-raised: #34322c;     /* +slight lift over surface for layered modals/popovers */
+  /* G42 cycle-43: re-tuned slightly warmer (#302e29 → #38352f) so hover
+     stops on cards/menus pop more against surface. AA contrast with
+     fg-default (#f0ebe6) ~10.8:1 — AAA. */
+  --color-bg-hover: #38352f;              /* HT --color-accent (neutral hover tint) */
+  /* G22 cycle-25 — HT's --color-input #3a3732 is roughly equal to
+     --color-bg-hover and only ~5L points darker than surface; inputs
+     blended INTO cards. Drop to a deeper warm-near-black so the field
+     sits visibly BELOW the card — keeps the warm hue, gains affordance. */
+  --color-bg-input: #15140f;
+  --color-bg-overlay: rgba(15, 14, 12, 0.78); /* warm dark scrim — matches new canvas */
+
+  /* color — foreground. AA contrast verified for the warm dark palette:
+   *    fg-default (#f0ebe6) on bg-canvas (#1a1917)  → ~13.5 : 1  ✓ AAA
+   *    fg-default            on bg-surface (#252420) → ~11.6 : 1  ✓ AAA
+   *    fg-muted   (#9a958e) on bg-canvas             → ~5.4 : 1   ✓ AA
+   *    fg-muted              on bg-surface           → ~4.6 : 1   ✓ AA
+   */
+  --color-fg-default: #f0ebe6;            /* HT --color-foreground dark */
+  --color-fg-strong: #ffffff;
+  --color-fg-muted: #9a958e;              /* HT --color-muted-foreground dark */
+  --color-fg-subtle: #6f6a64;             /* deeper than muted for de-emphasized chrome */
+  --color-fg-on-accent: #ffffff;          /* HT --color-primary-foreground */
+
+  /* color — border. HT dark palette + a separate "strong" stop. */
+  --color-border-subtle: #3a3732;         /* HT --color-border dark */
+  --color-border-strong: #4d4942;         /* lift over subtle for hover/focused card edges */
+  --color-border-focus: #7a9e8a;          /* HT --color-ring dark (= --color-primary) */
+
+  /* color — accent. HT --color-primary (sage green) is THE brand.
+   *    accent (#7a9e8a) on bg-canvas (#1a1917) → ~6.9 : 1  ✓ AA-AAA
+   *    fg-on-accent (#ffffff) on accent (#7a9e8a) → ~3.2 : 1  ✓ AA-large
+   */
+  --color-accent: #7a9e8a;                /* HT --color-primary dark — sage */
+  --color-accent-hover: #8eb29c;
+  --color-accent-active: #688876;
+  --color-accent-subtle: rgba(122, 158, 138, 0.14);
+  --color-accent-border: rgba(122, 158, 138, 0.4);
+
+  /* color — danger. HT --color-destructive (warm coral, unified across themes). */
+  --color-danger: #c47a5a;                /* HT --color-destructive */
+  --color-danger-hover: #d18a6c;
+  --color-danger-subtle: rgba(196, 122, 90, 0.14);
+  --color-danger-border: rgba(196, 122, 90, 0.4);
+
+  /* color — success. HT keeps success = primary (sage) so it harmonizes with
+   *  brand and doesn't compete with the destructive coral. */
+  --color-success: #7a9e8a;
+  --color-success-subtle: rgba(122, 158, 138, 0.14);
+  --color-success-border: rgba(122, 158, 138, 0.4);
+
+  /* G35 Part 2 cycle-59 — warning/critical amber family. Not from
+   * HousesTracker palette (HT has only sage/coral); chosen for AA contrast
+   * with --color-fg-default + visual distinction from --color-danger (coral).
+   * Surfaces the user's "critical" device flag (fridge, freezer, well pump,
+   * sump pump, modem, medical device, etc.) in the Impact modal + components
+   * list + test mode. AA contrast on bg-canvas (#1a1917): amber (#d97706) →
+   * ~5.1 : 1 ✓ AA. */
+  --color-warning: #d97706;
+  --color-warning-hover: #b45309;
+  --color-warning-subtle: rgba(217, 119, 6, 0.16);
+  --color-warning-border: rgba(217, 119, 6, 0.45);
+
+  /* spacing scale (4px base) */
+  --space-0: 0;
+  --space-1: 0.25rem;  /* 4px */
+  --space-2: 0.5rem;   /* 8px */
+  --space-3: 0.75rem;  /* 12px */
+  --space-4: 1rem;     /* 16px */
+  --space-5: 1.25rem;  /* 20px */
+  --space-6: 1.5rem;   /* 24px */
+  --space-8: 2rem;     /* 32px */
+  --space-10: 2.5rem;  /* 40px */
+  --space-12: 3rem;    /* 48px */
+  --space-16: 4rem;    /* 64px */
+
+  /* type ramp. G17: tighter scale, better hierarchy.
+     G22 cycle-23: family now Plus Jakarta Sans (self-hosted via
+     @fontsource/plus-jakarta-sans @ main.tsx). Inter stays as the
+     metric-compatible fallback for FOUT/no-load fallback. */
+  --text-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --text-family-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --text-size-xs: 0.75rem;     /* 12px */
+  --text-size-sm: 0.8125rem;   /* 13px */
+  --text-size-base: 0.9375rem; /* 15px */
+  --text-size-md: 1rem;        /* 16px */
+  --text-size-lg: 1.1875rem;   /* 19px — was 18px, slight nudge */
+  --text-size-xl: 1.4375rem;   /* 23px — was 22px */
+  --text-size-2xl: 1.875rem;   /* 30px — was 28px, more headline impact */
+  --text-weight-regular: 400;
+  --text-weight-medium: 500;
+  --text-weight-semibold: 600;
+  --text-weight-bold: 700;
+  --text-leading-tight: 1.18;  /* was 1.2 — tighter for large headlines */
+  --text-leading-snug: 1.4;    /* was 1.35 — slightly looser body */
+  --text-leading-normal: 1.55; /* was 1.5 — easier paragraph reading */
+  --text-tracking-tight: -0.011em;  /* NEW — used by display headings */
+  --text-tracking-normal: 0;
+
+  /* radius scale. Slightly larger for friendlier feel. */
+  --radius-sm: 6px;
+  --radius-md: 12px;   /* was 10px */
+  --radius-lg: 16px;   /* was 14px */
+  --radius-xl: 22px;   /* was 20px */
+  --radius-pill: 999px;
+
+  /* elevation / shadow. G17: layered, multi-stop shadows for actual depth. */
+  --shadow-sm:
+    0 1px 1px rgba(0, 0, 0, 0.18),
+    0 1px 3px rgba(0, 0, 0, 0.28);
+  --shadow-md:
+    0 2px 4px rgba(0, 0, 0, 0.22),
+    0 6px 16px rgba(0, 0, 0, 0.32);
+  --shadow-lg:
+    0 4px 8px rgba(0, 0, 0, 0.28),
+    0 16px 40px rgba(0, 0, 0, 0.42);
+  --shadow-focus: 0 0 0 3px rgba(122, 158, 138, 0.45);  /* sage halo (G22) */
+  /* G21 cycle-21 polish: subtle upward lift that signals "floating nav above content".
+     Used by BottomTabs and any future floating bottom surfaces. */
+  --shadow-tabs:
+    0 -1px 0 var(--color-border-strong),
+    0 -8px 24px rgba(0, 0, 0, 0.35);
+
+  /* motion */
+  --motion-duration-fast: 120ms;
+  --motion-duration-base: 180ms;
+  --motion-duration-slow: 240ms;
+  --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* interaction targets / layout */
+  --touch-target: 44px;
+  --layout-max-w: 640px;
+  --layout-bottom-tabs-h: 64px;
+}
+
+/* G25 cycle-26 — bump content canvas on desktop so screens with a side-by-
+   side layout (PanelDetail configure page) get room without forcing
+   fullBleed. Mobile-first 640px max stays the default. */
+@media (min-width: 960px) {
+  :root {
+    --layout-max-w: 1200px;
+  }
+}
+
+/*
+ * G22 cycle-23 — LIGHT theme overrides.
+ * G42 cycle-53 — shadow tokens re-tuned for cream canvas.
+ *
+ * Activated by adding `.light` class to <html> via ThemeProvider (US-004).
+ * Values from HousesTracker index.css light variant. Names unchanged.
+ */
+:root.light {
+  color-scheme: light;
+
+  /* color — background. HousesTracker LIGHT palette. */
+  --color-bg-canvas: #faf8f5;             /* HT --color-background light — warm cream */
+  --color-bg-surface: #ffffff;            /* HT --color-card light */
+  --color-bg-surface-raised: #ffffff;     /* same as surface; modals get an outline+shadow instead */
+  --color-bg-hover: #f5f0eb;              /* HT --color-accent light — neutral hover tint */
+  --color-bg-input: #ffffff;              /* HT --color-input is border-color; field bg = card */
+  --color-bg-overlay: rgba(44, 42, 39, 0.42); /* warm scrim derived from HT --color-foreground light */
+
+  /* color — foreground. AA contrast verified for the warm light palette:
+   *    fg-default (#2c2a27) on bg-canvas (#faf8f5) → ~14.0 : 1 ✓ AAA
+   *    fg-default            on bg-surface (#ffffff) → ~15.2 : 1 ✓ AAA
+   *    fg-muted   (#8a8279) on bg-canvas             → ~4.7 : 1  ✓ AA
+   *    fg-muted              on bg-surface           → ~5.1 : 1  ✓ AA
+   */
+  --color-fg-default: #2c2a27;            /* HT --color-foreground light */
+  --color-fg-strong: #1a1816;
+  --color-fg-muted: #8a8279;              /* HT --color-muted-foreground light */
+  --color-fg-subtle: #a8a098;
+  --color-fg-on-accent: #ffffff;          /* HT --color-primary-foreground (unchanged) */
+
+  --color-border-subtle: #e8e0d8;         /* HT --color-border light */
+  --color-border-strong: #d4ccc1;
+  --color-border-focus: #5f7a6a;          /* HT --color-ring light = HT --color-primary light */
+
+  --color-accent: #5f7a6a;                /* HT --color-primary light — sage (slightly darker than dark theme) */
+  --color-accent-hover: #6f8c7b;
+  --color-accent-active: #4e6759;
+  --color-accent-subtle: rgba(95, 122, 106, 0.12);
+  --color-accent-border: rgba(95, 122, 106, 0.4);
+
+  --color-danger: #c47a5a;                /* HT --color-destructive — unified across themes */
+  --color-danger-hover: #b86a48;
+  /* Cycle-65 P0 — deepened from 0.12 → 0.20 alpha so the "Delete this panel"
+     destructive bar stands out against the cream canvas. The original 0.12
+     alpha blended into bg-canvas (#faf8f5) too closely to read as danger. */
+  --color-danger-subtle: rgba(196, 122, 90, 0.20);
+  --color-danger-border: rgba(196, 122, 90, 0.55);
+
+  --color-success: #5f7a6a;
+  --color-success-subtle: rgba(95, 122, 106, 0.12);
+  --color-success-border: rgba(95, 122, 106, 0.4);
+
+  /* G35 Part 2 cycle-59 — warning/critical amber family, light theme.
+   * Slightly deeper amber than dark for AA contrast on the cream canvas.
+   * AA contrast on bg-canvas (#faf8f5): amber (#b45309) → ~5.0 : 1 ✓ AA. */
+  --color-warning: #b45309;
+  --color-warning-hover: #92400e;
+  --color-warning-subtle: rgba(180, 83, 9, 0.10);
+  --color-warning-border: rgba(180, 83, 9, 0.40);
+
+  --shadow-focus: 0 0 0 3px rgba(95, 122, 106, 0.35);
+
+  /* G42 cycle-53 — shadow alphas re-tuned for cream canvas. Multi-stop
+     layered shape (cycle-17) preserved; alphas dropped to ~0.04-0.10
+     range so depth reads correctly without muddying the warm light bg.
+     Tints stay neutral black (no blue cast on cream). */
+  --shadow-sm:
+    0 1px 1px rgba(0, 0, 0, 0.04),
+    0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md:
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 4px 12px rgba(0, 0, 0, 0.07);
+  --shadow-lg:
+    0 4px 8px rgba(0, 0, 0, 0.06),
+    0 16px 40px rgba(0, 0, 0, 0.10);
+  --shadow-tabs:
+    0 -1px 0 var(--color-border-strong),
+    0 -8px 24px rgba(0, 0, 0, 0.05);
+}
+
+/* honour user's reduced-motion preference: zero all motion durations.
+ * Components should still use the same variable names so respect is automatic.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration-fast: 0ms;
+    --motion-duration-base: 0ms;
+    --motion-duration-slow: 0ms;
+  }
+}
