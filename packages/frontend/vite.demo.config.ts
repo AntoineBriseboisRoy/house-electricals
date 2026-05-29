@@ -137,7 +137,16 @@ export default defineConfig({
   define: {
     // Some browserified deps reference a bare `global`.
     global: 'globalThis',
+    // Version-pill build stamps. These MUST mirror the four defines in
+    // vite.config.ts — VersionPill.tsx references all of them, so any left
+    // undefined becomes a runtime ReferenceError. CI sets GITHUB_SHA; locally
+    // we fall back to "demo".
     __APP_VERSION__: JSON.stringify(`${pkg.version.replace(/\.0$/, '')}-demo`),
+    __GIT_SHA__: JSON.stringify(process.env.GITHUB_SHA ?? 'demo'),
+    __GIT_DESCRIBE__: JSON.stringify(
+      `${(process.env.GITHUB_SHA ?? 'demo').slice(0, 7)}-demo`
+    ),
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
   },
   build: {
     target: 'es2022',
