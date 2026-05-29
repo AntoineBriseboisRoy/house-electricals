@@ -55,6 +55,42 @@ unchanged; only the engine + access layer changed. The current contract:
    (used by the e2e harness for a clean `e2e` schema; `DB_RESET` is test-only
    and only ever drops the NAMED schema, never `public`).
 
+## Real build versioning (2026-05) — supersedes the static "v0.X" pill
+
+The bottom-left `VersionPill` used to show only `v{package.json version}`
+(stripped to `v0.2`), which never changed between deploys. It now shows
+**real, build-stamped versioning** so every build is identifiable. Pins:
+
+1. **Four stamps inlined at build via `vite.config.ts` `define:`** — ENV-FIRST
+   (CI/Docker inject them as build-args, since the alpine image has no git and
+   `.dockerignore` excludes `.git`), with a local `git` fallback for
+   `pnpm dev`/`build`:
+   - `__APP_VERSION__` — semver from `packages/frontend/package.json` (human
+     release marker; `.0` is NO LONGER stripped — shows full `0.2.0`).
+   - `__GIT_DESCRIBE__` — `git describe --tags --always --dirty` (precise,
+     auto-incrementing id: `v0.3.0`, `v0.3.0-4-gABCDEF`, or bare SHA).
+   - `__GIT_SHA__` — full commit SHA (short form shown in UI).
+   - `__BUILD_TIME__` — ISO-8601 build timestamp.
+
+2. **Pill shows `v{semver} · {shortSha}`** (e.g. `v0.2.0 · 10070a3`) so it
+   changes per deploy; the force-refresh modal carries full provenance
+   (`version-pill-build` dl: git-describe, full SHA, build date). testids:
+   `version-pill` (+ `data-version`, `data-sha`), `version-pill-build`,
+   `force-refresh-modal`.
+
+3. **Docker** (`packages/backend/Dockerfile`): `ARG GIT_SHA` (→
+   `ENV VITE_GIT_SHA`) + `ARG GIT_DESCRIBE` + `ARG BUILD_TIME` → ENV, read by
+   vite.config. NEVER run git inside the build (no git binary, no `.git`).
+
+4. **CI** (`.github/workflows/release.yml`): the build job checks out with
+   `fetch-depth: 0 + fetch-tags` and a "Compute build version metadata" step
+   runs `git describe` + `date -u` ON THE RUNNER (which has git), passing
+   `GIT_SHA` / `GIT_DESCRIBE` / `BUILD_TIME` as build-args. To cut a clean
+   release marker, push a `vX.Y.Z` tag — `git describe` then surfaces it.
+
+5. e2e: `version-pill.spec.ts` asserts the pill matches `v<semver> · <7hex>`
+   and the modal lists Commit + Built (no longer a frozen `v0.2`).
+
 ## Impact view — "switches that lose control" (2026-05)
 
 Completes the cycle-58 G35 ADR #1 deferral ("a future cycle MAY add a

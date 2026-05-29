@@ -2,16 +2,53 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { readFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-// Cycle-83 — version stamp from packages/frontend/package.json so the
-// VersionPill shows an incremental human-readable "v0.X" instead of a
-// build SHA. Bump packages/frontend/package.json `"version"` to ship a
-// new release marker. Patch (`.0`) is stripped at display time.
+// ── Real build versioning (2026-05) ─────────────────────────────────────────
+// The bundle is stamped at build time with four values, mirroring the
+// canonical OSS pattern (git-describe + commit + build date, à la Docker /
+// Grafana / Prometheus ldflags). Values come ENV-FIRST so CI/Docker — where
+// `.git` is absent (alpine base, .dockerignore) — can inject them as
+// build-args; otherwise we shell out to git for local `pnpm dev`/`build`.
+//   - __APP_VERSION__  : semver from package.json (the human release marker)
+//   - __GIT_DESCRIBE__ : `git describe --tags --always --dirty` (precise id —
+//                        e.g. "v0.3.0", "v0.3.0-4-gabc1234", or just the SHA
+//                        when untagged). Auto-increments every commit.
+//   - __GIT_SHA__      : full commit SHA (short form shown in the UI)
+//   - __BUILD_TIME__   : ISO-8601 build timestamp
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8')) as { version: string };
+const pkg = JSON.parse(
+  readFileSync(resolve(__dirname, 'package.json'), 'utf-8')
+) as { version: string };
+
+/** Run a git command, returning '' on any failure (no .git, no git binary). */
+const git = (args: string): string => {
+  try {
+    return execSync(`git ${args}`, {
+      cwd: __dirname,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .toString()
+      .trim();
+  } catch {
+    return '';
+  }
+};
+
 const APP_VERSION = pkg.version;
+const GIT_SHA = (
+  process.env.GIT_SHA ||
+  process.env.VITE_GIT_SHA ||
+  git('rev-parse HEAD')
+).trim();
+const GIT_DESCRIBE = (
+  process.env.GIT_DESCRIBE ||
+  git('describe --tags --always --dirty') ||
+  GIT_SHA.slice(0, 7)
+).trim();
+const BUILD_TIME = (process.env.BUILD_TIME || new Date().toISOString()).trim();
 
 export default defineConfig({
   plugins: [
@@ -111,8 +148,10 @@ export default defineConfig({
   },
   define: {
     // Inlined at build time so the bundle has zero runtime overhead.
-    // Strip the trailing `.0` patch so semver `0.2.0` displays as `0.2`.
-    __APP_VERSION__: JSON.stringify(APP_VERSION.replace(/\.0$/, '')),
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+    __GIT_SHA__: JSON.stringify(GIT_SHA),
+    __GIT_DESCRIBE__: JSON.stringify(GIT_DESCRIBE),
+    __BUILD_TIME__: JSON.stringify(BUILD_TIME),
   },
   build: {
     target: 'es2022',

@@ -43,11 +43,19 @@ RUN pnpm install --frozen-lockfile=false
 COPY packages/shared packages/shared
 COPY packages/frontend packages/frontend
 
-# CI passes GIT_SHA as a build-arg so the frontend bundle can surface the
-# deployed commit in a "force-refresh" affordance (cycle-68). Local builds
-# without --build-arg still work; the SHA fallback just isn't shown.
+# CI passes the build version stamps as build-args so the frontend bundle can
+# surface the deployed version (the VersionPill chip + build-info modal). The
+# alpine base has no git and .dockerignore excludes .git, so vite.config can't
+# shell out here — these MUST arrive as build-args. Local `docker build`
+# without them still works; vite.config falls back to package.json + empty
+# SHA. (2026-05: was GIT_SHA only; added GIT_DESCRIBE + BUILD_TIME for real
+# build versioning.)
 ARG GIT_SHA=""
+ARG GIT_DESCRIBE=""
+ARG BUILD_TIME=""
 ENV VITE_GIT_SHA=$GIT_SHA
+ENV GIT_DESCRIBE=$GIT_DESCRIBE
+ENV BUILD_TIME=$BUILD_TIME
 
 RUN pnpm --filter @he/shared build \
  && pnpm --filter @he/frontend build

@@ -105,6 +105,21 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # Full history + tags so `git describe` can resolve the nearest
+          # release tag for the build version stamp (below).
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Compute build version metadata
+        id: ver
+        # Runs on the runner (which HAS git) — NOT inside the Docker build,
+        # whose alpine base lacks git and whose context excludes .git. The
+        # results are injected into the image via build-args.
+        run: |
+          DESCRIBE="$(git describe --tags --always --dirty 2>/dev/null || echo "${GITHUB_SHA}")"
+          echo "describe=${DESCRIBE}" >> "$GITHUB_OUTPUT"
+          echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Set lowercase owner
         # GHCR requires the image path to be lowercase; the GitHub owner
@@ -135,10 +150,11 @@ jobs:
             type=semver,pattern={{version}}
 
       - name: Build & push
-        # GIT_SHA build-arg surfaces in the frontend bundle as a version
-        # pill (Vite's VITE_GIT_SHA convention). DO NOT use `git rev-parse`
-        # inside the build — alpine base lacks git and .dockerignore
-        # excludes .git.
+        # The version stamps (GIT_SHA / GIT_DESCRIBE / BUILD_TIME) are computed
+        # on the runner above and surfaced in the frontend bundle as the
+        # VersionPill chip + build-info modal. DO NOT compute them with git
+        # INSIDE the build — alpine base lacks git and .dockerignore excludes
+        # .git; they must arrive as build-args.
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -148,5 +164,7 @@ jobs:
           labels: ${{ steps.image_meta.outputs.labels }}
           build-args: |
             GIT_SHA=${{ github.sha }}
+            GIT_DESCRIBE=${{ steps.ver.outputs.describe }}
+            BUILD_TIME=${{ steps.ver.outputs.build_time }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

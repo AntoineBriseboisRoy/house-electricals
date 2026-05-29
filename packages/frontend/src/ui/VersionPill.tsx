@@ -23,21 +23,39 @@ import { toast } from './toast.js';
  * just gives users an escape hatch when iOS PWA holds the old SW across
  * refresh, without invalidating the autoUpdate strategy.
  *
- * `__APP_VERSION__` is injected via `vite.config.ts` `define:` from
- * `packages/frontend/package.json` `"version"`. Bump that field to
- * release a new marker. Patch (`.0`) is stripped at build time so
- * `0.2.0` → `0.2`. Local `pnpm dev` shows the same — the value comes
- * from package.json, not from an env variable.
- *
- * The build SHA is still injected via the CI `--build-arg GIT_SHA` flow
- * and shown inside the modal body for ops/debugging, but no longer
- * dominates the chip surface.
+ * Real build versioning (2026-05): all four stamps are inlined at build
+ * time via `vite.config.ts` `define:` (ENV-first so CI/Docker inject them
+ * as build-args; git fallback for local builds). The chip shows the human
+ * semver + the short commit SHA — so it CHANGES every deploy instead of
+ * being frozen at "v0.2" — and the modal carries the full provenance
+ * (git-describe, full SHA, build date) for ops/debugging.
+ *   __APP_VERSION__  — semver from packages/frontend/package.json
+ *   __GIT_DESCRIBE__ — `git describe --tags --always --dirty`
+ *   __GIT_SHA__      — full commit SHA
+ *   __BUILD_TIME__   — ISO build timestamp
  */
 declare const __APP_VERSION__: string;
-const APP_VERSION = __APP_VERSION__;
+declare const __GIT_SHA__: string;
+declare const __GIT_DESCRIBE__: string;
+declare const __BUILD_TIME__: string;
 
-const RAW_SHA = (import.meta.env.VITE_GIT_SHA ?? '').trim();
-const SHORT_SHA = RAW_SHA.length >= 7 ? RAW_SHA.slice(0, 7) : '';
+const APP_VERSION = __APP_VERSION__;
+const GIT_SHA = (__GIT_SHA__ ?? '').trim();
+const SHORT_SHA = GIT_SHA.length >= 7 ? GIT_SHA.slice(0, 7) : '';
+const GIT_DESCRIBE = (__GIT_DESCRIBE__ ?? '').trim();
+const BUILD_TIME = (__BUILD_TIME__ ?? '').trim();
+
+/** Human "May 29, 2026, 14:05 UTC" from the ISO stamp; '' when unparseable. */
+const formatBuildTime = (iso: string): string => {
+  if (iso === '') return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+};
+const BUILD_TIME_LABEL = formatBuildTime(BUILD_TIME);
 
 async function forceRefresh(): Promise<void> {
   try {
@@ -68,12 +86,20 @@ export const VersionPill = (): JSX.Element => {
         type="button"
         className="version-pill"
         onClick={() => setOpen(true)}
-        aria-label={`App version ${APP_VERSION} — tap to force refresh`}
-        title={`App version ${APP_VERSION}`}
+        aria-label={
+          `App version ${APP_VERSION}` +
+          (SHORT_SHA ? ` build ${SHORT_SHA}` : '') +
+          ' — tap for build info'
+        }
+        title={`v${APP_VERSION}${SHORT_SHA ? ` · ${SHORT_SHA}` : ''}`}
         data-testid="version-pill"
         data-version={APP_VERSION}
+        data-sha={SHORT_SHA}
       >
         v{APP_VERSION}
+        {SHORT_SHA ? (
+          <span className="version-pill__sha"> · {SHORT_SHA}</span>
+        ) : null}
       </button>
       <Modal
         open={open}
@@ -108,9 +134,28 @@ export const VersionPill = (): JSX.Element => {
         }
       >
         <p className="modal__message">
-          Currently running version <strong>v{APP_VERSION}</strong>
-          {SHORT_SHA ? <span className="version-pill__sha"> ({SHORT_SHA})</span> : null}.
+          Currently running version <strong>v{APP_VERSION}</strong>.
         </p>
+        <dl className="version-pill__build" data-testid="version-pill-build">
+          {GIT_DESCRIBE ? (
+            <>
+              <dt>Build</dt>
+              <dd>{GIT_DESCRIBE}</dd>
+            </>
+          ) : null}
+          {SHORT_SHA ? (
+            <>
+              <dt>Commit</dt>
+              <dd>{GIT_SHA}</dd>
+            </>
+          ) : null}
+          {BUILD_TIME_LABEL ? (
+            <>
+              <dt>Built</dt>
+              <dd>{BUILD_TIME_LABEL}</dd>
+            </>
+          ) : null}
+        </dl>
         <p className="modal__message">
           If the app feels stuck on an old version after a deploy, this will
           unregister the service worker, clear every cache, and reload.

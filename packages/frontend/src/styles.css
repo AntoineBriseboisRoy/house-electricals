@@ -430,6 +430,30 @@ body {
     border-color var(--motion-duration-fast) var(--motion-ease-out),
     opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
+/* 2026-05 — short commit SHA appended to the pill (e.g. "v0.2.0 · 1a2b3c4")
+   so the chip is unique per build instead of a frozen "v0.2". */
+.version-pill__sha {
+  font-weight: var(--text-weight-regular);
+  opacity: 0.8;
+}
+/* Build provenance list inside the force-refresh / build-info modal. */
+.version-pill__build {
+  margin: var(--space-2) 0 var(--space-3);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-size-sm);
+}
+.version-pill__build dt {
+  color: var(--color-fg-muted);
+  font-weight: var(--text-weight-medium);
+}
+.version-pill__build dd {
+  margin: 0;
+  font-family: var(--text-family-mono);
+  color: var(--color-fg-default);
+  overflow-wrap: anywhere;
+}
 .version-pill:hover {
   background: var(--color-bg-surface-raised);
   color: var(--color-fg-default);
