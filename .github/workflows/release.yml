@@ -136,7 +136,7 @@ jobs:
         # pill (Vite's VITE_GIT_SHA convention). DO NOT use `git rev-parse`
         # inside the build — alpine base lacks git and .dockerignore
         # excludes .git.
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: packages/backend/Dockerfile
