@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { UseFormReturn } from 'react-hook-form';
 import type {
   ComponentInput,
@@ -8,6 +8,7 @@ import type {
 import type { PanelWithBreakers } from '../api.js';
 import { componentTypeLabel } from './ComponentTypeIcon.js';
 import { Button, Checkbox, Combobox, Input, Select } from '../ui/index.js';
+import { TYPICAL_LOAD_WATTS } from '../lib/load.js';
 
 type Props = {
   form: UseFormReturn<ComponentInput>;
@@ -29,7 +30,7 @@ type Props = {
    *  floor). When non-null AND the component currently has no `breakerId`,
    *  the Wiring section's Panel select defaults to this id so the user only
    *  needs to pick a slot. The user can still override to a different panel.
-   *  Hint copy under the Panel select explains the default is from the floor. */
+   *  When set, that panel's breaker group sorts first in the picker. */
   floorPanelId?: string | null;
 };
 
@@ -77,68 +78,43 @@ export const ComponentForm = ({
     formState: { errors, isSubmitting },
   } = form;
 
-  // G31 cycle-39 — Wiring: two cascading dropdowns (panel → breaker).
-  // The form's canonical state is `breakerId` (the only field the API
-  // cares about); the panel select is a UX scaffold that filters the
-  // breaker list. We derive the initial selected panel from whichever
-  // group contains the current breakerId.
+  // Wiring: ONE step (2026-05). `breakerId` is the only field the API cares
+  // about — the panel a component lives on is DERIVED from its breaker
+  // (component.breakerId → breaker.panelId), never stored separately. So a
+  // single breaker picker, grouped by panel, is all that's needed: picking a
+  // breaker assigns the panel automatically. (Replaces the old cycle-39
+  // cascading Panel → Breaker pair, which made wiring a 2-step chore.)
   const currentBreakerId = watch('breakerId') ?? null;
 
-  const panelIdForBreaker = useMemo(() => {
-    if (currentBreakerId === null) return null;
-    for (const g of breakerGroups) {
-      if (g.breakers.some((b) => b.id === currentBreakerId)) return g.panel.id;
-    }
-    return null;
-  }, [breakerGroups, currentBreakerId]);
-
-  // Cycle-85 — when the component has no wired breaker (typical for new
-  // components on a floor with a linked panel), default the Panel select
-  // to the floor's linked panel. The user can override to a different
-  // panel; switching panel clears the breaker per the existing flow.
-  // Validate against the loaded breakerGroups so a stale floor.panelId
-  // (panel deleted) gracefully falls through to "no default".
-  const floorPanelDefault = useMemo(() => {
-    if (floorPanelId === null) return null;
-    return breakerGroups.some((g) => g.panel.id === floorPanelId)
-      ? floorPanelId
-      : null;
-  }, [floorPanelId, breakerGroups]);
-
-  const initialPanelId = panelIdForBreaker ?? floorPanelDefault;
-
-  const [selectedPanelId, setSelectedPanelId] = useState<string | null>(
-    initialPanelId
-  );
-
-  // Re-seed when the form's external breakerId changes (e.g. opening the
-  // edit form for a different component). Cycle-85: also re-seed when the
-  // floor default changes so the EditingRow can flip in mid-life if the
-  // floor/panel context changes.
-  useEffect(() => {
-    setSelectedPanelId(panelIdForBreaker ?? floorPanelDefault);
-  }, [panelIdForBreaker, floorPanelDefault]);
-
-  const handlePanelChange = (next: string | null): void => {
-    setSelectedPanelId(next);
-    // Switching panel always clears the breaker — the user must pick one
-    // from the new panel's list. Same behavior when they pick Unassigned.
-    setValue('breakerId', null, { shouldDirty: true, shouldValidate: true });
-  };
-
   const handleBreakerChange = (next: string | null): void => {
-    setValue('breakerId', next, {
-      shouldDirty: true,
-      shouldValidate: true,
-    });
+    setValue('breakerId', next, { shouldDirty: true, shouldValidate: true });
   };
 
-  const breakersForSelectedPanel = useMemo(() => {
-    if (selectedPanelId === null) return [];
-    return (
-      breakerGroups.find((g) => g.panel.id === selectedPanelId)?.breakers ?? []
-    );
-  }, [breakerGroups, selectedPanelId]);
+  // Build the grouped breaker options. When the component sits on a floor
+  // linked to a panel (Cycle-85 context), sort that panel's group FIRST so
+  // its breakers are the easiest to reach — the floorPanelId still earns its
+  // keep without forcing a separate panel selection step.
+  const breakerOptGroups = useMemo(() => {
+    const groups = breakerGroups.filter((g) => g.breakers.length > 0);
+    const ordered =
+      floorPanelId === null
+        ? groups
+        : [...groups].sort((a, b) =>
+            a.panel.id === floorPanelId
+              ? -1
+              : b.panel.id === floorPanelId
+                ? 1
+                : 0
+          );
+    return ordered.map((g) => ({
+      label: g.panel.name,
+      options: g.breakers.map((b) => ({ value: b.id, label: formatBreaker(b) })),
+    }));
+  }, [breakerGroups, floorPanelId]);
+
+  // 2026-05 — typical continuous-load default OFFERED for the current type.
+  const typicalLoad =
+    TYPICAL_LOAD_WATTS[(watch('type') as ComponentType | undefined) ?? 'outlet'];
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="component-form" noValidate>
@@ -245,6 +221,49 @@ export const ComponentForm = ({
           />
         </div>
 
+        {/* 2026-05 — per-circuit load (watts). Optional; null = unknown. A
+            typical value for the chosen type is offered (placeholder + a
+            one-tap "Use typical" button); the user can override or clear. */}
+        <div className="form-grid--wide component-form__load">
+          <Input
+            label="Load (watts)"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            step={10}
+            data-testid="cf-load-watts"
+            placeholder={
+              typicalLoad !== null ? `Typical: ${typicalLoad} W` : 'e.g. 1500'
+            }
+            autoComplete="off"
+            hint="Estimated continuous draw — used for overload warnings. Leave blank if unknown."
+            error={errors.loadWatts?.message ?? null}
+            {...register('loadWatts', {
+              setValueAs: (v) => {
+                if (v === '' || v === null || v === undefined) return null;
+                const n =
+                  typeof v === 'number' ? v : Number.parseInt(String(v), 10);
+                return Number.isFinite(n) ? n : null;
+              },
+            })}
+          />
+          {typicalLoad !== null && typicalLoad > 0 && (
+            <button
+              type="button"
+              className="component-form__load-typical"
+              data-testid="cf-load-typical"
+              onClick={() =>
+                setValue('loadWatts', typicalLoad, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+              }
+            >
+              Use typical ({typicalLoad} W)
+            </button>
+          )}
+        </div>
+
         {/* G37 cycle-68 — GFCI/AFCI protection picker. Same closed enum as
             BreakerForm. Cycle-71 Select primitive maps placeholder → null. */}
         <Select<ProtectionKind>
@@ -284,57 +303,22 @@ export const ComponentForm = ({
           </p>
         </div>
 
-        {/* G31 cycle-39 — Wiring section. Hidden when there are no panels
-            (early setup, before the user has created their first panel). */}
+        {/* Wiring — ONE step (2026-05). Single breaker picker grouped by
+            panel; the panel is derived from the breaker automatically.
+            Hidden when there are no panels (early setup). */}
         {breakerGroups.length > 0 && (
           <div className="form-grid--wide component-form__wiring">
             <h3 className="component-form__wiring-heading">Wiring</h3>
-            <div className="form-grid">
-              <Select<string>
-                id="cf-panel"
-                label="Panel"
-                data-testid="cf-panel"
-                value={selectedPanelId}
-                onChange={handlePanelChange}
-                placeholder="Unassigned (not wired)"
-                options={breakerGroups.map(({ panel }) => ({
-                  value: panel.id,
-                  label: panel.name,
-                }))}
-                hint={
-                  /* Cycle-85 — hint surfaces only when the floor-linked
-                     default is in effect (no breaker wired AND the floor
-                     supplied a panel) so users understand WHY the Panel
-                     was pre-selected. Hides once the user picks a breaker
-                     (or overrides the Panel). */
-                  currentBreakerId === null &&
-                  floorPanelDefault !== null &&
-                  selectedPanelId === floorPanelDefault
-                    ? "Default from this component's floor — change to override."
-                    : undefined
-                }
-              />
-              <Select<string>
-                id="cf-breaker"
-                label="Breaker"
-                data-testid="cf-breaker"
-                aria-label="Breaker (pick a panel first)"
-                value={currentBreakerId}
-                onChange={handleBreakerChange}
-                disabled={selectedPanelId === null}
-                placeholder={
-                  selectedPanelId === null
-                    ? 'Pick a panel first'
-                    : breakersForSelectedPanel.length === 0
-                      ? 'No breakers on this panel'
-                      : 'Choose a breaker'
-                }
-                options={breakersForSelectedPanel.map((b) => ({
-                  value: b.id,
-                  label: formatBreaker(b),
-                }))}
-              />
-            </div>
+            <Select<string>
+              id="cf-breaker"
+              label="Breaker"
+              data-testid="cf-breaker"
+              value={currentBreakerId}
+              onChange={handleBreakerChange}
+              placeholder="Unassigned (not wired)"
+              optGroups={breakerOptGroups}
+              hint="Pick the breaker — the panel it’s on is set automatically."
+            />
           </div>
         )}
       </div>

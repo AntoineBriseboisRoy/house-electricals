@@ -6,6 +6,7 @@ import type { AuthConfig } from './auth.js';
 import { Db, createPool } from './db.js';
 import {
   initSchema,
+  PgAttachmentRepository,
   PgBreakerRepository,
   PgBreakerTestRepository,
   PgBuildingRepository,
@@ -141,6 +142,7 @@ export const buildTestApp = (
     wallRepository: new PgWallRepository(db),
     roomRepository: new PgRoomRepository(db),
     serviceEntryRepository: new PgServiceEntryRepository(db),
+    attachmentRepository: new PgAttachmentRepository(db),
     db,
     appUserRepository: overrides.appUserRepository ?? null,
     auth: overrides.auth ?? null,

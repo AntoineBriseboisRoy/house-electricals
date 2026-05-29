@@ -73,6 +73,7 @@ import {
 } from '../api.js';
 import { BreakerPicker } from '../components/BreakerPicker.js';
 import { ComponentForm } from '../components/ComponentForm.js';
+import { PhotoStrip } from '../components/PhotoStrip.js';
 import { suffixDuplicate } from '../lib/duplicateName.js';
 import {
   Button,
@@ -1164,6 +1165,32 @@ export const FloorEditScreen = (): JSX.Element => {
         toast.error(err instanceof Error ? err.message : 'Failed to move endpoint.');
       }
     },
+    onWallMoveCommit: async (wallId, dx, dy) => {
+      const before = walls.find((w) => w.id === wallId);
+      if (!before) return;
+      const moved: Wall = {
+        ...before,
+        x1: before.x1 + dx,
+        y1: before.y1 + dy,
+        x2: before.x2 + dx,
+        y2: before.y2 + dy,
+      };
+      setWalls((prev) => prev.map((w) => (w.id === wallId ? moved : w)));
+      try {
+        await updateWall(wallId, {
+          x1: moved.x1,
+          y1: moved.y1,
+          x2: moved.x2,
+          y2: moved.y2,
+        });
+        // Translating a wall can also close (or break) a loop.
+        const nextWalls = walls.map((w) => (w.id === wallId ? moved : w));
+        void maybeCreateRoomFromLoop(nextWalls, wallId);
+      } catch (err) {
+        setWalls((prev) => prev.map((w) => (w.id === wallId ? before : w)));
+        toast.error(err instanceof Error ? err.message : 'Failed to move wall.');
+      }
+    },
   });
 
   const roomEditor = useRoomEditor({
@@ -1428,7 +1455,7 @@ export const FloorEditScreen = (): JSX.Element => {
   }, [rooms, selectedRoomId, prompt, attemptRenameRoom]);
 
   /** G26 — commit a numeric edit to one of x/y/w/h on the selected room.
-   *  Clamps to the coordinate bounds, snaps to 250 (the SNAP_STEP), no-ops
+   *  Clamps to the coordinate bounds, snaps to the SNAP_STEP grid, no-ops
    *  on identity, optimistic local update + PATCH + rollback on failure. */
   const handleEditRoomDimension = useCallback(
     async (field: 'x' | 'y' | 'w' | 'h', rawNext: number): Promise<void> => {
@@ -1783,16 +1810,53 @@ export const FloorEditScreen = (): JSX.Element => {
   // During a polygon-vertex drag, walls whose endpoint sits on the dragged
   // coordinate follow it live (the room reshapes via displayedRooms above).
   const displayedWalls = useMemo<Wall[]>(() => {
-    if (vertexDrag === null) return walls;
-    const { orig, current } = vertexDrag;
-    const at = (x: number, y: number): boolean => x === orig.x && y === orig.y;
-    return walls.map((w) => {
-      let nw = w;
-      if (at(w.x1, w.y1)) nw = { ...nw, x1: current.x, y1: current.y };
-      if (at(w.x2, w.y2)) nw = { ...nw, x2: current.x, y2: current.y };
-      return nw;
-    });
-  }, [walls, vertexDrag]);
+    let result = walls;
+    // (a) Polygon-room vertex reshape — moves every wall endpoint coincident
+    //     with the dragged vertex.
+    if (vertexDrag !== null) {
+      const { orig, current } = vertexDrag;
+      const at = (x: number, y: number): boolean =>
+        x === orig.x && y === orig.y;
+      result = result.map((w) => {
+        let nw = w;
+        if (at(w.x1, w.y1)) nw = { ...nw, x1: current.x, y1: current.y };
+        if (at(w.x2, w.y2)) nw = { ...nw, x2: current.x, y2: current.y };
+        return nw;
+      });
+    }
+    // (b) Single-endpoint drag — the wall line follows the dragged endpoint
+    //     LIVE (was previously only applied on release).
+    const ed = wallEditor.endpointDrag;
+    if (ed !== null) {
+      result = result.map((w) =>
+        w.id !== ed.wallId
+          ? w
+          : ed.endpoint === 1
+            ? { ...w, x1: ed.current.x, y1: ed.current.y }
+            : { ...w, x2: ed.current.x, y2: ed.current.y }
+      );
+    }
+    // (c) Whole-wall translate — both endpoints shift by the snapped delta.
+    const wd = wallEditor.wallDrag;
+    if (wd !== null) {
+      const dx = wd.current.x - wd.anchor.x;
+      const dy = wd.current.y - wd.anchor.y;
+      if (dx !== 0 || dy !== 0) {
+        result = result.map((w) =>
+          w.id !== wd.wallId
+            ? w
+            : {
+                ...w,
+                x1: w.x1 + dx,
+                y1: w.y1 + dy,
+                x2: w.x2 + dx,
+                y2: w.y2 + dy,
+              }
+        );
+      }
+    }
+    return result;
+  }, [walls, vertexDrag, wallEditor.endpointDrag, wallEditor.wallDrag]);
 
   // Walls absorbed into a room's outline (their segment IS a room polygon
   // edge) are hidden + non-selectable — the room represents them, so the
@@ -2126,7 +2190,13 @@ export const FloorEditScreen = (): JSX.Element => {
                         className="floor-plan__wall-hit"
                         onPointerDown={(e) => {
                           e.stopPropagation();
-                          setSelectedWallId(w.id);
+                          // Second press on an already-selected wall begins a
+                          // whole-wall translate drag (mirrors room translate).
+                          if (selectedWallId === w.id) {
+                            wallEditor.startWallDrag(w.id, e);
+                          } else {
+                            setSelectedWallId(w.id);
+                          }
                         }}
                       />
                     ))}
@@ -2257,8 +2327,14 @@ export const FloorEditScreen = (): JSX.Element => {
                         data-wall-id={w.id}
                         onPointerDown={(e) => {
                           e.stopPropagation();
-                          setSelectedWallId(w.id);
-                          setSelectedRoomId(null);
+                          // Second press on an already-selected wall begins a
+                          // whole-wall translate drag (mirrors room translate).
+                          if (selectedWallId === w.id) {
+                            wallEditor.startWallDrag(w.id, e);
+                          } else {
+                            setSelectedWallId(w.id);
+                            setSelectedRoomId(null);
+                          }
                         }}
                       />
                     ))}
@@ -2316,24 +2392,15 @@ export const FloorEditScreen = (): JSX.Element => {
                 selectedWallId !== null &&
                 !hiddenWallIds.has(selectedWallId) &&
                 (() => {
-                  const sel = walls.find((w) => w.id === selectedWallId);
+                  // Read from displayedWalls so both dots track a live
+                  // endpoint drag AND a whole-wall translate in lockstep.
+                  const sel = displayedWalls.find(
+                    (w) => w.id === selectedWallId
+                  );
                   if (!sel) return null;
-                  const drag = wallEditor.endpointDrag;
                   const endpoints: { endpoint: 1 | 2; pt: Point }[] = [
-                    {
-                      endpoint: 1,
-                      pt:
-                        drag && drag.wallId === sel.id && drag.endpoint === 1
-                          ? drag.current
-                          : { x: sel.x1, y: sel.y1 },
-                    },
-                    {
-                      endpoint: 2,
-                      pt:
-                        drag && drag.wallId === sel.id && drag.endpoint === 2
-                          ? drag.current
-                          : { x: sel.x2, y: sel.y2 },
-                    },
+                    { endpoint: 1, pt: { x: sel.x1, y: sel.y1 } },
+                    { endpoint: 2, pt: { x: sel.x2, y: sel.y2 } },
                   ];
                   return endpoints.map(({ endpoint, pt }) => (
                     <button
@@ -2350,7 +2417,7 @@ export const FloorEditScreen = (): JSX.Element => {
                         } as CSSProperties
                       }
                       onPointerDown={(e) =>
-                        wallEditor.startEndpointDrag(sel.id, endpoint, e)
+                        wallEditor.startEndpointDrag(sel.id, endpoint, pt, e)
                       }
                     />
                   ));
@@ -3185,6 +3252,11 @@ export const FloorEditScreen = (): JSX.Element => {
                       </div>
                     )}
 
+                    {/* 2026-05 — photos right in the drawer, so you can see
+                       + add pictures of the selected component WITHOUT opening
+                       the edit form. */}
+                    <PhotoStrip parentType="component" parentId={sel.id} />
+
                     {/* Cycle-86 — opens ComponentForm in a Modal so the
                        user can wire the component to a panel/breaker (and
                        edit other fields) without leaving the floor map.
@@ -3406,6 +3478,8 @@ const FloorComponentEditFormHost = ({
       critical: component.critical,
       // Cycle-68 G37 — seed protection so the edit form shows current value.
       protection: component.protection,
+      // 2026-05 — seed load (watts) so the edit form shows the current value.
+      loadWatts: component.loadWatts,
     },
   });
 

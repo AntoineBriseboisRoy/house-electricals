@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Breaker, BreakerInput, BreakerTest, Component, Panel } from '@he/shared';
+import type { BreakerLoad } from '../lib/load.js';
 import { BreakerRow } from './BreakerRow.js';
 import { ComponentTypeIcon, componentTypeLabel } from './ComponentTypeIcon.js';
 import { listComponents } from '../api.js';
@@ -22,12 +23,16 @@ type Props = {
   onChangeFeedsSubpanel?: (subpanelId: string | null) => void | Promise<void>;
   /** G35 Part 1 (cycle-58) — open the Impact modal for this breaker. */
   onShowImpact?: () => void;
+  /** 2026-05 — per-circuit load summary for this breaker. Pass-through. */
+  load?: BreakerLoad | null;
   /** G36 cycle-61 — most-recent BreakerTest for this breaker. Pass-through. */
   lastTest?: BreakerTest | null;
   /** G40 Part 1 cycle-66 — service-log entry count + open-modal callback.
    *  Pass-through to BreakerRow. */
   serviceLogCount?: number;
   onShowServiceLog?: () => void;
+  /** 2026-05 — open the PhotosModal for this breaker. Pass-through. */
+  onShowPhotos?: () => void;
 };
 
 export const BreakerWithComponents = ({
@@ -44,9 +49,11 @@ export const BreakerWithComponents = ({
   currentSubpanelId,
   onChangeFeedsSubpanel,
   onShowImpact,
+  load,
   lastTest,
   serviceLogCount,
   onShowServiceLog,
+  onShowPhotos,
 }: Props): JSX.Element => {
   const [expanded, setExpanded] = useState(false);
   const [components, setComponents] = useState<Component[] | null>(null);
@@ -82,9 +89,11 @@ export const BreakerWithComponents = ({
         currentSubpanelId={currentSubpanelId}
         onChangeFeedsSubpanel={onChangeFeedsSubpanel}
         onShowImpact={onShowImpact}
+        load={load}
         lastTest={lastTest}
         serviceLogCount={serviceLogCount}
         onShowServiceLog={onShowServiceLog}
+        onShowPhotos={onShowPhotos}
       />
       {!isEditing && (
         <li className="breaker-row breaker-row--expandable">

@@ -137,6 +137,31 @@ body {
   gap: var(--space-2);
 }
 
+/* 2026-05 — export block below the buildings list. */
+.buildings-export {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.buildings-export__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-muted);
+}
+
+.buildings-export__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .buildings-list__row {
   display: flex;
   align-items: center;
@@ -1828,6 +1853,23 @@ h2 {
   font-size: 0.85rem;
 }
 
+/* 2026-05 — per-circuit load line on a breaker row. Muted by default;
+   amber > 80% (warn), red > 100% (over) via data-load-status. */
+.breaker-row__load {
+  margin-top: var(--space-1);
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-fg-muted);
+}
+
+.breaker-row__load[data-load-status='warn'] {
+  color: var(--color-warning);
+}
+
+.breaker-row__load[data-load-status='over'] {
+  color: var(--color-danger);
+}
+
 .breaker-row__actions {
   display: flex;
   gap: 0.5rem;
@@ -3262,6 +3304,60 @@ h2 {
   border: 1px solid var(--color-warning-border);
   border-radius: var(--radius-pill);
   pointer-events: none;
+}
+
+/* 2026-05 — per-slot load chip (load % of continuous capacity). Bottom-right
+   corner so it doesn't collide with the top-right protection badge. Muted by
+   default; amber > 80% (warn), red > 100% (over) via data-load-status. */
+.panel-viz__load-badge {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  padding: 0 var(--space-1);
+  min-height: 14px;
+  line-height: 14px;
+  font-size: 9px;
+  font-weight: var(--text-weight-semibold);
+  background: var(--color-bg-hover);
+  color: var(--color-fg-muted);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-pill);
+  pointer-events: none;
+}
+
+.panel-viz__load-badge[data-load-status='warn'] {
+  background: var(--color-warning-subtle);
+  color: var(--color-warning);
+  border-color: var(--color-warning-border);
+}
+
+.panel-viz__load-badge[data-load-status='over'] {
+  background: var(--color-danger-subtle);
+  color: var(--color-danger);
+  border-color: var(--color-danger-border);
+}
+
+/* 2026-05 — load (watts) field in the component form: the "Use typical"
+   one-tap default offer. */
+.component-form__load {
+  display: flex;
+  flex-direction: column;
+}
+
+.component-form__load-typical {
+  align-self: flex-start;
+  margin-top: var(--space-1);
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-medium);
+  cursor: pointer;
+}
+
+.component-form__load-typical:hover {
+  text-decoration: underline;
 }
 
 /* G39 cycle-56 — subpanel feeder badge rendered inside a slot cell when
@@ -5064,6 +5160,47 @@ h2 {
   white-space: nowrap;
 }
 
+/* 2026-05 — "Switches that lose control" section. Complements the
+ * loses-power list: switches on the off breaker can no longer toggle the
+ * lights/outlets they control (those components keep their own power). */
+.impact-modal__switches {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.impact-modal__switches-note {
+  margin: 0;
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-muted);
+}
+
+.impact-modal__switch-loss {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.impact-modal__switch-controlled {
+  list-style: none;
+  margin: 0;
+  padding-left: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.impact-modal__switch-controlled li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-muted);
+}
+
 /* G35 Part 1 (cycle-58) — Impact button on BreakerRow.
  *
  * Mitigates Devil OBJ3 (BreakerRow row-wrap pressure at narrow widths):
@@ -5888,4 +6025,131 @@ h2 {
 .service-log-modal__form-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+/* ── Photos / attachments (components & breakers — 2026-05) ──────────────── */
+.photo-strip {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Embedded in PhotosModal — the modal supplies its own header rule, so drop
+   the strip's own divider/top-spacing (no stray "middle bar"). The redundant
+   "Photos" label is hidden, leaving just the Add button (docked right). */
+.photo-strip--embedded {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.photo-strip--embedded .photo-strip__head {
+  justify-content: flex-end;
+}
+
+.photo-strip__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.photo-strip__label {
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--text-tracking-tight);
+}
+
+/* The native file input is driven by the Add-photo button. */
+.photo-strip__input {
+  display: none;
+}
+
+.photo-strip__empty,
+.photo-strip__loading {
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-muted);
+  margin: 0;
+}
+
+.photo-strip__grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.photo-strip__item {
+  position: relative;
+  width: 104px;
+  height: 104px;
+}
+
+.photo-strip__thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--color-bg-surface-raised);
+}
+
+.photo-strip__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.photo-strip__thumb:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/* Corner delete affordance — keeps the 44px hit target (cycle-70 rule) but
+   sits over the thumbnail with a surface backdrop so it reads over any photo. */
+.photo-strip__delete {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  background: var(--color-bg-overlay);
+  border-radius: var(--radius-md);
+}
+
+/* Tap-to-zoom lightbox — bespoke fixed overlay (an image viewer, not a form
+   dialog). ESC + overlay click + the close button all dismiss it. */
+.photo-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: var(--color-bg-overlay);
+  backdrop-filter: blur(4px);
+}
+
+.photo-lightbox__img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.photo-lightbox__close {
+  position: fixed;
+  top: var(--space-4);
+  right: var(--space-4);
+  background: var(--color-bg-surface-raised);
 }

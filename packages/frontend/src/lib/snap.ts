@@ -6,13 +6,14 @@ import { COORD_MIN, COORD_MAX } from '@he/shared';
  * Coords live in the integer coordinate space (matches components.posX/posY).
  * The space is generously bounded (COORD_MIN..COORD_MAX in @he/shared) so the
  * plan feels effectively unbounded — the fixed 0-10000 viewBox is just the
- * window the viewport pans across. Default step is 250 — pinned in CLAUDE.md
- * "Wall editor (G12 walls)". The step is a constant; do NOT make it
- * user-configurable globally. Future per-floor configurability would add a
- * `grid_step` column to floors.
+ * window the viewport pans across. Default step is 50 viewbox units (was 250 —
+ * lowered 2026-05 for finer corner/endpoint/vertex placement; the 250 grid was
+ * too coarse). Pinned in CLAUDE.md "Wall editor (G12 walls)". The step is a
+ * constant; do NOT make it user-configurable globally. Future per-floor
+ * configurability would add a `grid_step` column to floors.
  */
 
-export const SNAP_STEP = 250;
+export const SNAP_STEP = 50;
 
 /** Snap a single coord to the nearest grid line, clamped to the coordinate
  *  space bounds (COORD_MIN..COORD_MAX). */

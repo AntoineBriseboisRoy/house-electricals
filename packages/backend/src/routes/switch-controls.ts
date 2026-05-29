@@ -39,29 +39,38 @@ export const buildSwitchControlRoutes = (
   // has the component data loaded for the floor and only needs the
   // (switchId, gangIndex, controlledId) triples to build its memos.
   router.get('/switch-controls', async (c) => {
+    // Scope by floor (G38 cycle-64) OR by building (2026-05 — used by the
+    // Impact view's "switches that lose control" section). Exactly one is
+    // required. The scope column is a fixed whitelist, never user text, so
+    // interpolating it into the SQL is injection-safe.
     const floorId = c.req.query('floorId');
-    if (floorId === undefined || floorId.length === 0) {
+    const buildingId = c.req.query('buildingId');
+    const hasFloor = floorId !== undefined && floorId.length > 0;
+    const hasBuilding = buildingId !== undefined && buildingId.length > 0;
+    if (!hasFloor && !hasBuilding) {
       const err: ApiError = {
-        error: { message: 'floorId query parameter is required.' },
+        error: { message: 'floorId or buildingId query parameter is required.' },
       };
       return c.json(err, 400);
     }
+    const scopeCol = hasFloor ? 'floor_id' : 'building_id';
+    const scopeVal = hasFloor ? (floorId as string) : (buildingId as string);
     type Row = {
       switch_id: string;
       gang_index: number;
       controlled_id: string;
     };
     // A control row is included when EITHER the switch OR the controlled
-    // component lives on the floor. Two JOINs on components → either side
+    // component matches the scope. Two JOINs on components → either side
     // matches → use OR.
     const rows = await db.query<Row>(
       `SELECT sc.switch_id, sc.gang_index, sc.controlled_id
          FROM switch_controls sc
          LEFT JOIN components sw  ON sw.id  = sc.switch_id
          LEFT JOIN components ctl ON ctl.id = sc.controlled_id
-         WHERE sw.floor_id = $1 OR ctl.floor_id = $1
+         WHERE sw.${scopeCol} = $1 OR ctl.${scopeCol} = $1
          ORDER BY sc.switch_id ASC, sc.gang_index ASC, sc.controlled_id ASC`,
-      [floorId]
+      [scopeVal]
     );
     const data: SwitchControl[] = rows.map((r) => ({
       switchId: r.switch_id,

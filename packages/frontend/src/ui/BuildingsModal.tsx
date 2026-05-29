@@ -1,4 +1,4 @@
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Download, Pencil, Plus, Trash2 } from 'lucide-react';
 import type { Building } from '@he/shared';
 import { Modal } from './Modal.js';
 import { Button } from './Button.js';
@@ -100,6 +100,43 @@ export const BuildingsModal = ({
           );
         })}
       </ul>
+
+      {/* 2026-05 — export the CURRENT building's data. Plain <a download>
+          links: same-origin GETs that carry the auth cookie; the backend
+          replies with Content-Disposition: attachment. JSON = full tree;
+          CSV = the printable circuit directory (breaker → components). */}
+      {currentBuildingId !== null &&
+        (() => {
+          const current = buildings.find((b) => b.id === currentBuildingId);
+          if (current === undefined) return null;
+          const base = `/api/v1/buildings/${encodeURIComponent(current.id)}/export`;
+          return (
+            <div className="buildings-export" data-testid="buildings-export">
+              <span className="buildings-export__label">
+                <Download size={15} strokeWidth={2.25} aria-hidden="true" />
+                Export “{current.name}”
+              </span>
+              <div className="buildings-export__links">
+                <a
+                  className="btn btn--secondary btn--sm"
+                  href={`${base}.json`}
+                  download
+                  data-testid="buildings-export-json"
+                >
+                  JSON (full backup)
+                </a>
+                <a
+                  className="btn btn--secondary btn--sm"
+                  href={`${base}.csv`}
+                  download
+                  data-testid="buildings-export-csv"
+                >
+                  CSV (circuit directory)
+                </a>
+              </div>
+            </div>
+          );
+        })()}
     </Modal>
   );
 };

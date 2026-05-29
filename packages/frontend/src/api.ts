@@ -1,5 +1,7 @@
 import type {
   ApiEnvelope,
+  Attachment,
+  AttachmentParentType,
   Breaker,
   BreakerInput,
   BreakerTest,
@@ -409,6 +411,50 @@ export const deleteFloorPlan = async (floorId: string): Promise<Floor> => {
 export const floorPlanUrl = (filename: string): string =>
   `/files/floor-plans/${encodeURIComponent(filename)}`;
 
+// ── Photos / attachments (components & breakers — 2026-05) ────────────────
+
+const photosPath = (
+  parentType: AttachmentParentType,
+  parentId: string
+): string =>
+  `/api/v1/${parentType === 'component' ? 'components' : 'breakers'}/${encodeURIComponent(
+    parentId
+  )}/photos`;
+
+export const listPhotos = async (
+  parentType: AttachmentParentType,
+  parentId: string
+): Promise<Attachment[]> => {
+  const res = await fetch(photosPath(parentType, parentId));
+  return unwrap<Attachment[]>(res);
+};
+
+export const uploadPhoto = async (
+  parentType: AttachmentParentType,
+  parentId: string,
+  file: File
+): Promise<Attachment> => {
+  const body = new FormData();
+  body.append('file', file);
+  const res = await fetch(photosPath(parentType, parentId), {
+    method: 'POST',
+    body,
+  });
+  return unwrap<Attachment>(res);
+};
+
+export const deletePhoto = async (id: string): Promise<void> => {
+  const res = await fetch(`/api/v1/photos/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok && res.status !== 204) {
+    throw new ApiHttpError(res.status, await res.text().catch(() => ''));
+  }
+};
+
+/** Served URL for a photo — photos share the floor-plan static route. */
+export const photoUrl = (filename: string): string => floorPlanUrl(filename);
+
 export const listBreakers = async (panelId: string): Promise<Breaker[]> => {
   const res = await fetch(`/api/v1/panels/${encodeURIComponent(panelId)}/breakers`);
   return unwrap<Breaker[]>(res);
@@ -660,6 +706,22 @@ export const listSwitchControlsByFloor = async (
 ): Promise<SwitchControl[]> => {
   const res = await fetch(
     `/api/v1/switch-controls?floorId=${encodeURIComponent(floorId)}`
+  );
+  return unwrap<SwitchControl[]>(res);
+};
+
+/**
+ * 2026-05 — flat building-wide list of switch_controls (any link where either
+ * end is in the building). Defaults to the active building. Powers the Impact
+ * view's "switches that lose control" section. Returns [] if no building.
+ */
+export const listSwitchControlsByBuilding = async (
+  buildingId?: string
+): Promise<SwitchControl[]> => {
+  const bid = buildingId ?? activeBuildingId;
+  if (bid === null || bid === undefined || bid.length === 0) return [];
+  const res = await fetch(
+    `/api/v1/switch-controls?buildingId=${encodeURIComponent(bid)}`
   );
   return unwrap<SwitchControl[]>(res);
 };

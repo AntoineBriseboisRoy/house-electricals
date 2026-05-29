@@ -310,6 +310,12 @@ export type Component = {
    *  enum as Breaker.protection — a circuit's protection can live on
    *  EITHER end (breaker or receptacle). */
   protection: ProtectionKind | null;
+  /** 2026-05 — estimated continuous load in WATTS, for per-circuit load
+   *  tracking + overload warnings. `null` = unknown (the user hasn't
+   *  estimated it). Per-type typical defaults are OFFERED in the form but
+   *  the value is always user-overridable. Switches/junction boxes draw no
+   *  load themselves (the load is the thing they control). */
+  loadWatts: number | null;
   createdAt: number;
 };
 
@@ -330,6 +336,8 @@ export type ComponentInput = {
   critical?: boolean;
   /** G37 cycle-68 — see Component.protection. Default null. */
   protection?: ProtectionKind | null;
+  /** 2026-05 — see Component.loadWatts. Default null (unknown). */
+  loadWatts?: number | null;
 };
 
 /** G19 — link from a switch's gang to a component it controls (light /
@@ -417,6 +425,10 @@ export const componentInputSchema = z.object({
   /** G37 cycle-68 — GFCI/AFCI/dual protection. Optional on input; the repo
    *  defaults to null when absent. PATCH accepts a ProtectionKind or null. */
   protection: protectionKindSchema.nullable().optional(),
+  /** 2026-05 — estimated continuous load in watts. Optional; null = unknown.
+   *  Capped at 100000 W (defensive — a residential circuit tops out far
+   *  below this; the cap just rejects obviously-bad input). */
+  loadWatts: z.number().int().min(0).max(100000).nullable().optional(),
 });
 
 export const switchControlInputSchema = z.object({
@@ -447,6 +459,7 @@ export const componentSchema = z.object({
   floorId: z.string().nullable(),
   gangs: z.number().int().min(1).max(8),
   protection: protectionKindSchema.nullable(),
+  loadWatts: z.number().int().min(0).max(100000).nullable(),
   createdAt: z.number().int().nonnegative(),
 });
 
@@ -963,6 +976,48 @@ export type ServiceEntryInputParsed = z.infer<typeof serviceEntryInputSchema>;
 export type ServiceEntryListQueryParsed = z.infer<
   typeof serviceEntryListQuerySchema
 >;
+
+// ── Attachments (photos on components & breakers — 2026-05) ─────────────────
+
+/** Polymorphic parent kinds for an uploaded photo. Closed app-level enum
+ *  (DB CHECK), mirroring service_entries' parent_type. */
+export type AttachmentParentType = 'component' | 'breaker';
+
+/** An uploaded image attached to a component or breaker. `filename` is the
+ *  on-disk name under FLOOR_PLAN_DIR (served via /files/floor-plans/<filename>);
+ *  the DB stores the filename only, NOT a URL — same contract as floor plans,
+ *  so the deployment topology stays out of the database. */
+export type Attachment = {
+  id: string;
+  parentType: AttachmentParentType;
+  parentId: string;
+  filename: string;
+  createdAt: number;
+};
+
+export interface AttachmentRepository {
+  listByParent(
+    parentType: AttachmentParentType,
+    parentId: string
+  ): Promise<Attachment[]>;
+  create(input: {
+    parentType: AttachmentParentType;
+    parentId: string;
+    filename: string;
+  }): Promise<Attachment>;
+  get(id: string): Promise<Attachment | null>;
+  delete(id: string): Promise<boolean>;
+}
+
+export const attachmentParentTypeSchema = z.enum(['component', 'breaker']);
+
+export const attachmentSchema = z.object({
+  id: z.string(),
+  parentType: attachmentParentTypeSchema,
+  parentId: z.string(),
+  filename: z.string(),
+  createdAt: z.number().int().nonnegative(),
+});
 
 // ── App user (single-user login gate — sign-up flow) ────────────────────────
 

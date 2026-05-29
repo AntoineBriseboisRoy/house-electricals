@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   AlertTriangle,
+  Camera,
   ClipboardList,
   Lightbulb,
   Map as MapIcon,
@@ -41,6 +42,7 @@ import {
   componentTypeLabel,
 } from '../components/ComponentTypeIcon.js';
 import { ComponentForm } from '../components/ComponentForm.js';
+import { PhotosModal } from '../components/PhotosModal.js';
 import { ProtectionBadge } from '../components/ProtectionBadge.js';
 import {
   Button,
@@ -194,6 +196,8 @@ export const ComponentsScreen = (): JSX.Element => {
   const [serviceLogComponentId, setServiceLogComponentId] = useState<string | null>(
     null
   );
+  /** 2026-05 — when non-null, render the PhotosModal for the matching component. */
+  const [photosComponentId, setPhotosComponentId] = useState<string | null>(null);
   const [, setLocation] = useLocation();
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // G42(c) cycle-47 — one-tap delete with a 30s undo toast replaces the
@@ -254,6 +258,8 @@ export const ComponentsScreen = (): JSX.Element => {
       critical: false,
       // G37 cycle-68 — default to null (no protection) on create.
       protection: null,
+      // 2026-05 — load (watts) unknown by default; the form offers a typical.
+      loadWatts: null,
     },
   });
 
@@ -1117,6 +1123,14 @@ export const ComponentsScreen = (): JSX.Element => {
                         </Tooltip>
                       )}
                     <div className="component-row__actions">
+                      <IconButton
+                        icon={<Camera size={16} strokeWidth={2.25} />}
+                        variant="default"
+                        onClick={() => setPhotosComponentId(c.id)}
+                        aria-label={`Photos for ${c.name}`}
+                        data-testid="component-row-photos"
+                        data-target-component-id={c.id}
+                      />
                       <Button
                         variant="secondary"
                         size="sm"
@@ -1172,6 +1186,17 @@ export const ComponentsScreen = (): JSX.Element => {
           onClose={() => setServiceLogComponentId(null)}
         />
       )}
+      {photosComponentId !== null && (
+        <PhotosModal
+          open
+          parentType="component"
+          parentId={photosComponentId}
+          parentLabel={
+            components.find((c) => c.id === photosComponentId)?.name
+          }
+          onClose={() => setPhotosComponentId(null)}
+        />
+      )}
     </>
   );
 };
@@ -1214,6 +1239,8 @@ const EditingRow = ({
       critical: component.critical,
       // G37 cycle-68 — seed protection so the edit form shows current value.
       protection: component.protection,
+      // 2026-05 — seed load (watts) so the edit form shows the current value.
+      loadWatts: component.loadWatts,
     },
   });
 

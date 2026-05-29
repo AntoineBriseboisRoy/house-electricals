@@ -1,6 +1,6 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { AlertCircle, ClipboardList, Trash2, Zap } from 'lucide-react';
+import { AlertCircle, Camera, ClipboardList, Trash2, Zap } from 'lucide-react';
 import {
   breakerInputSchema,
   type Breaker,
@@ -11,6 +11,7 @@ import {
 import { BreakerForm } from './BreakerForm.js';
 import { Button, IconButton } from '../ui/index.js';
 import { formatRelative, isStaleOlderThanOneYear } from '../lib/relativeTime.js';
+import { formatWatts, type BreakerLoad } from '../lib/load.js';
 
 type Props = {
   breaker: Breaker;
@@ -35,6 +36,10 @@ type Props = {
    *  screen owns modal state + the precomputed item list; the row only
    *  fires the request. */
   onShowImpact?: () => void;
+  /** 2026-05 — per-circuit load summary (sum of wired components' watts vs
+   *  continuous capacity). Renders a "Load X W / Y W (Z%)" line, colored
+   *  amber > 80% and red > 100%. Undefined/null or zero-watts → hidden. */
+  load?: BreakerLoad | null;
   /** G36 cycle-61 — most-recent BreakerTest for this breaker, or null if
    *  no test was ever logged. The row renders "Last verified: X ago"
    *  below the slot label, plus a warn dot when verification is stale
@@ -48,6 +53,9 @@ type Props = {
   /** G40 Part 1 cycle-66 — open the ServiceLogModal for this breaker. The
    *  parent owns modal state + the entries fetch. */
   onShowServiceLog?: () => void;
+  /** 2026-05 — open the PhotosModal for this breaker (quick view/add without
+   *  entering the edit form). Parent owns the modal state. */
+  onShowPhotos?: () => void;
 };
 
 const formatPoles = (poles: Breaker['poles']): string =>
@@ -66,9 +74,11 @@ export const BreakerRow = ({
   currentSubpanelId,
   onChangeFeedsSubpanel,
   onShowImpact,
+  load,
   lastTest,
   serviceLogCount,
   onShowServiceLog,
+  onShowPhotos,
 }: Props): JSX.Element => {
   const form = useForm<BreakerInput>({
     resolver: zodResolver(breakerInputSchema),
@@ -209,6 +219,20 @@ export const BreakerRow = ({
           {breaker.amperage}A · {formatPoles(breaker.poles)}
         </span>
         <span className="breaker-row__label">{breaker.label}</span>
+        {load != null && load.watts > 0 && (
+          <span
+            className="breaker-row__load"
+            data-testid="breaker-row-load"
+            data-breaker-id={breaker.id}
+            data-load-status={load.status}
+            title={`Estimated load ${formatWatts(load.watts)} of ${formatWatts(
+              load.capacity
+            )} continuous capacity (${Math.round(load.pct * 100)}%)`}
+          >
+            Load {formatWatts(load.watts)} / {formatWatts(load.capacity)} (
+            {Math.round(load.pct * 100)}%)
+          </span>
+        )}
       </div>
       <div className="breaker-row__actions">
         {onShowImpact !== undefined && (
@@ -224,6 +248,16 @@ export const BreakerRow = ({
           >
             Impact
           </Button>
+        )}
+        {onShowPhotos !== undefined && (
+          <IconButton
+            icon={<Camera size={16} strokeWidth={2.25} />}
+            variant="default"
+            onClick={onShowPhotos}
+            aria-label={`Photos for breaker ${breaker.slot}`}
+            data-testid="breaker-row-photos"
+            data-breaker-id={breaker.id}
+          />
         )}
         <Button
           variant="secondary"

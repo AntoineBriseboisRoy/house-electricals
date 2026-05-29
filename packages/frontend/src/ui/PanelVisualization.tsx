@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { useLocation } from 'wouter';
 import type { Breaker, Panel, ProtectionKind, TandemHalf } from '@he/shared';
+import type { BreakerLoad } from '../lib/load.js';
 
 /**
  * Visual diagram of a breaker panel (G18).
@@ -49,6 +50,10 @@ export type PanelVisualizationProps = {
    *  hash pulse (which is for transient deep-link feedback). Independent of
    *  the cycle-22 G23 `#breaker-<id>` hash mechanism — they can coexist. */
   highlightedBreakerId?: string | null;
+  /** 2026-05 — per-breaker load summary, keyed by breaker id. When a slot's
+   *  breaker has known load (watts > 0), a compact "Z%" chip renders in the
+   *  slot, colored amber > 80% / red > 100%. */
+  loadByBreakerId?: ReadonlyMap<string, BreakerLoad>;
 };
 
 type SlotCell =
@@ -180,6 +185,27 @@ const ProtectionBadge = ({
   </span>
 );
 
+/** 2026-05 — compact per-slot load chip. Shows the load percentage of the
+ *  breaker's continuous capacity; colored amber > 80% / red > 100% via the
+ *  data-load-status attribute. Hidden when there's no known load (watts 0).
+ *  Static `<span>` — the slot itself is the click target. */
+const LoadChip = ({ load }: { load?: BreakerLoad }): JSX.Element | null => {
+  if (!load || load.watts <= 0) return null;
+  const pct = Math.round(load.pct * 100);
+  return (
+    <span
+      className="panel-viz__load-badge"
+      data-testid="load-badge"
+      data-load-status={load.status}
+      title={`Estimated load ${Math.round(load.watts).toLocaleString()} W of ${Math.round(
+        load.capacity
+      ).toLocaleString()} W continuous capacity (${pct}%)`}
+    >
+      {pct}%
+    </span>
+  );
+};
+
 /** G39 cycle-56 — tiny chip rendered inside a slot cell when its breaker
  *  feeds a subpanel. Tap → navigate to that subpanel's detail page. Uses
  *  `e.stopPropagation()` so the underlying slot button's onClick (which
@@ -227,6 +253,7 @@ export const PanelVisualization = ({
   onSlotClick,
   subpanelsByFeederBreakerId,
   highlightedBreakerId,
+  loadByBreakerId,
 }: PanelVisualizationProps): JSX.Element => {
   const cells = useMemo(() => buildSlots(panel, breakers), [panel, breakers]);
   const narrow = useNarrowViewport();
@@ -341,6 +368,7 @@ export const PanelVisualization = ({
                     {b.protection !== null && (
                       <ProtectionBadge kind={b.protection} />
                     )}
+                    <LoadChip load={loadByBreakerId?.get(b.id)} />
                     {subTandem && (
                       <SubpanelBadge subpanel={subTandem} navigate={setLocation} />
                     )}
@@ -385,6 +413,7 @@ export const PanelVisualization = ({
               {b.label}
             </span>
             {b.protection !== null && <ProtectionBadge kind={b.protection} />}
+            <LoadChip load={loadByBreakerId?.get(b.id)} />
             {sub && <SubpanelBadge subpanel={sub} navigate={setLocation} />}
           </button>
         );

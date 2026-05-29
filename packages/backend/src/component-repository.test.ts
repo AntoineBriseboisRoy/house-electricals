@@ -54,6 +54,33 @@ describe('PgComponentRepository', () => {
     assert.equal(await repo.get('nonexistent'), null);
   });
 
+  it('loadWatts: defaults null, persists on create, updatable, clearable', async () => {
+    // Default null when omitted.
+    const a = await repo.create({ type: 'outlet', name: 'No load' });
+    assert.equal(a.loadWatts, null);
+    assert.equal((await repo.get(a.id))?.loadWatts, null);
+
+    // Persists when provided.
+    const b = await repo.create({ type: 'appliance', name: 'Fridge', loadWatts: 700 });
+    assert.equal(b.loadWatts, 700);
+    assert.equal((await repo.get(b.id))?.loadWatts, 700);
+
+    // Updatable to a new value.
+    const up = await repo.update(b.id, { loadWatts: 150 });
+    assert.equal(up?.loadWatts, 150);
+    assert.equal((await repo.get(b.id))?.loadWatts, 150);
+
+    // Clearable back to null (unknown).
+    const cleared = await repo.update(b.id, { loadWatts: null });
+    assert.equal(cleared?.loadWatts, null);
+    assert.equal((await repo.get(b.id))?.loadWatts, null);
+
+    // A non-loadWatts patch leaves it intact.
+    const c = await repo.create({ type: 'light', name: 'Lamp', loadWatts: 60 });
+    const renamed = await repo.update(c.id, { name: 'Lamp 2' });
+    assert.equal(renamed?.loadWatts, 60);
+  });
+
   it('update applies partial patch and returns updated', async () => {
     const c = await repo.create({
       type: 'outlet',

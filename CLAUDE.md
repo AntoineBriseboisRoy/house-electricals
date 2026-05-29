@@ -55,6 +55,235 @@ unchanged; only the engine + access layer changed. The current contract:
    (used by the e2e harness for a clean `e2e` schema; `DB_RESET` is test-only
    and only ever drops the NAMED schema, never `public`).
 
+## Impact view — "switches that lose control" (2026-05)
+
+Completes the cycle-58 G35 ADR #1 deferral ("a future cycle MAY add a
+separate 'Switches that lose control' surface"). The ImpactModal already
+lists components that LOSE POWER when a breaker is flipped (direct +
+subpanel cascade via `computeImpact`). This adds a complementary section:
+switches on the flipped breaker (direct OR cascade-off) whose controlled
+lights/outlets KEEP power but can no longer be toggled from that switch.
+Pin these decisions:
+
+1. **Power-loss ≠ control-loss — two distinct lists, never merged.** A
+   switch losing power does NOT kill the light it controls (the light has
+   its own circuit). `lib/impact.ts` keeps `computeImpact` (loses power)
+   and adds `computeSwitchControlLoss(breakerId, allComponents, allPanels,
+   breakersByPanel, switchControls)` → `SwitchControlLoss[]`
+   (`{ switchComponent, controlled[] }`). A controlled component that ALSO
+   loses power is EXCLUDED from the control-loss list — it's already in the
+   power-loss list (no double-report). Both use the same cycle-57
+   `computeCascadeOff` for the off-set.
+
+2. **`ImpactModal` takes `switchLosses?: SwitchControlLoss[]` (default
+   `[]`).** New section after the power groups: heading "Switches that lose
+   control" + an explanatory note + per-switch list. DOM hooks (READ-ONLY
+   e2e contract): `data-testid="impact-modal-switch-losses"` (section),
+   `impact-modal-switch-loss` + `data-switch-id` (each switch),
+   `impact-modal-switch-controlled` + `data-component-id` (each controlled).
+   Subtitle copy adapts: power>0 → "N components lose power"; else
+   switches>0 → "No components lose power directly."; else "Nothing loses
+   power or control."
+
+3. **`GET /api/v1/switch-controls` now accepts `?buildingId=` too** (was
+   `?floorId=` only — G38 cycle-64). Exactly one of the two is required
+   (400 otherwise). The scope column is a fixed whitelist (`floor_id` |
+   `building_id`), never user text, so it's injection-safe to interpolate.
+   The Impact modal scopes by BUILDING (not floor) because a breaker's
+   switches can sit on any floor. Frontend helper:
+   `listSwitchControlsByBuilding(buildingId?)` in `api.ts` (defaults to the
+   active building; returns `[]` when none set). PanelDetailScreen loads it
+   in its refresh `Promise.all` and threads `switchLosses` into ImpactModal.
+
+4. **No new token NAMES** (cycle-11/17/20 rule). New `.impact-modal__switches*`
+   / `__switch-loss` / `__switch-controlled` BEM classes read existing
+   tokens only. Backend tests for the `?buildingId` query live in
+   `switch-controls.test.ts` (returns building-scoped controls + isolates
+   across buildings).
+
+## Building export — JSON + CSV circuit directory (2026-05)
+
+Export a building's full data. Two read-only, building-scoped GET endpoints
+(`routes/export.ts`, mounted PROTECTED under `/api/v1`):
+
+1. **`GET /api/v1/buildings/:id/export.json`** — the building's FULL tree as a
+   pretty-printed JSON download (`Content-Disposition: attachment`). Shape:
+   `{ format: 'house-electricals-building-export', version: 1, exportedAt,
+   building, floors, rooms, walls, panels, breakers, components,
+   switchControls, serviceEntries, breakerTests }`. `components` are the plain
+   `Component` rows (the resolved `breaker` summary is stripped — redundant
+   with `breakers`).
+
+2. **`GET /api/v1/buildings/:id/export.csv`** — a flat "circuit directory"
+   (the printable artifact): header `Panel,Slot,Amperage,Poles,Breaker
+   Label,Protection,Component,Type,Room,Load (W)`, one row per (breaker, wired
+   component); breakers with no components get one row with empty component
+   cells. Sorted by panel-creation-order → slotPosition → slot. CRLF line
+   endings (Excel-friendly); RFC-4180 quote-escaping. Tandem slots render
+   `${slot}${tandemHalf}`.
+
+Pins:
+- **Read-only reporting aggregation** — main entities go through their repos
+  (clean camelCase); `switch_controls` / `breaker_tests` / `service_entries`
+  (no per-building repo accessor) are read via `db` with a building-scoped
+  subquery. This is NOT a write-path repo bypass (same precedent as the flat
+  switch-controls route). `buildExportRoutes(deps)` takes `{ db, building/
+  panel/breaker/floor/room/wall/component repositories }`.
+- **404** when the building doesn't exist. Filename = a slug of the building
+  name (`<slug>-export.json` / `<slug>-circuits.csv`), falling back to the id.
+- **Frontend**: the BuildingsModal renders an **Export** block (testid
+  `buildings-export`) below the list for the CURRENT building — two plain
+  `<a download>` links (testids `buildings-export-json` /
+  `buildings-export-csv`) to the endpoints above. Same-origin GETs carry the
+  `he_auth` cookie automatically; no JS fetch needed. The CSV IS the
+  "printable circuit directory" (print from a spreadsheet) — distinct from
+  the per-panel visual `PrintableDiagramScreen` (cycle-27 G24).
+- Backend tests: `export.test.ts` (full-tree JSON, CSV directory shape,
+  strict building scoping, 404) — added to `backend/package.json`'s explicit
+  test list.
+
+## One-step component wiring (2026-05) — supersedes the cycle-39/85 cascade
+
+A component's **panel is DERIVED from its breaker** (`component.breakerId →
+breaker.panelId`) — there is NO `components.panel_id` column, and assigning a
+breaker is the ONLY thing that "assigns the panel". The cycle-39 G31 Wiring
+section used two cascading `<Select>`s (Panel → Breaker, with a
+disabled-until-panel gate + cycle-85 `floorPanelId` panel pre-select), which
+made wiring a 2-step chore. **Collapsed (2026-05) to a SINGLE breaker
+`<Select>` grouped by panel** (`optGroups`, native `<optgroup>`): picking a
+breaker in one step assigns the panel automatically. Pin:
+
+1. `ComponentForm` renders ONE `Select` (`data-testid="cf-breaker"`,
+   `optGroups` = panels → their breakers). The old `cf-panel` select +
+   `selectedPanelId`/`handlePanelChange`/`breakersForSelectedPanel` machinery
+   are gone. `currentBreakerId = watch('breakerId')` + `handleBreakerChange`
+   (setValue) remain.
+2. `floorPanelId` still earns its keep: when set (component on a floor linked
+   to a panel), that panel's group sorts FIRST in the picker (most-relevant
+   breakers reachable first) — instead of pre-selecting a panel step.
+3. e2e updated to the single-picker contract: `component-wiring.spec.ts`
+   (enabled-from-start, grouped, one-step save) + `floor-edit-wire-modal.spec.ts`
+   (no `cf-panel` default assertion). `cf-panel` no longer exists.
+
+## Photos on components & breakers (2026-05)
+
+Attach images to a component or a breaker. Reuses the floor-plan image
+pipeline end-to-end. Pin these decisions:
+
+1. **Generic polymorphic `attachments` table** — `id` (ULID), `parent_type
+   TEXT CHECK(parent_type IN ('component','breaker'))`, `parent_id`,
+   `filename`, `created_at` BIGINT. Index `idx_attachments_parent` on
+   `(parent_type, parent_id, created_at DESC)`. Mirrors `service_entries`'
+   polymorphic shape — NO FK (closed app-level enum; cascade is app-level).
+   `PgAttachmentRepository` (`listByParent`, `create`, `get`, `delete`) is
+   the only DB access; `AttachmentRepository` interface + `Attachment` type
+   live in `@he/shared`. Wired into `AppDeps.attachmentRepository`
+   (server.ts, index.ts, test-helpers.ts).
+
+2. **App-level cascade deletes ROWS in all 5 sites** (mirroring
+   service_entries): building delete, panel-cascade per-breaker loop,
+   breaker delete, `deleteByPanel`, component delete. **Files on disk are
+   NOT cleaned up on parent cascade** — orphaned image bytes are accepted
+   (harmless; ULID filenames never collide, never wrongly served). Only the
+   explicit `DELETE /photos/:id` route unlinks the file. (Repos are pure
+   `pg` — no filesystem in the repo layer / inside a transaction.)
+
+3. **Storage reuses FLOOR_PLAN_DIR + the `/files/floor-plans/` static
+   route.** Photo filenames are `photo-<ulid>-<sha8>.<ext>` (globally
+   unique — no collision with floor-plan files or across parents). The DB
+   stores the filename only, never a URL (same contract as floor plans —
+   keeps deployment topology out of the database). Same `sniffImage`
+   magic-byte check (PNG/JPEG/WebP, SVG rejected), same 10 MB cap.
+
+4. **Routes** (mounted PROTECTED in server.ts): `POST
+   /api/v1/{components,breakers}/:id/photos` (multipart, field `file`) →
+   201 Attachment; `GET` same paths → Attachment[]; `DELETE
+   /api/v1/photos/:id` → 204 (+ best-effort file unlink). The POST routes
+   validate the parent exists (404 otherwise). `routes/attachments.ts`
+   takes `(componentRepo, breakerRepo, attachmentRepo)`. Backend tests:
+   `attachments.test.ts` (added to `backend/package.json`'s explicit test
+   list — it does NOT glob).
+
+5. **Frontend `<PhotoStrip parentType parentId />`**
+   (`components/PhotoStrip.tsx`) is the canonical surface — a thumbnail
+   grid + an "Add photo" button (mobile camera via `<input type=file
+   accept=image/* capture="environment">`), a tap-to-zoom lightbox
+   (bespoke fixed overlay, ESC/overlay/close dismiss), and a per-thumb
+   delete (`useModal().confirm` + optimistic remove + rollback). It loads
+   /uploads/deletes via `api.ts` (`listPhotos` / `uploadPhoto` /
+   `deletePhoto` / `photoUrl`) keyed on (parentType, parentId). Upload is
+   an explicit user action (no auto). testids: `photo-strip`,
+   `photo-strip-add`, `photo-strip-input`, `photo-strip-grid`,
+   `photo-strip-item` (+ `data-photo-id`), `photo-strip-delete`,
+   `photo-lightbox`.
+
+   **UX surfacing (REVISED 2026-05) — quick view/add WITHOUT entering edit.**
+   PhotoStrip is NO LONGER embedded in ComponentForm/BreakerForm (the
+   `photosParentId` prop was removed). Instead:
+   - **`<PhotosModal>`** (`components/PhotosModal.tsx`, base Modal +
+     PhotoStrip, parent-owned open state like ServiceLogModal, testid
+     `photos-modal`) opens from a small **camera `IconButton`** on each
+     ComponentsScreen component row (testid `component-row-photos` +
+     `data-target-component-id`) and each BreakerRow (testid
+     `breaker-row-photos` + `data-breaker-id`, via an `onShowPhotos`
+     callback threaded BreakerWithComponents → BreakerRow; the screen owns
+     the `photosBreakerId` state).
+   - **FloorEditScreen selected-component drawer** renders `<PhotoStrip>`
+     **inline** so a pin's photos are visible + addable the moment it's
+     selected — no Edit modal needed (this was the user's specific pain).
+
+6. **No new token NAMES** (cycle-11/17/20 rule). New `.photo-strip*` /
+   `.photo-lightbox*` BEM classes read existing tokens only.
+
+## Per-circuit load tracking + overload warnings (2026-05)
+
+Estimate how loaded each breaker is and warn before overload. Pin these
+decisions:
+
+1. **`components.load_watts INTEGER NULL`** — estimated continuous draw in
+   watts; `null` = unknown. Added to the components CREATE TABLE (fresh DBs)
+   AND via an idempotent `ALTER TABLE components ADD COLUMN IF NOT EXISTS
+   load_watts INTEGER` (existing DBs). `CHECK (load_watts IS NULL OR
+   load_watts >= 0)`. Threaded through every component SQL touchpoint
+   (list/get SELECT, INSERT, UPDATE, `rowToComponent`) + the shared
+   `Component`/`ComponentInput` types + `componentInputSchema`
+   (`z.number().int().min(0).max(100000).nullable().optional()`). Switches &
+   junction boxes draw no load themselves (they route/control).
+
+2. **Capacity = amperage × volts × 0.8** (NEC continuous-load rule). Volts by
+   poles: single/tandem = 120, double = 240. Status thresholds are relative
+   to that already-derated capacity: `> 100%` → over (danger), `> 80%` →
+   warn, else ok. All of this is a PURE frontend helper —
+   `packages/frontend/src/lib/load.ts` (`breakerVolts`,
+   `breakerCapacityWatts`, `sumLoadWatts`, `loadStatus`, `computeBreakerLoad`,
+   `TYPICAL_LOAD_WATTS`, `formatWatts`). Unit-tested in `lib/load.test.ts`
+   (node:test, run via the backend's tsx — import sibling as `./load.js` per
+   NodeNext, NOT `./load.ts`, or the frontend `tsc` rejects the extension).
+   **No aggregate endpoint** — load is computed client-side from the
+   already-loaded breakers + components (PanelDetailScreen has both).
+
+3. **Display surfaces (both per the spec)**: (a) BreakerRow renders a
+   `Load X W / Y W (Z%)` line in `.breaker-row__meta`, hidden when watts = 0;
+   (b) PanelVisualization renders a compact `Z%` `LoadChip` in the
+   bottom-right of each slot (top-right is the protection badge), hidden when
+   watts = 0. Both color amber `> 80%` / red `> 100%` via a
+   `data-load-status` attribute (`ok|warn|over`). PanelDetailScreen builds a
+   `loadByBreakerId: Map<breakerId, BreakerLoad>` memo and threads it into
+   PanelVisualization (`loadByBreakerId` prop) + each BreakerWithComponents →
+   BreakerRow (`load` prop). DOM hooks: `breaker-row-load`, `load-badge`
+   (both carry `data-load-status`).
+
+4. **Form offers a per-type typical**: ComponentForm has a "Load (watts)"
+   `<Input type=number>` (testid `cf-load-watts`) registered with a
+   `setValueAs` that coerces empty → null. The typical for the chosen type
+   (`TYPICAL_LOAD_WATTS`) shows as the placeholder + a one-tap "Use typical
+   (N W)" button (testid `cf-load-typical`). Always user-overridable; blank =
+   unknown. The three ComponentInput form seeds (ComponentsScreen create +
+   edit, FloorEditScreen edit) seed `loadWatts`.
+
+5. **No new token NAMES** (cycle-11/17/20 rule). Reuses the cycle-59
+   `--color-warning*` amber family + `--color-danger*` for the over tier.
+
 ## Multi-building layer (2026-05) — READ before touching panels/floors/components
 
 A top-level **Building** entity now owns the whole tree. Every `panel`,
@@ -2635,7 +2864,7 @@ PATCH / name-only no-op / < 3-point rejection.
 The cycle-13 G12 work introduces an in-app vector wall editor. Pin these four decisions — future cycles (rooms in cycle-14, G14 placement on drawn plans, etc.) must respect them.
 
 1. **`walls.floor_id` is NOT NULL with `ON DELETE CASCADE`.** Walls can't exist detached from a floor — they ARE geometry on a specific floor. This is the opposite of `components.floor_id` which is nullable + `SET NULL` because components model real-world objects that exist before placement. Do NOT relax `walls.floor_id` to nullable.
-2. **Snap step is fixed at 1/40 of the 10000-unit normalized canvas (= 250 units).** Not user-configurable. `SNAP_STEP` is a constant in `packages/frontend/src/lib/snap.ts`. **Future configurability adds a `grid_step` column to `floors`** (per-floor) — NOT a global setting. Do not add a global preferences screen.
+2. **Snap step is fixed at 50 viewbox units** (lowered 2026-05 from the original 250 = 1/40 of the 10000-unit window — that grid was too coarse for granular corner/endpoint/vertex placement). Not user-configurable. `SNAP_STEP` is a constant in `packages/frontend/src/lib/snap.ts`. **Future configurability adds a `grid_step` column to `floors`** (per-floor) — NOT a global setting. Do not add a global preferences screen. (`VERTEX_SNAP_DIST` stays 350 — the converging-walls link radius is independent of the grid step.)
 3. **Vector-first floors render at 1:1 canvas aspect** when no image is uploaded (`.floor-plan--vector-only`). When an image is later attached, walls' normalized 0-10000 coords stay numerically identical and visually reproject to the image's natural aspect ratio. **Do not gate wall-drawing on image presence** — VISION explicitly preserves the vector-only path.
 4. **SVG `preserveAspectRatio="none"` is intentional.** The walls overlay tracks the underlay's exact display box. This means walls visually distort if the underlay's aspect changes between uploads — the same trade-off pins accept. Don't "fix" this by switching to `xMidYMid meet`.
 
@@ -2646,7 +2875,7 @@ Additional notes:
 - **Wall draw is a two-tap state machine** (not press-drag) — `useWallEditor` state: `idle → first-endpoint-set → on-second-tap commits + back to idle`. ESC cancels the pending first endpoint. Both endpoints pass through `snap()` before commit. Tap on an existing wall (in edit mode) selects it instead of drawing.
 - **Endpoint move = press-drag with PATCH only on pointerup.** Same rule as `useMapDrag` for pins (load-bearing — drag-during-move would flood the backend at 60Hz). The handle circle follows the snapped current point during drag for visual feedback.
 - **Wall delete is explicit confirm + DELETE.** Tap to select → "Delete wall" button → `window.confirm` → DELETE. No swipe-to-delete or right-click — this is mobile-first PWA.
-- **Pinch-zoom is deferred** to a future G12 cycle. The 1/40 snap step on a phone-sized canvas means grid cells render at ~9px, but the snap is forgiving (release-point snap, not tap-precision) — workable today, much better once pinch-zoom lands.
+- **Pinch-zoom is deferred** to a future G12 cycle. The snap (50 viewbox units as of 2026-05) is forgiving (release-point snap, not tap-precision) — workable today, much better once pinch-zoom lands.
 
 ## Multi-floor model (G13)
 

@@ -5,7 +5,7 @@ import { Button } from './Button.js';
 import { Modal } from './Modal.js';
 import { Tooltip } from './Tooltip.js';
 import { ComponentTypeIcon } from '../components/ComponentTypeIcon.js';
-import type { ImpactItem } from '../lib/impact.js';
+import type { ImpactItem, SwitchControlLoss } from '../lib/impact.js';
 
 export type ImpactModalProps = {
   open: boolean;
@@ -13,6 +13,10 @@ export type ImpactModalProps = {
   breakerLabel: string;
   /** Pre-computed impact items (output of computeImpact). */
   items: ReadonlyArray<ImpactItem>;
+  /** 2026-05 — switches on this breaker that lose the ability to toggle the
+   *  lights/outlets they control (those components stay powered). Output of
+   *  computeSwitchControlLoss. */
+  switchLosses?: ReadonlyArray<SwitchControlLoss>;
   /** Floor lookup for grouping items by floor name. */
   floorById: ReadonlyMap<string, Floor>;
   onClose: () => void;
@@ -34,6 +38,7 @@ export const ImpactModal = ({
   open,
   breakerLabel,
   items,
+  switchLosses = [],
   floorById,
   onClose,
 }: ImpactModalProps): JSX.Element | null => {
@@ -75,10 +80,13 @@ export const ImpactModal = ({
   }, [items, floorById]);
 
   const count = items.length;
+  const switchCount = switchLosses.length;
   const subtitle =
-    count === 0
-      ? 'Nothing loses power.'
-      : `${count} component${count === 1 ? '' : 's'} lose${count === 1 ? 's' : ''} power`;
+    count > 0
+      ? `${count} component${count === 1 ? '' : 's'} lose${count === 1 ? 's' : ''} power`
+      : switchCount > 0
+        ? 'No components lose power directly.'
+        : 'Nothing loses power or control.';
 
   return (
     <Modal
@@ -185,6 +193,52 @@ export const ImpactModal = ({
                 })}
             </section>
           ))}
+        </div>
+      )}
+      {switchLosses.length > 0 && (
+        <div
+          className="impact-modal__switches"
+          data-testid="impact-modal-switch-losses"
+        >
+          <h3 className="impact-modal__floor-name">Switches that lose control</h3>
+          <p className="impact-modal__switches-note">
+            These switches lose power, so you can't toggle from them — but the
+            lights / outlets they control stay powered from their own circuit.
+          </p>
+          <ul className="impact-modal__items">
+            {switchLosses.map((sl) => (
+              <li
+                key={sl.switchComponent.id}
+                className="impact-modal__switch-loss"
+                data-testid="impact-modal-switch-loss"
+                data-switch-id={sl.switchComponent.id}
+              >
+                <div className="impact-modal__item">
+                  <span className="impact-modal__item-icon" aria-hidden="true">
+                    <ComponentTypeIcon
+                      type={sl.switchComponent.type}
+                      size={18}
+                    />
+                  </span>
+                  <span className="impact-modal__item-name">
+                    {sl.switchComponent.name}
+                  </span>
+                </div>
+                <ul className="impact-modal__switch-controlled">
+                  {sl.controlled.map((c) => (
+                    <li
+                      key={c.id}
+                      data-testid="impact-modal-switch-controlled"
+                      data-component-id={c.id}
+                    >
+                      <ComponentTypeIcon type={c.type} size={14} />
+                      <span>{c.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </Modal>

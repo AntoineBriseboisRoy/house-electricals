@@ -1283,7 +1283,14 @@ export const PanelMapScreen = (): JSX.Element => {
                           } as CSSProperties
                         }
                         onPointerDown={(e) =>
-                          wallEditor.startEndpointDrag(sel.id, endpoint, e)
+                          wallEditor.startEndpointDrag(
+                            sel.id,
+                            endpoint,
+                            endpoint === 1
+                              ? { x: sel.x1, y: sel.y1 }
+                              : { x: sel.x2, y: sel.y2 },
+                            e
+                          )
                         }
                       />
                     ));

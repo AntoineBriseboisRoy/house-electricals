@@ -5,6 +5,7 @@ import type { Db } from './db.js';
 import type {
   ApiError,
   AppUserRepository,
+  AttachmentRepository,
   BreakerRepository,
   BreakerTestRepository,
   BuildingRepository,
@@ -24,6 +25,8 @@ import { buildFloorPlanRoutes } from './routes/floor-plans.js';
 import { buildFloorRoutes } from './routes/floors.js';
 import { buildRoomRoutes } from './routes/rooms.js';
 import { buildServiceEntryRoutes } from './routes/service-entries.js';
+import { buildAttachmentRoutes } from './routes/attachments.js';
+import { buildExportRoutes } from './routes/export.js';
 import { buildWallRoutes } from './routes/walls.js';
 import { buildSwitchControlRoutes } from './routes/switch-controls.js';
 import { devStaticRoutes } from './routes/dev-static.js';
@@ -48,6 +51,8 @@ export type AppDeps = {
   roomRepository: RoomRepository;
   /** G40 cycle-66 — dated service-log repo (service_entries). */
   serviceEntryRepository: ServiceEntryRepository;
+  /** 2026-05 — photos on components & breakers (attachments). */
+  attachmentRepository: AttachmentRepository;
   /** Postgres handle — switch_controls is a thin join table, easier to
    *  query directly than via a full repo class for G19 scope. */
   db: Db;
@@ -164,6 +169,27 @@ export const buildApp = (deps: AppDeps): Hono => {
   app.route(
     '/api/v1',
     buildSwitchControlRoutes(deps.db, deps.componentRepository)
+  );
+  app.route(
+    '/api/v1',
+    buildAttachmentRoutes(
+      deps.componentRepository,
+      deps.breakerRepository,
+      deps.attachmentRepository
+    )
+  );
+  app.route(
+    '/api/v1',
+    buildExportRoutes({
+      db: deps.db,
+      buildingRepository: deps.buildingRepository,
+      panelRepository: deps.panelRepository,
+      breakerRepository: deps.breakerRepository,
+      floorRepository: deps.floorRepository,
+      roomRepository: deps.roomRepository,
+      wallRepository: deps.wallRepository,
+      componentRepository: deps.componentRepository,
+    })
   );
 
   // ── UNGATED static serving (intentional) ─────────────────────────────

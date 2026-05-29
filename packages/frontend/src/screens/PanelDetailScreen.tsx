@@ -19,6 +19,7 @@ import {
   type Panel,
   type ResolvedComponent,
   type ServiceEntry,
+  type SwitchControl,
 } from '@he/shared';
 import { ComponentTypeIcon } from '../components/ComponentTypeIcon.js';
 import { ProtectionBadge } from '../components/ProtectionBadge.js';
@@ -36,11 +37,13 @@ import {
   listFloors,
   listPanels,
   listServiceEntries,
+  listSwitchControlsByBuilding,
   updateBreaker,
   updatePanel,
 } from '../api.js';
 import { BreakerForm } from '../components/BreakerForm.js';
 import { BreakerWithComponents } from '../components/BreakerWithComponents.js';
+import { PhotosModal } from '../components/PhotosModal.js';
 import {
   Button,
   Card,
@@ -60,7 +63,8 @@ import {
 } from '../ui/index.js';
 import { useModal } from '../hooks/useModal.js';
 import { useUndoableDelete } from '../hooks/useUndoableDelete.js';
-import { computeImpact } from '../lib/impact.js';
+import { computeImpact, computeSwitchControlLoss } from '../lib/impact.js';
+import { computeBreakerLoad, type BreakerLoad } from '../lib/load.js';
 
 type ViewMode = 'viz' | 'list';
 const VIEW_KEY = 'he.panel-view';
@@ -97,6 +101,10 @@ export const PanelDetailScreen = (): JSX.Element => {
   >(new Map());
   /** G35 Part 1 (cycle-58) — floors for the Impact modal's name lookup. */
   const [floors, setFloors] = useState<Floor[]>([]);
+  /** 2026-05 — every switch_control triple in the building. Threaded into
+   *  computeSwitchControlLoss for the Impact modal's "switches that lose
+   *  control" section. */
+  const [switchControls, setSwitchControls] = useState<SwitchControl[]>([]);
   /** G35 Part 1 (cycle-58) — when non-null, render the Impact modal for
    *  the matching breaker. */
   const [impactBreakerId, setImpactBreakerId] = useState<string | null>(null);
@@ -129,6 +137,8 @@ export const PanelDetailScreen = (): JSX.Element => {
   const [serviceLogBreakerId, setServiceLogBreakerId] = useState<string | null>(
     null
   );
+  /** 2026-05 — when non-null, render the PhotosModal for the matching breaker. */
+  const [photosBreakerId, setPhotosBreakerId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>(readView);
@@ -255,15 +265,20 @@ export const PanelDetailScreen = (): JSX.Element => {
       // every panel; we filter client-side to this panel's breakers.
       // Postgres at this scale (<10k components) handles a full table-scan
       // in <10ms — far cheaper than the N round-trips.
-      const [p, b, allComponents, panels] = await Promise.all([
+      const [p, b, allComponents, panels, scs] = await Promise.all([
         getPanel(panelId),
         listBreakers(panelId),
         listComponents(),
         listPanels(),
+        // 2026-05 — switch_controls for the active building, for the Impact
+        // modal's "switches that lose control" section. Building-scoped (not
+        // per-floor) because a breaker's switches can sit on any floor.
+        listSwitchControlsByBuilding(),
       ]);
       setPanel(p);
       setBreakers(b);
       setAllPanels(panels);
+      setSwitchControls(scs);
       // G35 Part 1 (cycle-58) — cache the full component set so the
       // Impact modal can resolve direct + cascade hits without another
       // round-trip on click. listComponents was already on this critical
@@ -562,6 +577,18 @@ export const PanelDetailScreen = (): JSX.Element => {
   }));
   const totalWiredComponents = panelComponents.length;
 
+  /** 2026-05 — per-breaker load (sum of wired components' watts) vs the
+   *  breaker's continuous-load capacity. Drives the load chip on the panel
+   *  viz + the load line on each breaker row. Keyed by breaker id. */
+  const loadByBreakerId = useMemo(() => {
+    const map = new Map<string, BreakerLoad>();
+    for (const b of breakers) {
+      const onBreaker = panelComponents.filter((c) => c.breakerId === b.id);
+      map.set(b.id, computeBreakerLoad(b, onBreaker));
+    }
+    return map;
+  }, [breakers, panelComponents]);
+
   /** G39 cycle-56 — Map from this panel's feeder breaker id → the subpanel
    *  it feeds. Used by PanelVisualization to render a "→ Subpanel" chip on
    *  the feeder slot. Built from allPanels filtered by parentBreakerId
@@ -751,6 +778,21 @@ export const PanelDetailScreen = (): JSX.Element => {
       breakersByPanel
     );
   }, [impactBreakerId, allComponents, allPanels, breakersByPanel]);
+
+  /** 2026-05 — switches that lose power (direct or cascade-off) and so can
+   *  no longer toggle the lights/outlets they control. Those controlled
+   *  components KEEP power from their own circuit, so they're NOT in
+   *  impactItems — this is the complementary "loses control" view. */
+  const switchLosses = useMemo(() => {
+    if (impactBreakerId === null) return [];
+    return computeSwitchControlLoss(
+      impactBreakerId,
+      allComponents,
+      allPanels,
+      breakersByPanel,
+      switchControls
+    );
+  }, [impactBreakerId, allComponents, allPanels, breakersByPanel, switchControls]);
 
   /** G35 Part 1 (cycle-58) — floor lookup by id for the Impact modal. */
   const floorById = useMemo(() => {
@@ -1016,6 +1058,7 @@ export const PanelDetailScreen = (): JSX.Element => {
             breakers={breakers}
             onSlotClick={handleSlotClick}
             subpanelsByFeederBreakerId={subpanelsByFeederBreakerId}
+            loadByBreakerId={loadByBreakerId}
           />
         ) : (
           <ul className="breaker-list">
@@ -1037,6 +1080,7 @@ export const PanelDetailScreen = (): JSX.Element => {
                   handleChangeFeedsSubpanel(b.id, subId)
                 }
                 onShowImpact={() => setImpactBreakerId(b.id)}
+                load={loadByBreakerId.get(b.id) ?? null}
                 lastTest={
                   lastTestByBreakerId.has(b.id)
                     ? lastTestByBreakerId.get(b.id) ?? null
@@ -1048,6 +1092,7 @@ export const PanelDetailScreen = (): JSX.Element => {
                     : undefined
                 }
                 onShowServiceLog={() => setServiceLogBreakerId(b.id)}
+                onShowPhotos={() => setPhotosBreakerId(b.id)}
               />
             ))}
           </ul>
@@ -1176,6 +1221,7 @@ export const PanelDetailScreen = (): JSX.Element => {
           open
           breakerLabel={impactBreakerLabel}
           items={impactItems}
+          switchLosses={switchLosses}
           floorById={floorById}
           onClose={() => setImpactBreakerId(null)}
         />
@@ -1189,6 +1235,21 @@ export const PanelDetailScreen = (): JSX.Element => {
           onAddEntry={handleAddServiceEntry}
           onDeleteEntry={handleDeleteServiceEntry}
           onClose={() => setServiceLogBreakerId(null)}
+        />
+      )}
+      {photosBreakerId !== null && (
+        <PhotosModal
+          open
+          parentType="breaker"
+          parentId={photosBreakerId}
+          parentLabel={(() => {
+            const b = breakers.find((x) => x.id === photosBreakerId);
+            if (!b) return undefined;
+            const half =
+              b.poles === 'tandem' && b.tandemHalf !== null ? b.tandemHalf : '';
+            return `Slot ${b.slot}${half}`;
+          })()}
+          onClose={() => setPhotosBreakerId(null)}
         />
       )}
     </>

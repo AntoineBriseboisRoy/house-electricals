@@ -101,13 +101,8 @@ test.describe('cycle-86 wire components from FloorEditScreen via Modal', () => {
     const modal = page.getByTestId('floor-edit-component-modal');
     await expect(modal).toBeVisible();
 
-    // 7) Panel select inside the Modal is defaulted to the floor's
-    //    linked panel (cycle-85 floorPanelDefault). The component itself
-    //    has breakerId=null so the default is in effect.
-    const panelSelect = modal.getByTestId('cf-panel');
-    await expect(panelSelect).toHaveValue(seed.panelId);
-
-    // 8) Pick the first breaker on that panel.
+    // 7) 2026-05 — single grouped breaker picker (panel auto-derived). The
+    //    floor's linked panel group sorts first; pick the breaker in one step.
     const breakerSelect = modal.getByTestId('cf-breaker');
     await expect(breakerSelect).toBeEnabled();
     await breakerSelect.selectOption(seed.breakerIds[0]);

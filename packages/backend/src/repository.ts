@@ -5,6 +5,9 @@ import {
   rectToPolygon,
   type AppUser,
   type AppUserRepository,
+  type Attachment,
+  type AttachmentParentType,
+  type AttachmentRepository,
   type Breaker,
   type BreakerInput,
   type BreakerRepository,
@@ -92,6 +95,8 @@ type ComponentRow = {
   critical: 0 | 1;
   /** G37 cycle-68: 'gfci' | 'afci' | 'dual' | null. */
   protection: ProtectionKind | null;
+  /** 2026-05 — estimated continuous load in watts; null = unknown. */
+  load_watts: number | null;
   created_at: number;
 };
 
@@ -228,12 +233,16 @@ export const initSchema = async (db: Db): Promise<void> => {
       critical SMALLINT NOT NULL DEFAULT 0 CHECK (critical IN (0,1)),
       protection TEXT
         CHECK (protection IN ('gfci','afci','dual') OR protection IS NULL),
+      load_watts INTEGER CHECK (load_watts IS NULL OR load_watts >= 0),
       created_at BIGINT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_components_breaker_id ON components(breaker_id);
     CREATE INDEX IF NOT EXISTS idx_components_floor_id ON components(floor_id);
     CREATE INDEX IF NOT EXISTS idx_components_room ON components(room);
     CREATE INDEX IF NOT EXISTS idx_components_type ON components(type);
+    -- 2026-05 — per-circuit load tracking. Idempotent ADD for DBs created
+    -- before the column existed (the CREATE TABLE above covers fresh DBs).
+    ALTER TABLE components ADD COLUMN IF NOT EXISTS load_watts INTEGER;
 
     -- Coordinate bounds (BETWEEN -100000 AND 100000) MUST stay in sync with
     -- @he/shared COORD_MIN/COORD_MAX (and frontend lib/snap.ts). Constraints
@@ -357,6 +366,20 @@ export const initSchema = async (db: Db): Promise<void> => {
     );
     CREATE INDEX IF NOT EXISTS idx_service_entries_parent
       ON service_entries(parent_type, parent_id, occurred_at DESC);
+
+    -- Attachments (photos on components & breakers — 2026-05). Polymorphic
+    -- parent (no FK — SQLite-era precedent kept for Postgres; cascade is
+    -- app-level, mirroring service_entries). The filename column is the
+    -- on-disk name under FLOOR_PLAN_DIR; the file lives on the bind-mount.
+    CREATE TABLE IF NOT EXISTS attachments (
+      id TEXT PRIMARY KEY,
+      parent_type TEXT NOT NULL CHECK (parent_type IN ('component','breaker')),
+      parent_id TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_attachments_parent
+      ON attachments(parent_type, parent_id, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS app_users (
       id TEXT PRIMARY KEY,
@@ -496,6 +519,19 @@ export class PgBuildingRepository implements BuildingRepository {
       // Polymorphic service_entries (no FK) for this building's breakers + components.
       await tx.execute(
         `DELETE FROM service_entries WHERE
+           (parent_type = 'breaker' AND parent_id IN (
+              SELECT b.id FROM breakers b JOIN panels p ON b.panel_id = p.id
+              WHERE p.building_id = $1))
+           OR (parent_type = 'component' AND parent_id IN (
+              SELECT id FROM components WHERE building_id = $1))`,
+        [id]
+      );
+      // Polymorphic attachments (no FK) — same shape as service_entries.
+      // 2026-05: only the ROWS cascade here; orphaned image files on disk
+      // are accepted on bulk parent-delete (harmless unreferenced bytes —
+      // ULID filenames never collide). Explicit photo DELETE unlinks the file.
+      await tx.execute(
+        `DELETE FROM attachments WHERE
            (parent_type = 'breaker' AND parent_id IN (
               SELECT b.id FROM breakers b JOIN panels p ON b.panel_id = p.id
               WHERE p.building_id = $1))
@@ -684,6 +720,11 @@ export class PgPanelRepository implements PanelRepository {
           `DELETE FROM service_entries WHERE parent_type = 'breaker' AND parent_id = $1`,
           [breakerId]
         );
+        // 2026-05 — attachments (breaker-parent) cascade (rows only).
+        await tx.execute(
+          `DELETE FROM attachments WHERE parent_type = 'breaker' AND parent_id = $1`,
+          [breakerId]
+        );
         await tx.execute('DELETE FROM breakers WHERE id = $1', [breakerId]);
       }
       const n = await tx.execute('DELETE FROM panels WHERE id = $1', [id]);
@@ -824,6 +865,12 @@ export class PgBreakerRepository implements BreakerRepository {
         `DELETE FROM service_entries WHERE parent_type = 'breaker' AND parent_id = $1`,
         [id]
       );
+      // 2026-05 — attachments (breaker-parent) cascade (rows only; see note
+      // in the building cascade about orphaned files on disk).
+      await tx.execute(
+        `DELETE FROM attachments WHERE parent_type = 'breaker' AND parent_id = $1`,
+        [id]
+      );
       const n = await tx.execute('DELETE FROM breakers WHERE id = $1', [id]);
       return n > 0;
     });
@@ -847,6 +894,13 @@ export class PgBreakerRepository implements BreakerRepository {
       // G40 cycle-66 — service_entries (breaker-parent) cascade for bulk delete.
       await tx.execute(
         `DELETE FROM service_entries
+         WHERE parent_type = 'breaker'
+           AND parent_id IN (SELECT id FROM breakers WHERE panel_id = $1)`,
+        [panelId]
+      );
+      // 2026-05 — attachments (breaker-parent) cascade for bulk delete (rows).
+      await tx.execute(
+        `DELETE FROM attachments
          WHERE parent_type = 'breaker'
            AND parent_id IN (SELECT id FROM breakers WHERE panel_id = $1)`,
         [panelId]
@@ -900,7 +954,7 @@ export class PgComponentRepository implements ComponentRepository {
       );
     }
     const sql = `SELECT
-        c.id, c.type, c.name, c.room, c.notes, c.breaker_id, c.floor_id, c.pos_x, c.pos_y, c.gangs, c.critical, c.protection, c.created_at,
+        c.id, c.type, c.name, c.room, c.notes, c.breaker_id, c.floor_id, c.pos_x, c.pos_y, c.gangs, c.critical, c.protection, c.load_watts, c.created_at,
         b.id   AS br_id,
         b.panel_id AS br_panel_id,
         b.slot AS br_slot,
@@ -934,11 +988,12 @@ export class PgComponentRepository implements ComponentRepository {
       posY: input.posY ?? null,
       gangs: input.gangs ?? 1,
       protection: input.protection ?? null,
+      loadWatts: input.loadWatts ?? null,
       createdAt: Date.now(),
     };
     await this.db.execute(
-      `INSERT INTO components (id, type, name, room, notes, breaker_id, floor_id, pos_x, pos_y, gangs, critical, protection, created_at, building_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+      `INSERT INTO components (id, type, name, room, notes, breaker_id, floor_id, pos_x, pos_y, gangs, critical, protection, load_watts, created_at, building_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         component.id,
         component.type,
@@ -952,6 +1007,7 @@ export class PgComponentRepository implements ComponentRepository {
         component.gangs,
         component.critical ? 1 : 0,
         component.protection,
+        component.loadWatts,
         component.createdAt,
         buildingId,
       ]
@@ -962,7 +1018,7 @@ export class PgComponentRepository implements ComponentRepository {
   async get(id: string): Promise<ResolvedComponent | null> {
     const row = await this.db.queryOne<ResolvedComponentRow>(
       `SELECT
-         c.id, c.type, c.name, c.room, c.notes, c.breaker_id, c.floor_id, c.pos_x, c.pos_y, c.gangs, c.critical, c.protection, c.created_at,
+         c.id, c.type, c.name, c.room, c.notes, c.breaker_id, c.floor_id, c.pos_x, c.pos_y, c.gangs, c.critical, c.protection, c.load_watts, c.created_at,
          b.id   AS br_id,
          b.panel_id AS br_panel_id,
          b.slot AS br_slot,
@@ -1003,6 +1059,8 @@ export class PgComponentRepository implements ComponentRepository {
       gangs: patch.gangs ?? existing.gangs,
       protection:
         patch.protection === undefined ? existing.protection : patch.protection ?? null,
+      loadWatts:
+        patch.loadWatts === undefined ? existing.loadWatts : patch.loadWatts ?? null,
     };
 
     // Refactor 2026-05 follow-up — switch+controlled share one circuit.
@@ -1020,8 +1078,8 @@ export class PgComponentRepository implements ComponentRepository {
     await this.db.transaction(async (tx) => {
       await tx.execute(
         `UPDATE components
-         SET type = $1, name = $2, room = $3, notes = $4, breaker_id = $5, floor_id = $6, pos_x = $7, pos_y = $8, gangs = $9, critical = $10, protection = $11
-         WHERE id = $12`,
+         SET type = $1, name = $2, room = $3, notes = $4, breaker_id = $5, floor_id = $6, pos_x = $7, pos_y = $8, gangs = $9, critical = $10, protection = $11, load_watts = $12
+         WHERE id = $13`,
         [
           merged.type,
           merged.name,
@@ -1034,6 +1092,7 @@ export class PgComponentRepository implements ComponentRepository {
           merged.gangs,
           merged.critical ? 1 : 0,
           merged.protection,
+          merged.loadWatts,
           id,
         ]
       );
@@ -1063,6 +1122,11 @@ export class PgComponentRepository implements ComponentRepository {
     return this.db.transaction(async (tx) => {
       await tx.execute(
         `DELETE FROM service_entries WHERE parent_type = 'component' AND parent_id = $1`,
+        [id]
+      );
+      // 2026-05 — attachments (component-parent) cascade (rows only).
+      await tx.execute(
+        `DELETE FROM attachments WHERE parent_type = 'component' AND parent_id = $1`,
         [id]
       );
       const n = await tx.execute('DELETE FROM components WHERE id = $1', [id]);
@@ -1119,6 +1183,7 @@ const rowToComponent = (row: ComponentRow): Component => ({
   posY: row.pos_y,
   gangs: row.gangs,
   protection: row.protection,
+  loadWatts: row.load_watts,
   createdAt: row.created_at,
 });
 
@@ -1758,6 +1823,75 @@ export class PgServiceEntryRepository implements ServiceEntryRepository {
 
   async delete(id: string): Promise<boolean> {
     const n = await this.db.execute('DELETE FROM service_entries WHERE id = $1', [id]);
+    return n > 0;
+  }
+}
+
+// ── PgAttachmentRepository (photos on components & breakers — 2026-05) ─────
+
+type AttachmentRow = {
+  id: string;
+  parent_type: AttachmentParentType;
+  parent_id: string;
+  filename: string;
+  created_at: number;
+};
+
+const rowToAttachment = (row: AttachmentRow): Attachment => ({
+  id: row.id,
+  parentType: row.parent_type,
+  parentId: row.parent_id,
+  filename: row.filename,
+  createdAt: row.created_at,
+});
+
+const ATTACHMENT_COLS = 'id, parent_type, parent_id, filename, created_at';
+
+export class PgAttachmentRepository implements AttachmentRepository {
+  constructor(private readonly db: Db) {}
+
+  async listByParent(
+    parentType: AttachmentParentType,
+    parentId: string
+  ): Promise<Attachment[]> {
+    const rows = await this.db.query<AttachmentRow>(
+      `SELECT ${ATTACHMENT_COLS} FROM attachments
+       WHERE parent_type = $1 AND parent_id = $2
+       ORDER BY created_at ASC, id ASC`,
+      [parentType, parentId]
+    );
+    return rows.map(rowToAttachment);
+  }
+
+  async create(input: {
+    parentType: AttachmentParentType;
+    parentId: string;
+    filename: string;
+  }): Promise<Attachment> {
+    const att: Attachment = {
+      id: newId(),
+      parentType: input.parentType,
+      parentId: input.parentId,
+      filename: input.filename,
+      createdAt: Date.now(),
+    };
+    await this.db.execute(
+      `INSERT INTO attachments (${ATTACHMENT_COLS}) VALUES ($1, $2, $3, $4, $5)`,
+      [att.id, att.parentType, att.parentId, att.filename, att.createdAt]
+    );
+    return att;
+  }
+
+  async get(id: string): Promise<Attachment | null> {
+    const row = await this.db.queryOne<AttachmentRow>(
+      `SELECT ${ATTACHMENT_COLS} FROM attachments WHERE id = $1`,
+      [id]
+    );
+    return row ? rowToAttachment(row) : null;
+  }
+
+  async delete(id: string): Promise<boolean> {
+    const n = await this.db.execute('DELETE FROM attachments WHERE id = $1', [id]);
     return n > 0;
   }
 }

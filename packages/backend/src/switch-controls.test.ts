@@ -460,4 +460,98 @@ describe('switch_controls routes (G19)', () => {
       assert.equal(r.status, 400);
     });
   });
+
+  // 2026-05 — flat per-building list endpoint, consumed by the Impact view's
+  // "switches that lose control" section. A breaker's switches can sit on any
+  // floor, so the modal scopes by building rather than by floor.
+  describe('GET /switch-controls?buildingId (2026-05)', () => {
+    const createCompIn = async (body: {
+      type: string;
+      name: string;
+      gangs?: number;
+      buildingId?: string;
+    }): Promise<Component> => {
+      const r = await app.request('/api/v1/components', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return ((await r.json()) as { data: Component }).data;
+    };
+
+    const createBuilding = async (name: string): Promise<{ id: string }> => {
+      const r = await app.request('/api/v1/buildings', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      return ((await r.json()) as { data: { id: string } }).data;
+    };
+
+    it('returns controls for components in the building (default building)', async () => {
+      // Components created without an explicit buildingId land in the seeded
+      // default building ('building_default').
+      const sw = await createCompIn({ type: 'switch', name: 'def-sw' });
+      const l = await createCompIn({ type: 'light', name: 'def-light' });
+      await app.request(`/api/v1/components/${sw.id}/controls`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ gangIndex: 0, controlledId: l.id }),
+      });
+
+      const r = await app.request(
+        '/api/v1/switch-controls?buildingId=building_default'
+      );
+      assert.equal(r.status, 200);
+      const body = (await r.json()) as { data: SwitchControl[] };
+      assert.equal(body.data.length, 1);
+      assert.equal(body.data[0].switchId, sw.id);
+      assert.equal(body.data[0].controlledId, l.id);
+      assert.equal(body.data[0].gangIndex, 0);
+    });
+
+    it('excludes controls from another building', async () => {
+      const other = await createBuilding('Garage');
+      // Default-building pair.
+      const dSw = await createCompIn({ type: 'switch', name: 'd-sw' });
+      const dL = await createCompIn({ type: 'light', name: 'd-light' });
+      await app.request(`/api/v1/components/${dSw.id}/controls`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ gangIndex: 0, controlledId: dL.id }),
+      });
+      // Garage-building pair.
+      const gSw = await createCompIn({
+        type: 'switch',
+        name: 'g-sw',
+        buildingId: other.id,
+      });
+      const gL = await createCompIn({
+        type: 'light',
+        name: 'g-light',
+        buildingId: other.id,
+      });
+      await app.request(`/api/v1/components/${gSw.id}/controls`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ gangIndex: 0, controlledId: gL.id }),
+      });
+
+      // Querying the default building returns ONLY its own control.
+      const rDef = await app.request(
+        '/api/v1/switch-controls?buildingId=building_default'
+      );
+      const defBody = (await rDef.json()) as { data: SwitchControl[] };
+      assert.equal(defBody.data.length, 1);
+      assert.equal(defBody.data[0].switchId, dSw.id);
+
+      // Querying the Garage building returns ONLY its own control.
+      const rGar = await app.request(
+        `/api/v1/switch-controls?buildingId=${other.id}`
+      );
+      const garBody = (await rGar.json()) as { data: SwitchControl[] };
+      assert.equal(garBody.data.length, 1);
+      assert.equal(garBody.data[0].switchId, gSw.id);
+    });
+  });
 });

@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { Db, createPool } from './db.js';
 import {
   PgAppUserRepository,
+  PgAttachmentRepository,
   PgBreakerRepository,
   PgBreakerTestRepository,
   PgBuildingRepository,
@@ -88,6 +89,7 @@ const main = async (): Promise<void> => {
   const wallRepository = new PgWallRepository(db);
   const roomRepository = new PgRoomRepository(db);
   const serviceEntryRepository = new PgServiceEntryRepository(db);
+  const attachmentRepository = new PgAttachmentRepository(db);
   const appUserRepository = new PgAppUserRepository(db);
   const app = buildApp({
     buildingRepository,
@@ -99,6 +101,7 @@ const main = async (): Promise<void> => {
     wallRepository,
     roomRepository,
     serviceEntryRepository,
+    attachmentRepository,
     db,
     appUserRepository,
     auth,

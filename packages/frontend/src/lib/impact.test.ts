@@ -53,6 +53,7 @@ const makeComponent = (
     posY: partial.posY ?? null,
     gangs: partial.gangs ?? 1,
     protection: partial.protection ?? null,
+    loadWatts: partial.loadWatts ?? null,
     createdAt: partial.createdAt ?? Date.now(),
     breaker: breakerSummary,
   };
