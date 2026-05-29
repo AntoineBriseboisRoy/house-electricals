@@ -66,71 +66,106 @@ body {
   padding-right: 0;
 }
 
-/* G22 cycle-23 — floating theme toggle, fixed top-right. Avoids modifying
-   every ScreenHeader; reachable from any screen. */
-.theme-toggle {
-  position: fixed;
-  top: calc(env(safe-area-inset-top) + var(--space-3));
-  right: calc(env(safe-area-inset-right) + var(--space-3));
-  z-index: 60; /* above bottom-tabs (50) and content but below modals (70+) */
-}
+/* fix/mobile-floating-cluster — the account menu trigger lives in the
+   BOTTOM TAB BAR (rendered via BottomTabs `trailing`), NOT as a floating
+   chip over page content. The trigger reuses the `.bottom-tabs__link`
+   classes so it matches the navigation tabs — no bespoke positioning is
+   needed here. Tapping it opens a Modal-as-sheet (cycle-73) holding the
+   account / theme / change-password / sign-out controls.
 
-/* Cycle-70 polish-pass-2 P2 #11 — give the floating ThemeToggle a visible
-   pill surface in BOTH themes. Previously the IconButton ghost variant
-   rendered a bare moon/sun icon with no background — easy to miss in dark
-   mode where the icon blends into the canvas. Override the ghost variant
-   inside .theme-toggle so the floating control reads as a tappable chip
-   with a clear hit-target boundary. Uses existing tokens only. */
-.theme-toggle .icon-btn {
-  background: var(--color-bg-surface);
-  border-color: var(--color-border-subtle);
-  box-shadow: var(--shadow-sm);
+   History: the feat/auth-gate-signup 3-chip cluster (Theme + Account +
+   Logout) floated top-right and overlapped the in-header Add CTAs on
+   mobile. An interim single floating chip was also rejected — the user
+   wants nothing user/theme-related floating over the page. Moving the
+   trigger into the tab bar removes ALL fixed top-right chrome, so the
+   `.screen-header` no longer reserves right-edge padding for it.
+
+   The `.user-menu__*` rules below style the SHEET BODY only (the trigger
+   is a plain tab-bar item). */
+
+/* Modal body for the UserMenu — stacks a "signed in as" header, a
+   theme-picker row, and the Change-password + Sign-out action buttons. */
+.user-menu__body {
+  display: grid;
+  gap: var(--space-4);
 }
-.theme-toggle .icon-btn:hover:not(:disabled) {
-  background: var(--color-bg-surface-raised);
+.user-menu__signed-in {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border-subtle);
+}
+.user-menu__signed-in-label {
+  font-size: var(--text-size-xs);
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.user-menu__username {
+  font-size: var(--text-size-base);
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-strong);
+  word-break: break-word;
+}
+.user-menu__section {
+  display: grid;
+  gap: var(--space-2);
+}
+.user-menu__section-title {
+  margin: 0;
+  font-size: var(--text-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-fg-muted);
+  font-weight: var(--text-weight-semibold);
+}
+.user-menu__theme-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.user-menu__theme-option {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: var(--touch-target);
+  padding: var(--space-2) var(--space-1);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  color: var(--color-fg-default);
+  border: 1px solid var(--color-border-subtle);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-size-sm);
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+.user-menu__theme-option:hover:not([data-selected='true']) {
+  background: var(--color-bg-hover);
   border-color: var(--color-border-strong);
 }
-
-/* feat/auth-gate — LogoutButton: sibling of ThemeToggle, sits just to
-   its LEFT in the top-right cluster. Shares the visible-pill styling
-   so the two controls read as a related toolbar. */
-/* feat/auth-gate (sign-up flow) — 3-button floating top-right cluster.
-   Order right-to-left: ThemeToggle, AccountButton, LogoutButton.
-   Each chip is touch-target wide with space-2 between siblings.
-
-   Right offsets:
-     ThemeToggle:   space-3 from edge          (already declared above)
-     AccountButton: 1*touch-target + space-3 + 1*space-2
-     LogoutButton:  2*touch-target + space-3 + 2*space-2
-*/
-.account-button {
-  position: fixed;
-  top: calc(env(safe-area-inset-top) + var(--space-3));
-  right: calc(
-    env(safe-area-inset-right) + var(--touch-target) + var(--space-3) +
-      var(--space-2)
-  );
-  z-index: 60;
+.user-menu__theme-option[data-selected='true'] {
+  background: var(--color-accent-subtle);
+  color: var(--color-fg-default);
+  border-color: var(--color-accent-border);
+  box-shadow: inset 0 0 0 1px var(--color-accent-border);
 }
-.logout-button {
-  position: fixed;
-  top: calc(env(safe-area-inset-top) + var(--space-3));
-  right: calc(
-    env(safe-area-inset-right) + 2 * var(--touch-target) + var(--space-3) +
-      2 * var(--space-2)
-  );
-  z-index: 60;
+.user-menu__theme-option:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--shadow-focus);
 }
-.account-button .icon-btn,
-.logout-button .icon-btn {
-  background: var(--color-bg-surface);
-  border-color: var(--color-border-subtle);
-  box-shadow: var(--shadow-sm);
-}
-.account-button .icon-btn:hover:not(:disabled),
-.logout-button .icon-btn:hover:not(:disabled) {
-  background: var(--color-bg-surface-raised);
-  border-color: var(--color-border-strong);
+.user-menu__theme-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
 }
 
 /* feat/auth-gate — initial loading splash + login screen. */
@@ -193,10 +228,13 @@ body {
    ADR).
 
    Positioned bottom-left (NOT top-right) because:
-   1. The top-right column is already crowded with the floating
-      ThemeToggle + the cycle-34 G28 ScreenHeader right-padding reserve
-      for header action buttons (e.g. "Add panel"). A second floating
-      affordance there would intercept clicks on those buttons.
+   1. The top-right corner is reserved for each screen's primary header
+      action (e.g. "Add panel"). A floating affordance there would
+      intercept clicks on those buttons. (fix/mobile-floating-cluster
+      removed the old floating ThemeToggle + the G28 right-padding
+      reserve that used to crowd this corner — account/theme controls
+      now live in the bottom-tab Account sheet — but bottom-left remains
+      the right home for this escape-hatch chip.)
    2. The bottom-tabs occupy the full footer strip — but the bottom-left
       gutter (left of the leftmost tab on narrow viewports, OR left of
       the centered max-width tabs container on desktop) is unused.
@@ -330,6 +368,14 @@ html.theme-transitioning svg * {
   font-size: var(--text-size-xs);
   font-weight: var(--text-weight-medium);
   transition: color var(--motion-duration-fast) var(--motion-ease-out);
+  /* fix/mobile-floating-cluster — the Account trigger is a <button> using
+     this same class (the nav tabs are <a>). Reset native button chrome so
+     both render identically inside the grid. */
+  width: 100%;
+  background: none;
+  border: 0;
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .bottom-tabs__link:active {
@@ -521,25 +567,13 @@ body:has(.modal-overlay) .bottom-tabs {
   gap: var(--space-2);
   margin: 0 0 var(--space-4) 0;
   min-height: var(--touch-target);
-  /* G28 cycle-34 (extended for feat/auth-gate sign-up flow):
-     reserve space on the right for the 3-button floating cluster —
-     ThemeToggle + AccountButton + LogoutButton. Each chip is
-     touch-target wide with space-2 gaps; the right inset is space-3.
-     Without this padding, header action buttons like "Floor plan"
-     slip behind the cluster and get cropped on narrow viewports.
-     Refactor 2026-05 follow-up: dropped on wide desktops (>=1280px)
-     where the cluster floats outside the 1200px max-content area —
-     keeping the padding there pushes the Add CTA visibly LEFT of the
-     body cards' right edge (the user-reported "every page mis-aligns"
-     issue). */
-  padding-right: calc(
-    3 * var(--touch-target) + var(--space-3) + 2 * var(--space-2)
-  );
-}
-@media (min-width: 1280px) {
-  .screen-header {
-    padding-right: 0;
-  }
+  /* fix/mobile-floating-cluster — no right-edge reserve needed anymore.
+     The account/theme/logout cluster used to float fixed top-right and
+     this padding kept header actions (e.g. "Floor plan", "Add panel")
+     from slipping behind it. Those controls now live in the bottom tab
+     bar, so nothing floats over the header — the title + action CTA can
+     use the full width. (The cycle-34 G28 / cycle-38 G30 right-padding
+     reserves were here historically; removed with the chip.) */
 }
 
 .screen-header__back {
@@ -2723,16 +2757,13 @@ h2 {
 }
 
 /* G30 cycle-38 — at very-narrow viewports the header title competes with
- * the action button + the fixed top-right ThemeToggle. Drop the action's
- * text label and let it become an icon-only chip, freeing ~70px so the
- * title doesn't ellipsis-truncate. The icon stays a real link with the
- * accessible name carried by aria-label on the underlying <a>. Also
- * tighten the header's right-padding reserve from `--touch-target +
- * --space-3` (~56px) to ~48px so a bit more title fits. */
+ * the action button. Drop the action's text label and let it become an
+ * icon-only chip, freeing ~70px so the title doesn't ellipsis-truncate.
+ * The icon stays a real link with the accessible name carried by
+ * aria-label on the underlying <a>.
+ * (fix/mobile-floating-cluster removed the right-padding reserve that
+ * used to live here — there's no longer a fixed top-right chip to dodge.) */
 @media (max-width: 480px) {
-  .screen-header {
-    padding-right: calc(var(--touch-target) + var(--space-1));
-  }
   /* Hide text label inside .link-action--header (Link variant). */
   .link-action--header > span {
     position: absolute;

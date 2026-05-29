@@ -10,9 +10,12 @@ import { toast } from './toast.js';
  * `packages/frontend/package.json`. The user wanted human-friendly
  * release markers (v0.1, v0.2, v0.3…) instead of the 7-char SHA.
  *
- * Lives next to the ThemeToggle (top-right floating area). Renders a small
- * "v 0.X" chip that opens a modal offering "Force refresh" — which
- * unregisters every service worker + clears every cache + reloads.
+ * A small fixed chip anchored bottom-left, just above the bottom tab bar
+ * (see `.version-pill` in styles.css). Renders a "v0.X" marker that opens
+ * a modal offering "Force refresh" — which unregisters every service
+ * worker + clears every cache + reloads. (fix/mobile-floating-cluster:
+ * the old top-right ThemeToggle it once sat beside is gone; theme + account
+ * controls now live in the bottom-tab Account sheet.)
  *
  * Backup mechanism for users stuck on a stale PWA. The PRIMARY update path
  * stays vite-plugin-pwa's `registerType: 'autoUpdate' + skipWaiting +

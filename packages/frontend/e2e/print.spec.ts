@@ -45,8 +45,13 @@ test.describe('G24 printable diagram @cycle-27', () => {
     // Escape-hatch confirmed: no bottom-tabs nav in the DOM.
     await expect(page.locator('.bottom-tabs')).toHaveCount(0);
 
-    // No theme toggle either (lives in AppShell).
+    // No floating account/theme UI either (lives in AppShell).
+    // fix/mobile-floating-cluster: the cluster collapsed from 3 chips
+    // (.theme-toggle + .account-button + .logout-button) to a single
+    // .user-menu chip. Print escape-hatch is unaffected — assert all
+    // four selectors are absent for forwards/backwards safety.
     await expect(page.locator('.theme-toggle')).toHaveCount(0);
+    await expect(page.locator('.user-menu')).toHaveCount(0);
 
     // Cycle-68 — no VersionPill either (lives in AppShell next to
     // ThemeToggle). Locks in escape-hatch isolation for the new affordance.

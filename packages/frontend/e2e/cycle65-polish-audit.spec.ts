@@ -476,17 +476,26 @@ test.describe('Cycle 65 polish audit @audit-only', () => {
     await page.goto('/components');
     await settle(page);
 
-    // -------- 11. Light theme parity — toggle theme, capture a few key shots --------
-    const themeBtn = page.locator('.theme-toggle').first();
-    if (await themeBtn.isVisible().catch(() => false)) {
-      // Cycle: dark→light. The button cycles dark→light→system; click once.
-      await themeBtn.click();
+    // -------- 11. Light theme parity — toggle theme via UserMenu, capture a few key shots --------
+    // fix/mobile-floating-cluster: the standalone ThemeToggle chip is
+    // gone; theme controls live inside the UserMenu sheet now.
+    const userMenuBtn = page.getByTestId('user-menu-button');
+    if (await userMenuBtn.isVisible().catch(() => false)) {
+      await userMenuBtn.click();
+      await page.getByTestId('user-menu-modal').waitFor({ timeout: 2_000 });
+      await page.getByTestId('user-menu-theme-light').click();
       // Light theme often takes a 850ms transition window — wait for the
       // theme class to land instead of a fixed sleep.
       await page
         .locator('html.light, html.theme-light')
         .first()
         .waitFor({ timeout: 2_000 })
+        .catch(() => {});
+      // Close the sheet so it doesn't dominate the polish screenshots.
+      await page.keyboard.press('Escape');
+      await page
+        .getByTestId('user-menu-modal')
+        .waitFor({ state: 'hidden', timeout: 2_000 })
         .catch(() => {});
       await settle(page);
       await snap(page, project, '19-light-components', { fullPage: true });
@@ -499,10 +508,13 @@ test.describe('Cycle 65 polish audit @audit-only', () => {
       await settle(page);
       await snap(page, project, '21-light-panel-list', { fullPage: true });
 
-      // Restore dark theme (click theme button again to light→system, again to
-      // system→dark). Best-effort.
-      await page.locator('.theme-toggle').first().click().catch(() => {});
-      await page.locator('.theme-toggle').first().click().catch(() => {});
+      // Restore dark theme — best-effort.
+      await page.getByTestId('user-menu-button').click().catch(() => {});
+      await page
+        .getByTestId('user-menu-theme-dark')
+        .click()
+        .catch(() => {});
+      await page.keyboard.press('Escape').catch(() => {});
     }
 
     // -------- 12. Empty states — wipe seeded data is NOT something we can

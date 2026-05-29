@@ -25,7 +25,7 @@ import {
  *   .panel-viz) live in styles.css so the canvas doesn't stutter.
  */
 
-type Theme = 'light' | 'dark' | 'system';
+export type Theme = 'light' | 'dark' | 'system';
 type ResolvedTheme = 'light' | 'dark';
 
 type ThemeContextValue = {

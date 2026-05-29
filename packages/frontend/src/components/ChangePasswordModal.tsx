@@ -16,10 +16,11 @@ export type ChangePasswordModalProps = {
 /**
  * feat/auth-gate (sign-up flow) — change-password modal.
  *
- * Mounted by AppShell (via AccountButton) when the user clicks the
- * floating top-right Account chip. Server verifies the current password
- * before updating; cycle-73 `presentation="sheet"` pivots to a mobile
- * bottom-sheet below 720px.
+ * Rendered by UserMenu (the bottom-tab Account sheet) when the user taps
+ * "Change password" — fix/mobile-floating-cluster replaced the old floating
+ * top-right Account chip with the tab-bar Account item. Server verifies the
+ * current password before updating; cycle-73 `presentation="sheet"` pivots
+ * to a mobile bottom-sheet below 720px.
  *
  * The signed-in session cookie stays valid after the password change
  * (JWT signature depends on AUTH_SECRET, not the password hash), so

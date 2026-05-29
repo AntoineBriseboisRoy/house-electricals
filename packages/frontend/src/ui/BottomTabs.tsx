@@ -21,12 +21,29 @@ export type Tab = {
  * Active-state is derived from wouter's `useLocation` via each tab's
  * `isActive` predicate — never from `href` equality alone, since one tab
  * may cover several routes (Map tab covers /map and /panels/:id/map).
+ *
+ * fix/mobile-floating-cluster — `trailing` renders a non-navigation item as
+ * the LAST cell of the tab grid (e.g. the Account menu trigger that opens a
+ * bottom sheet). It's a sibling `<li>` inside the same `<ul>` so it lines up
+ * in the grid; the `--bottom-tabs-count` var includes it so the columns
+ * stay evenly sized. The account/theme/logout controls used to be a fixed
+ * floating chip on every screen — they now live behind this tab item so
+ * nothing floats over page content (HousesTracker pattern).
  */
-export const BottomTabs = ({ tabs }: { tabs: readonly Tab[] }): JSX.Element => {
+export const BottomTabs = ({
+  tabs,
+  trailing,
+}: {
+  tabs: readonly Tab[];
+  /** Optional non-navigation item rendered as the last grid cell. */
+  trailing?: ReactNode;
+}): JSX.Element => {
   const [location] = useLocation();
   // Refactor 2026-05 — surface tab count to CSS so the grid auto-adapts
-  // when this list grows (3 → 4 in iter 2). Cast string for inline style.
-  const navStyle = { ['--bottom-tabs-count' as string]: String(tabs.length) };
+  // when this list grows (3 → 4 in iter 2). The `trailing` item, when
+  // present, counts as one more column. Cast string for inline style.
+  const count = tabs.length + (trailing != null ? 1 : 0);
+  const navStyle = { ['--bottom-tabs-count' as string]: String(count) };
   return (
     <nav className="bottom-tabs" aria-label="Primary" style={navStyle}>
       <ul className="bottom-tabs__list">
@@ -51,6 +68,9 @@ export const BottomTabs = ({ tabs }: { tabs: readonly Tab[] }): JSX.Element => {
             </li>
           );
         })}
+        {trailing != null && (
+          <li className="bottom-tabs__item">{trailing}</li>
+        )}
       </ul>
     </nav>
   );

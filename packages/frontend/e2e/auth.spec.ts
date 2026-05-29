@@ -66,11 +66,15 @@ test.describe('auth gate @feat-auth-gate', () => {
     await expect(page.getByText('Main Panel')).toBeVisible();
     // Bottom-tabs render (we're authed inside AppShell).
     await expect(page.locator('.bottom-tabs')).toBeVisible();
-    // The fixed-top-right logout button is reachable.
-    await expect(page.getByTestId('logout-button')).toBeVisible();
+    // The fix/mobile-floating-cluster UserMenu chip is reachable
+    // (replaces the standalone logout button from the original
+    // feat/auth-gate cycle).
+    await expect(page.getByTestId('user-menu-button')).toBeVisible();
   });
 
-  test('Sign out button returns to LoginScreen', async ({ page }, info) => {
+  test('Sign out (via UserMenu) returns to LoginScreen', async ({
+    page,
+  }, info) => {
     skipMobile(info);
     await page.goto('/');
     await page.getByTestId('login-username').fill(USERNAME);
@@ -78,14 +82,39 @@ test.describe('auth gate @feat-auth-gate', () => {
     await page.getByTestId('login-submit').click();
     await expect(page.getByText('Main Panel')).toBeVisible();
 
-    await page.getByTestId('logout-button').click();
+    // Open the UserMenu sheet, click Sign out.
+    await page.getByTestId('user-menu-button').click();
+    await expect(page.getByTestId('user-menu-modal')).toBeVisible();
+    await page.getByTestId('user-menu-logout').click();
     await expect(
       page.getByRole('heading', { name: 'House Electricals' })
     ).toBeVisible();
     await expect(page.getByTestId('login-submit')).toBeVisible();
   });
 
-  test('change password: account button → modal → new password works on next login', async ({
+  test('UserMenu sheet contains username + theme picker + change-password trigger', async ({
+    page,
+  }, info) => {
+    skipMobile(info);
+    await page.goto('/');
+    await page.getByTestId('login-username').fill(USERNAME);
+    await page.getByTestId('login-password').fill(PASSWORD);
+    await page.getByTestId('login-submit').click();
+    await expect(page.getByText('Main Panel')).toBeVisible();
+
+    await page.getByTestId('user-menu-button').click();
+    const sheet = page.getByTestId('user-menu-modal');
+    await expect(sheet).toBeVisible();
+
+    await expect(sheet.getByTestId('user-menu-username')).toHaveText(USERNAME);
+    await expect(sheet.getByTestId('user-menu-theme-light')).toBeVisible();
+    await expect(sheet.getByTestId('user-menu-theme-dark')).toBeVisible();
+    await expect(sheet.getByTestId('user-menu-theme-system')).toBeVisible();
+    await expect(sheet.getByTestId('user-menu-change-password')).toBeVisible();
+    await expect(sheet.getByTestId('user-menu-logout')).toBeVisible();
+  });
+
+  test('change password: UserMenu → Change password → modal → new password works', async ({
     page,
   }, info) => {
     skipMobile(info);
@@ -98,39 +127,40 @@ test.describe('auth gate @feat-auth-gate', () => {
     await page.getByTestId('login-submit').click();
     await expect(page.getByText('Main Panel')).toBeVisible();
 
-    // Open the floating Account button → ChangePasswordModal.
-    await page.getByTestId('account-button').click();
+    // Open the UserMenu and trigger Change password.
+    await page.getByTestId('user-menu-button').click();
+    await expect(page.getByTestId('user-menu-modal')).toBeVisible();
+    await page.getByTestId('user-menu-change-password').click();
+    // UserMenu sheet closes before ChangePasswordModal opens (avoid
+    // modal-in-modal stacking).
+    await expect(page.getByTestId('user-menu-modal')).not.toBeVisible();
     const modal = page.getByTestId('change-password-modal');
     await expect(modal).toBeVisible();
 
-    // Submit the change.
     await modal.getByTestId('change-password-current').fill(PASSWORD);
     await modal.getByTestId('change-password-new').fill(NEW_PASSWORD);
     await modal.getByTestId('change-password-confirm').fill(NEW_PASSWORD);
     await modal.getByTestId('change-password-submit').click();
-
-    // Modal closes on success.
     await expect(modal).not.toBeVisible();
 
-    // Sign out and verify the OLD password no longer works AND the NEW
-    // one does.
-    await page.getByTestId('logout-button').click();
+    // Sign out → old fails → new succeeds.
+    await page.getByTestId('user-menu-button').click();
+    await page.getByTestId('user-menu-logout').click();
     await expect(page.getByTestId('login-submit')).toBeVisible();
 
-    // Old password rejected.
     await page.getByTestId('login-username').fill(USERNAME);
     await page.getByTestId('login-password').fill(PASSWORD);
     await page.getByTestId('login-submit').click();
     await expect(page.getByRole('alert')).toContainText(/invalid/i);
 
-    // New password accepted.
     await page.getByTestId('login-password').fill(NEW_PASSWORD);
     await page.getByTestId('login-submit').click();
     await expect(page.getByText('Main Panel')).toBeVisible();
 
-    // Cleanup — rotate the password BACK so other specs that hard-code
-    // the e2e creds (this file's earlier tests, on re-run) keep working.
-    await page.getByTestId('account-button').click();
+    // Cleanup — rotate the password BACK so other tests in this file
+    // (re-run order) keep working.
+    await page.getByTestId('user-menu-button').click();
+    await page.getByTestId('user-menu-change-password').click();
     const cleanupModal = page.getByTestId('change-password-modal');
     await expect(cleanupModal).toBeVisible();
     await cleanupModal.getByTestId('change-password-current').fill(NEW_PASSWORD);
