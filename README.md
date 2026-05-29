@@ -9,6 +9,16 @@
 [![Image](https://img.shields.io/badge/image-ghcr.io%2Fhouse--electricals-blue?logo=docker)](https://github.com/AntoineBriseboisRoy/house-electricals/pkgs/container/house-electricals)
 ![Build](https://github.com/AntoineBriseboisRoy/house-electricals/actions/workflows/release.yml/badge.svg)
 
+## 🚀 Try it live
+
+**▶ [antoinebriseboisroy.github.io/house-electricals](https://antoinebriseboisroy.github.io/house-electricals/)**
+
+A full, no-install demo running entirely in your browser — the **real**
+frontend *and* backend (Postgres compiled to WASM via PGlite), deployed to
+GitHub Pages. Sign up with any username/password to get in. Everything stays
+in your browser session; nothing is sent to a server, and the data resets
+when you clear site storage. (Best on a phone — it's a mobile-first PWA.)
+
 ## Features
 
 - 📱 **Mobile-first PWA** — installs to your phone's home screen
