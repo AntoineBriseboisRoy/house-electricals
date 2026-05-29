@@ -1,11 +1,11 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 /**
  * Single-user JWT-cookie auth (feat/auth-gate + sign-up flow).
  *
- * Credentials live in the SQLite `app_users` table — minted on first
+ * Credentials live in the Postgres `app_users` table — minted on first
  * boot via the public `POST /auth/signup` endpoint. There is exactly 0
  * or 1 user row at any moment. AUTH_USERNAME / AUTH_PASSWORD env vars
  * are NO LONGER consumed — earlier feat/auth-gate cycles read them
@@ -47,10 +47,11 @@ export const loadAuthConfig = (): AuthConfig => {
 };
 
 const loadOrGenerateSecret = (): string => {
-  // Use the directory of DB_PATH as a stable per-deployment location for
-  // the auto-generated secret (same place the SQLite file lives).
-  const dbPath = process.env.DB_PATH ?? join(DATA_DIR_DEFAULT, 'panels.db');
-  const dataDir = dirname(dbPath);
+  // Persist the auto-generated secret under DATA_DIR — the same durable
+  // volume that holds the uploaded floor-plan images. With Postgres holding
+  // the relational data, this directory exists purely for filesystem state
+  // (floor plans + this secret), so the secret no longer keys off a DB path.
+  const dataDir = process.env.DATA_DIR?.trim() || DATA_DIR_DEFAULT;
   const path = join(dataDir, AUTH_SECRET_FILENAME);
   if (existsSync(path)) {
     const raw = readFileSync(path, 'utf8').trim();

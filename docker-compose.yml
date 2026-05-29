@@ -11,24 +11,47 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: house-electricals-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-house_electricals}
+    volumes:
+      # All application data now lives in Postgres — back up this volume.
+      - he-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-house_electricals}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   app:
     build:
       context: .
       dockerfile: packages/backend/Dockerfile
     container_name: house-electricals
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
+      # Uploaded floor-plan images + the auto-generated .auth-secret live
+      # on disk; the relational data lives in Postgres (the `db` service).
       - ${DATA_PATH:-./data}:/data
     environment:
       NODE_ENV: production
-      DB_PATH: /data/panels.db
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-house_electricals}
       FLOOR_PLAN_DIR: /data/floor-plans
       PUBLIC_DIR: /app/public
       PORT: 3000
       HOST: 0.0.0.0
       # Auth: no AUTH_USERNAME / AUTH_PASSWORD here. First-time setup
       # is a sign-up screen at http://localhost:${HOST_PORT:-8070}/ —
-      # the backend stores the (one) user row in /data/panels.db.
+      # the backend stores the (one) user row in the `app_users` table.
     ports:
       - "${HOST_PORT:-8070}:3000"
     healthcheck:
@@ -37,3 +60,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+volumes:
+  he-pgdata:

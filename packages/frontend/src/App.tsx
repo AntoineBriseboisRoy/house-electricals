@@ -1,5 +1,6 @@
 import { Route, Switch, useLocation } from 'wouter';
 import { AppShell } from './ui/AppShell.js';
+import { BuildingProvider, useBuilding } from './contexts/BuildingContext.js';
 import { PanelListScreen } from './screens/PanelListScreen.js';
 import { PanelDetailScreen } from './screens/PanelDetailScreen.js';
 import { ComponentsScreen } from './screens/ComponentsScreen.js';
@@ -29,7 +30,6 @@ import { useAuth } from './contexts/AuthContext.js';
  * new routes via fullBleed. Use the route-outside-Switch escape instead.
  */
 export const App = (): JSX.Element => {
-  const [location] = useLocation();
   const { state: authState } = useAuth();
 
   // feat/auth-gate — gate everything behind sign-up / login.
@@ -50,6 +50,32 @@ export const App = (): JSX.Element => {
     return <LoginScreen />;
   }
 
+  // Authed → mount the building layer (the /buildings endpoint is auth-gated)
+  // and render the routed app inside it.
+  return (
+    <BuildingProvider>
+      <AuthedApp />
+    </BuildingProvider>
+  );
+};
+
+/**
+ * The authed, building-scoped app. Gates on the one-time building load (so the
+ * api scope is set before any screen fetches), then renders the escape-hatch
+ * or AppShell routes. Both route Switches are KEYED on the active building id:
+ * switching buildings remounts the matched screen so it re-fetches its
+ * now-rescoped data, while the AppShell chrome (tabs + building switcher)
+ * stays mounted.
+ */
+const AuthedApp = (): JSX.Element => {
+  const [location] = useLocation();
+  const { phase, currentBuildingId } = useBuilding();
+  const buildingKey = currentBuildingId ?? 'none';
+
+  if (phase === 'loading') {
+    return <div className="app-auth-splash" aria-label="Loading" />;
+  }
+
   // Escape-hatch routes: matched first, render WITHOUT AppShell chrome.
   // Keep this list short — only routes that genuinely need the full
   // viewport (e.g. the floor management/edit canvas, the printable
@@ -58,7 +84,7 @@ export const App = (): JSX.Element => {
   const isPrint = /^\/panels\/[^/]+\/print$/.test(location);
   if (isFloorEdit || isPrint) {
     return (
-      <Switch>
+      <Switch key={buildingKey}>
         <Route path="/floors/:id/edit" component={FloorEditScreen} />
         <Route path="/panels/:id/print" component={PrintableDiagramScreen} />
       </Switch>
@@ -69,7 +95,7 @@ export const App = (): JSX.Element => {
   const fullBleed = /^\/panels\/[^/]+\/map$/.test(location);
   return (
     <AppShell fullBleed={fullBleed}>
-      <Switch>
+      <Switch key={buildingKey}>
         <Route path="/" component={PanelListScreen} />
         <Route path="/map" component={MapLandingScreen} />
         <Route path="/panels/:id/map" component={PanelMapScreen} />

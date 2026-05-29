@@ -1,19 +1,51 @@
-import type { Room } from '@he/shared';
+import type { Room, RoomVertex } from '@he/shared';
+
+/** True when (x,y) lies on the segment a→b (collinear + within its bbox). */
+const onSegment = (a: RoomVertex, b: RoomVertex, x: number, y: number): boolean => {
+  const cross = (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
+  if (cross !== 0) return false;
+  return (
+    x >= Math.min(a.x, b.x) &&
+    x <= Math.max(a.x, b.x) &&
+    y >= Math.min(a.y, b.y) &&
+    y <= Math.max(a.y, b.y)
+  );
+};
 
 /**
- * Auto-bind helper for G26 (cycle-32).
+ * Ray-casting point-in-polygon test (even-odd rule), boundary-INCLUSIVE.
+ * Works for any simple polygon, including the 4-point rectangles the
+ * rectangle tool produces. A point exactly on an edge counts as inside —
+ * preserving the G26 "on the wall counts as in the room" intent.
+ */
+export const pointInPolygon = (
+  points: ReadonlyArray<RoomVertex>,
+  x: number,
+  y: number
+): boolean => {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const a = points[i];
+    const b = points[j];
+    if (a === undefined || b === undefined) continue;
+    if (onSegment(a, b, x, y)) return true; // on a boundary edge → inside
+    const intersects =
+      a.y > y !== b.y > y &&
+      x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+};
+
+/**
+ * Auto-bind helper for G26 (cycle-32), extended for polygon rooms.
  *
- * Given a list of rooms on a floor and a (x, y) point in normalized
- * 0-10000 viewbox coords, return the first room whose rectangle contains
- * the point — or null if no room contains it.
+ * Given a list of rooms on a floor and a (x, y) point in normalized viewbox
+ * coords, return the first room whose POLYGON contains the point — or null.
+ * Rectangles are 4-point polygons, so this subsumes the original rect test.
  *
- * Boundary is inclusive on both axes: a pin dropped exactly on a wall
- * is considered to belong to the room on that wall. This matches the
- * user's intent ("on the wall counts as in the room").
- *
- * If multiple rooms overlap at the point, the FIRST match in the array
- * wins. Callers that need a specific tiebreak (e.g. smallest room, or
- * most-recently-created) should sort `rooms` before calling.
+ * If multiple rooms overlap at the point, the FIRST match in the array wins.
+ * Callers that need a specific tiebreak should sort `rooms` before calling.
  */
 export const findRoomForPoint = (
   rooms: ReadonlyArray<Room>,
@@ -21,9 +53,7 @@ export const findRoomForPoint = (
   y: number
 ): Room | null => {
   for (const r of rooms) {
-    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
-      return r;
-    }
+    if (pointInPolygon(r.points, x, y)) return r;
   }
   return null;
 };

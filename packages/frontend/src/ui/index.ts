@@ -21,6 +21,7 @@ export {
   type CardActionsProps,
 } from './Card.js';
 export { Button, type ButtonProps, type ButtonVariant, type ButtonSize } from './Button.js';
+export { MoveToBuildingButton } from './MoveToBuildingButton.js';
 export { IconButton, type IconButtonProps, type IconButtonVariant } from './IconButton.js';
 export { Input, type InputProps } from './Input.js';
 export { Textarea, type TextareaProps } from './Textarea.js';

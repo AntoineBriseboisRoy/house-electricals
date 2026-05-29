@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import {
+  moveToBuildingSchema,
   panelInputSchema,
   panelPatchSchema,
   type ApiEnvelope,
@@ -10,6 +11,13 @@ import {
   type PanelRepository,
 } from '@he/shared';
 import { isUniqueConstraintError, uniqueNameTakenBody } from './unique-name.js';
+
+/** True for a Postgres FK-violation error (e.g. moving to a building that
+ *  doesn't exist). SQLSTATE 23503 lives on `err.code`. */
+const isForeignKeyError = (err: unknown): boolean =>
+  err !== null &&
+  typeof err === 'object' &&
+  (err as { code?: string }).code === '23503';
 
 /**
  * G39 cycle-56 — validate that wiring `panel.parentBreakerId = breakerId`
@@ -64,7 +72,11 @@ export const buildPanelRoutes = (
   const router = new Hono();
 
   router.get('/panels', async (c) => {
-    const panels = await repo.list();
+    // 2026-05 — optional ?buildingId scopes to one building.
+    const buildingId = c.req.query('buildingId');
+    const panels = await repo.list(
+      buildingId !== undefined && buildingId !== '' ? { buildingId } : undefined
+    );
     const body: ApiEnvelope<Panel[]> = { data: panels };
     return c.json(body, 200);
   });
@@ -167,6 +179,48 @@ export const buildPanelRoutes = (
       } catch (err) {
         if (isUniqueConstraintError(err) && patch.name !== undefined) {
           return c.json(uniqueNameTakenBody(patch.name), 409);
+        }
+        throw err;
+      }
+    }
+  );
+
+  // 2026-05 — move a panel (and the components wired to it) to another
+  // building. Cross-building refs are cleaned up in the repo.
+  router.post(
+    '/panels/:id/move',
+    zValidator('json', moveToBuildingSchema, (result, c) => {
+      if (!result.success) {
+        const err: ApiError = {
+          error: { message: result.error.issues[0]?.message ?? 'Invalid body.' },
+        };
+        return c.json(err, 400);
+      }
+      return undefined;
+    }),
+    async (c) => {
+      const id = c.req.param('id');
+      const { buildingId } = c.req.valid('json');
+      try {
+        const moved = await repo.moveToBuilding(id, buildingId);
+        if (moved === null) {
+          const err: ApiError = { error: { message: 'Panel not found.' } };
+          return c.json(err, 404);
+        }
+        const body: ApiEnvelope<Panel> = { data: moved };
+        return c.json(body, 200);
+      } catch (err) {
+        if (isUniqueConstraintError(err)) {
+          const e: ApiError = {
+            error: {
+              message: 'A panel with that name already exists in the target building.',
+            },
+          };
+          return c.json(e, 409);
+        }
+        if (isForeignKeyError(err)) {
+          const e: ApiError = { error: { message: 'Building not found.' } };
+          return c.json(e, 400);
         }
         throw err;
       }

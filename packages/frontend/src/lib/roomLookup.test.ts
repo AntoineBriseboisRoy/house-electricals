@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Room } from '@he/shared';
+import { rectToPolygon, type Room } from '@he/shared';
 import { findRoomForPoint, findPointsInRect } from './roomLookup.js';
 
 const makeRoom = (
@@ -13,6 +13,7 @@ const makeRoom = (
   y: partial.y,
   w: partial.w,
   h: partial.h,
+  points: partial.points ?? rectToPolygon(partial.x, partial.y, partial.w, partial.h),
   createdAt: partial.createdAt ?? Date.now(),
 });
 

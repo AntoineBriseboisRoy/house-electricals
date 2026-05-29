@@ -1,5 +1,22 @@
 import { sign } from 'hono/jwt';
+import { newId } from '@he/shared';
+import type { AppUserRepository } from '@he/shared';
+import type { Hono } from 'hono';
 import type { AuthConfig } from './auth.js';
+import { Db, createPool } from './db.js';
+import {
+  initSchema,
+  PgBreakerRepository,
+  PgBreakerTestRepository,
+  PgBuildingRepository,
+  PgComponentRepository,
+  PgFloorRepository,
+  PgPanelRepository,
+  PgRoomRepository,
+  PgServiceEntryRepository,
+  PgWallRepository,
+} from './repository.js';
+import { buildApp } from './server.js';
 
 /**
  * Auth config used across the backend auth-specific tests. Pinned so
@@ -37,3 +54,94 @@ export const authedHeaders = async (
   cookie: await testAuthCookie(),
   ...(extra ?? {}),
 });
+
+// ── Postgres test harness ──────────────────────────────────────────────
+//
+// Each suite gets its OWN schema (`test_<ulid>`) inside one shared Postgres
+// database, so suites are fully isolated without a database-per-test. The
+// schema is scoped via the pg connection `options: -c search_path=<schema>`
+// (see `createPool`), so all unqualified DDL/DML in `initSchema` + the
+// repositories lands in the isolated schema.
+//
+// Connection string: `DATABASE_URL` env var, falling back to the local
+// docker-compose dev database. Point `DATABASE_URL` at any reachable
+// Postgres to run the suite elsewhere (CI, a remote box, etc).
+
+const TEST_DATABASE_URL =
+  process.env.DATABASE_URL ??
+  'postgresql://postgres:postgres@localhost:5433/house_electricals';
+
+export interface TestDb {
+  /** Migrated, schema-isolated handle the repositories consume. */
+  db: Db;
+  /** The throw-away schema name (`test_<ulid>`). */
+  schema: string;
+  /** Drop the schema (CASCADE) and close the pool. Idempotent. */
+  cleanup(): Promise<void>;
+}
+
+/**
+ * Spin up an isolated, fully-migrated Postgres schema and return a `Db`
+ * scoped to it. Caller MUST `await cleanup()` (typically in `afterEach`).
+ */
+export const createTestDb = async (): Promise<TestDb> => {
+  // ULIDs are Crockford base32 (alphanumeric, no separators); lowercase so
+  // the unquoted identifier matches Postgres' default case-folding.
+  const schema = `test_${newId().toLowerCase()}`;
+  // Small pool — many suites run in the same Postgres and the default
+  // max_connections is 100; keep each suite's footprint low.
+  const pool = createPool(TEST_DATABASE_URL, { schema, max: 4 });
+  const db = new Db(pool);
+  // CREATE SCHEMA is explicit (names the schema), so it works even though
+  // the connection's search_path already points at the not-yet-existing
+  // schema. Everything `initSchema` creates then lands inside it.
+  await db.exec(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
+  await initSchema(db);
+
+  let closed = false;
+  const cleanup = async (): Promise<void> => {
+    if (closed) return;
+    closed = true;
+    try {
+      await db.exec(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    } finally {
+      await db.close();
+    }
+  };
+
+  return { db, schema, cleanup };
+};
+
+/**
+ * Wire a full `buildApp` with every Pg repository pointed at `db`. The
+ * route-level test suites all need the same 8-repository config; this
+ * hoists it to one place so each suite is just
+ * `app = buildTestApp(t.db)` in `beforeEach`.
+ *
+ * `auth`/`appUserRepository` default to `null` (the test-bypass mode —
+ * no JWT gate, cookie-free `app.request(...)`). The auth suite passes
+ * real values via `overrides` to exercise the gate.
+ */
+export interface TestAppOverrides {
+  auth?: AuthConfig | null;
+  appUserRepository?: AppUserRepository | null;
+}
+
+export const buildTestApp = (
+  db: Db,
+  overrides: TestAppOverrides = {}
+): Hono =>
+  buildApp({
+    buildingRepository: new PgBuildingRepository(db),
+    panelRepository: new PgPanelRepository(db),
+    breakerRepository: new PgBreakerRepository(db),
+    breakerTestRepository: new PgBreakerTestRepository(db),
+    componentRepository: new PgComponentRepository(db),
+    floorRepository: new PgFloorRepository(db),
+    wallRepository: new PgWallRepository(db),
+    roomRepository: new PgRoomRepository(db),
+    serviceEntryRepository: new PgServiceEntryRepository(db),
+    db,
+    appUserRepository: overrides.appUserRepository ?? null,
+    auth: overrides.auth ?? null,
+  });

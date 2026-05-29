@@ -6,28 +6,16 @@
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Hono } from 'hono';
 import type { Breaker, BreakerTest, Panel } from '@he/shared';
-import {
-  openDatabase,
-  SqliteBreakerRepository,
-  SqliteBreakerTestRepository,
-  SqliteComponentRepository,
-  SqliteFloorRepository,
-  SqlitePanelRepository,
-  SqliteRoomRepository,
-  SqliteServiceEntryRepository,
-  SqliteWallRepository,
-} from './repository.js';
-import { buildApp } from './server.js';
+import type { Db } from './db.js';
+import { PgBreakerTestRepository } from './repository.js';
+import { buildTestApp, createTestDb } from './test-helpers.js';
 
 describe('breaker_tests (G36)', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let app: ReturnType<typeof buildApp>;
+  let cleanup: () => Promise<void>;
+  let db: Db;
+  let app: Hono;
   let panel: Panel;
   let breaker: Breaker;
 
@@ -79,28 +67,16 @@ describe('breaker_tests (G36)', () => {
     );
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'he-bt-'));
-    db = openDatabase(join(dir, 'bt.db'));
-    app = buildApp({
-      panelRepository: new SqlitePanelRepository(db),
-      breakerRepository: new SqliteBreakerRepository(db),
-      breakerTestRepository: new SqliteBreakerTestRepository(db),
-      componentRepository: new SqliteComponentRepository(db),
-      floorRepository: new SqliteFloorRepository(db),
-      wallRepository: new SqliteWallRepository(db),
-      roomRepository: new SqliteRoomRepository(db),
-      serviceEntryRepository: new SqliteServiceEntryRepository(db),
-      db,
-      appUserRepository: null,
-      auth: null,
-    });
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    db = t.db;
+    app = buildTestApp(t.db);
     panel = await createPanel('Main');
     breaker = await createBreaker(panel.id, '1');
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   it('POST creates a test event with default testedAt', async () => {
@@ -309,7 +285,7 @@ describe('breaker_tests (G36)', () => {
   });
 
   it('latestByBreaker returns the most recent test per breaker', async () => {
-    const repo = new SqliteBreakerTestRepository(db);
+    const repo = new PgBreakerTestRepository(db);
     const b2 = await createBreaker(panel.id, '7');
     const b3 = await createBreaker(panel.id, '9');
 

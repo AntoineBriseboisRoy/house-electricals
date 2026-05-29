@@ -2,6 +2,154 @@
 
 This is the project-root `CLAUDE.md`. It records *project-wide conventions* that future cycles must respect. Per-package context lives in `packages/*/CLAUDE.md` (if any). Story-specific details belong in commit messages / `scripts/ralph/progress.txt`, not here.
 
+## Persistence is PostgreSQL (migrate/postgres) — READ FIRST
+
+House Electricals moved off `node:sqlite` to **PostgreSQL** (branch
+`migrate/postgres`) for reliability as the deployment scales. Many of the
+historical per-cycle ADRs below were written in the SQLite era and describe
+SQLite-specific mechanics (`openDatabase`, `DatabaseSync`, `sqlite_master`,
+`PRAGMA table_info`, "ALTER can't add a CHECK so rebuild the table",
+`node:sqlite`, `panels.db`, WAL files, `--experimental-sqlite`). **Those
+mechanics are SUPERSEDED — read them as history, not current instructions.**
+The data MODEL (tables, columns, FKs, cascade semantics, frozen enums) is
+unchanged; only the engine + access layer changed. The current contract:
+
+1. **`packages/backend/src/db.ts` is the ONLY file that talks to `pg`.** It
+   exports `createPool(connectionString, opts?)`, the `Db` class, and the
+   `Querier` interface. `Db` methods: `query<R>(sql, params?)` → rows;
+   `queryOne<R>` → first row or null; `execute(sql, params?)` → rowCount;
+   `exec(sql)` → runs trusted multi-statement DDL via the **simple** protocol
+   (the ONLY safe way — passing a `values` array switches pg to the extended
+   protocol, which rejects multi-statement/dollar-quoted strings); `transaction(fn)`
+   → runs `fn` on a dedicated pooled client with BEGIN/COMMIT/ROLLBACK; `close()`.
+
+2. **Placeholders are `$1, $2, …` (pg positional), never `?`.**
+
+3. **Epoch-ms timestamps are `BIGINT`, not `INTEGER`.** Postgres `INTEGER` is
+   32-bit and `Date.now()` overflows it. `db.ts` registers a `pg.types`
+   parser mapping BIGINT (OID 20) → JS number on load.
+
+4. **Schema init is `initSchema(db)` in `repository.ts`** (was `openDatabase`).
+   Idempotent `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT EXISTS` DDL
+   run via `Db.exec`. Repositories are `PgPanelRepository`,
+   `PgBreakerRepository`, `PgComponentRepository`, `PgFloorRepository`,
+   `PgWallRepository`, `PgRoomRepository`, `PgBreakerTestRepository`,
+   `PgServiceEntryRepository`, `PgAppUserRepository` (was `Sqlite*`).
+
+5. **Error codes are SQLSTATE strings on `err.code`:** UNIQUE violation =
+   `23505`, CHECK violation = `23514`, FK violation = `23503`. (Was sniffing
+   SQLite's `err.message.includes('UNIQUE constraint failed')`.)
+
+6. **Tests use schema-per-suite isolation against a REAL Postgres.**
+   `createTestDb()` in `test-helpers.ts` makes a pool scoped to a unique
+   `test_<ulid>` schema via `-c search_path=…`; `cleanup()` drops the schema
+   CASCADE + closes the pool. `DATABASE_URL` defaults to
+   `postgresql://postgres:postgres@localhost:5433/house_electricals` (the
+   `docker-compose.dev.yml` `he-postgres` container, host port 5433).
+   Run `docker compose -f docker-compose.dev.yml up -d` before `pnpm test`.
+
+7. **Connection config is `DATABASE_URL`** (no more `DB_PATH`). The backend
+   refuses to boot without it. `DATA_DIR` (default `/data`) now anchors ONLY
+   the `.auth-secret` file; floor-plan images live under `FLOOR_PLAN_DIR`.
+   Optional `DB_SCHEMA` + `DB_RESET` env vars scope/reset a named schema
+   (used by the e2e harness for a clean `e2e` schema; `DB_RESET` is test-only
+   and only ever drops the NAMED schema, never `public`).
+
+## Multi-building layer (2026-05) — READ before touching panels/floors/components
+
+A top-level **Building** entity now owns the whole tree. Every `panel`,
+`floor`, and `component` has a `building_id` (NOT NULL, `ON DELETE CASCADE`);
+breakers/walls/rooms/switch_controls/tests cascade through their parents. Pin
+these decisions — future cycles touching the data model, list/create paths, or
+app shell MUST respect them.
+
+1. **`buildings` table** — `id` (ULID), `name` UNIQUE, `created_at`. Created
+   in `initSchema` AFTER panels/floors/components, then `building_id` is
+   attached to those three via an idempotent `DO $$` migration (ADD COLUMN
+   nullable → backfill to the oldest building → `SET NOT NULL` + FK). A default
+   **"My House"** (`id='building_default'`) is seeded **only when the table is
+   empty** (`WHERE NOT EXISTS (SELECT 1 FROM buildings)`) — never resurrects a
+   user-deleted default. So there is ALWAYS ≥1 building.
+
+2. **Per-building name uniqueness.** The global `idx_unique_panels_name` /
+   `idx_unique_floors_name` were swapped (guarded, once) for
+   `idx_unique_{panels,floors}_building_name` on `(building_id, name)` — two
+   buildings can both have a "Main Panel"/"Main Floor". Rooms stay per-floor.
+
+3. **`PgBuildingRepository.delete` is an app-level cascade** inside one
+   transaction (service_entries → components → breakers → panels → floors →
+   building), because the panels→breakers edge has no DB CASCADE (cascades are
+   app-level by design). A plain FK cascade from the building would fail there.
+
+4. **Repos default the building.** `PgPanelRepository.create` /
+   `PgFloorRepository.create` / `PgComponentRepository.create` accept an
+   optional `buildingId`; when absent they resolve `resolveBuildingId(db)` =
+   the oldest building. `list(filter?)` takes an optional `{ buildingId }` and
+   filters when present. This keeps the backend test suite + the e2e REST seed
+   green WITHOUT passing buildingId everywhere (they land in "My House").
+
+5. **Routes**: flat REST `routes/buildings.ts` (`GET/POST /buildings`,
+   `GET/PATCH/DELETE /buildings/:id`), mounted PROTECTED in `server.ts`;
+   `AppDeps.buildingRepository` + `index.ts`/`test-helpers.ts` instantiate it.
+   DELETE **refuses the last building (409)** so the app never reaches a
+   zero-building state. `GET /panels` + `/floors` read `?buildingId`;
+   `GET /components` adds `buildingId` to its query schema; the three POSTs
+   accept `buildingId` in the body (the input schemas carry it, optional).
+
+6. **Frontend scopes at the API layer, NOT per call site.** `api.ts` holds a
+   module-level `activeBuildingId` + `setActiveBuildingId(id)`. `listPanels` /
+   `listFloors` auto-append `?buildingId`; `listComponents` adds it to params;
+   `createPanel`/`createFloor`/`createComponent` inject it into the body via
+   `withActiveBuilding(...)`. So the ~12 existing screen call sites were left
+   UNCHANGED. `listBuildings` is NOT scoped (it lists all buildings).
+
+7. **`BuildingContext`** (`contexts/BuildingContext.tsx`) owns the building
+   list + active selection (localStorage key `he.current-building`), mirrors
+   the selection into `setActiveBuildingId` **synchronously** before marking
+   ready, and is mounted INSIDE the authed tree in `App.tsx` (the `/buildings`
+   endpoint is auth-gated). `<AuthedApp>` gates on its `phase==='loading'`,
+   and **keys both route `<Switch>`es on `currentBuildingId`** — switching
+   buildings remounts the matched screen so it re-fetches its now-rescoped
+   data, while the AppShell chrome stays mounted.
+
+8. **`<BuildingSwitcher>`** (`ui/`) sits in a slim `.app-shell__topbar` above
+   every shell screen: a pill (`data-testid="building-switcher"`) showing the
+   current building that opens **`<BuildingsModal>`** — a base `Modal`
+   (`presentation="sheet"`) with **Add** in the header-action slot (top-right,
+   `Modal.headerAction` prop — 2026-05) next to the X. Each building is a
+   tap-to-switch row with a **pen (rename)** + **trash (delete)** IconButton on
+   the right (per-row destructive convention: `variant="danger"` + `Trash2`);
+   the trash is hidden when only one building exists (can't delete the last).
+   No footer — the header X is the sole dismiss. Create/rename/delete layer
+   useModal prompt/confirm dialogs ON TOP of the BuildingsModal (the cycle-61f
+   base-Modal + useModal stacking pattern). The switcher pill uses
+   `--radius-md` (rounded-square app theme, NOT a pill). testids:
+   `building-switcher`, `buildings-modal`, `buildings-modal-add`,
+   `buildings-list`, `buildings-list-switch` (+ `data-building-id`),
+   `buildings-list-rename`, `buildings-list-delete`.
+
+9. **Tests**: `packages/backend/src/buildings.test.ts` (seed default, CRUD,
+   409 duplicate, per-building uniqueness, `?buildingId` scoping, last-building
+   guard, cascade-delete incl. breakers, + the moves below). Added to the
+   explicit file list in `backend/package.json`'s `test` script (no glob).
+
+10. **Move between buildings.** `PanelRepository.moveToBuilding(panelId,
+    buildingId)` + `FloorRepository.moveToBuilding(floorId, buildingId)` are
+    transactional: they move the container AND its dependent components'
+    `building_id`, then clean up cross-building refs so nothing dangles —
+    moving a panel detaches its feeder + any subpanels it feeds that would
+    cross buildings, and unplaces moved components from floors in another
+    building; moving a floor detaches a cross-building default-panel link and
+    unwires moved components from breakers in another building (walls/rooms
+    follow via `floor_id`). Routes: `POST /api/v1/{panels,floors}/:id/move`
+    `{ buildingId }` → 200 / 404 (not found) / 409 (name collision in target,
+    per-building UNIQUE) / 400 (FK 23503 = target building missing). Frontend
+    `<MoveToBuildingButton kind id name>` (on PanelDetailScreen +
+    FloorEditScreen) picks a target via useModal, then **switches the active
+    building to the target** so the user follows the moved item (the flat
+    `getPanel`/`getFloor` still resolve it under the new building). Hidden when
+    only one building exists. testid `move-{panel,floor}-to-building`.
+
 ## Auth gate (feat/auth-gate + sign-up flow)
 
 Single-user JWT-cookie auth. Every `/api/v1/*` route except the public
@@ -10,7 +158,7 @@ carve-outs (`/auth/signup`, `/auth/login`, `/auth/logout`,
 signed with `AUTH_SECRET`. Pin these decisions — future cycles touching
 auth, routes, or test setup MUST respect them.
 
-1. **Credentials live in SQLite, NOT env vars.** The `app_users` table
+1. **Credentials live in Postgres, NOT env vars.** The `app_users` table
    holds exactly 0 or 1 row: `id`, `username`, `password_hash`,
    `created_at`. The hash is scrypt-encoded (`scrypt$N=…,r=…,p=…$salt$hash`
    PHC-ish format — see `backend/src/password.ts`). There are NO
@@ -120,9 +268,9 @@ auth, routes, or test setup MUST respect them.
     auth-gated info to it. Keep it `{ data: { ok: true } }` forever.
 
 15. **The `data/.auth-secret` file + `app_users` table are
-    user-survivable data.** Back BOTH up alongside `panels.db`
-    (`.auth-secret` is in the same `DATA_PATH`; `app_users` is a
-    table inside `panels.db`). Deleting `.auth-secret` = log everyone
+    user-survivable data.** Back BOTH up: `.auth-secret` lives under
+    `DATA_PATH` (filesystem bind-mount); `app_users` is a table in the
+    Postgres volume (`he-pgdata`). Deleting `.auth-secret` = log everyone
     out (user stays). Deleting the `app_users` row = full reset
     (sign-up screen appears again). Documented in README.md (Login
     section) + DEPLOYMENT.md (Data Persistence section).
@@ -570,9 +718,19 @@ desktop falls back to centered automatically.
 Wired sites this cycle: ServiceLogModal, Add-→-Modal (ComponentsScreen,
 PanelListScreen, MapLandingScreen). Conf/Prompt/Picker stay centered.
 
-The drag-handle is **decorative only** — NO pointer handlers, NO drag-to-
-dismiss gesture. Dismissal via Close button + overlay click + ESC
-(cycle-20 G20 ADR preserved).
+The drag-handle is a **functional swipe-to-dismiss affordance** (updated
+2026-05, superseding the cycle-73 "decorative only" decision per user
+feedback). `Modal.tsx` attaches pointer handlers to the handle: pointerdown
+captures, pointermove translates the sheet down with the finger (downward
+only, via inline `transform: translateY`), pointerup closes if the drag
+exceeds `min(150px, 30% of sheet height)` else snaps back. The
+`.modal--sheet-dragging` class suppresses the `.modal--sheet` snap-back
+`transition` mid-drag so it tracks 1:1. The handle stays `aria-hidden` —
+ESC + Close button + overlay click remain the accessible dismiss paths
+(cycle-20 G20 ADR preserved); the swipe is a touch enhancement on top.
+`min-height`/`max-height` on the shell + sheet now use `100dvh`/`85dvh`
+(with `vh` fallback) so mobile browser chrome doesn't create spurious
+scroll or push the fixed bottom-tabs below the fold.
 
 NEW class names: `.modal-overlay--sheet`, `.modal--sheet`,
 `.modal__drag-handle`. NEW keyframe `he-modal-slide-up`. NO new token
@@ -2183,15 +2341,20 @@ them.
    operator's external proxy; chromium covers Android Chrome + Edge +
    iOS-via-WebKit-shape behaviorally. Adding a browser is an ADR.
 
-3. **Tests run against an ISOLATED backend on port 3100 with a tmpdir
-   DB.** `e2e/globalSetup.ts` spawns `@he/backend` via `pnpm exec tsx
-   src/index.ts` with `DB_PATH=<mkdtempSync>/db.sqlite` and
-   `FLOOR_PLAN_DIR=<mkdtempSync>/floor-plans`. **NEVER point at
-   `./data/`** — that is the user's working data. `globalTeardown.ts`
-   uses `taskkill /T /F` on Windows or `process.kill(-pid)` (detached
-   group) on POSIX, then rm-rf the tmpdir.
+3. **Tests run against an ISOLATED backend on port 3100, scoped to a
+   throw-away Postgres schema.** `e2e/globalSetup.ts` spawns `@he/backend`
+   via `pnpm exec tsx src/index.ts` with `DATABASE_URL` pointed at the dev
+   Postgres (default `postgresql://postgres:postgres@localhost:5433/
+   house_electricals`, override for CI), `DB_SCHEMA=e2e`, `DB_RESET=1` (so
+   the `e2e` schema is dropped + recreated on every run), and
+   `FLOOR_PLAN_DIR=<mkdtempSync>/floor-plans`. **NEVER point `DB_SCHEMA` at
+   `public`** (the operator's data) and **NEVER point `FLOOR_PLAN_DIR` at
+   `./data/`** (the user's working images). `globalTeardown.ts` uses
+   `taskkill /T /F` on Windows or `process.kill(-pid)` (detached group) on
+   POSIX, then rm-rf the tmpdir. Requires the dev Postgres to be running
+   (`docker compose -f docker-compose.dev.yml up -d`).
 
-4. **Seed via REST in globalSetup, NOT direct SQLite writes.**
+4. **Seed via REST in globalSetup, NOT direct DB writes.**
    `e2e/seed.ts:seedFixtures(baseUrl)` POSTs deterministic data (1
    panel + 6 breakers + 1 floor + 2 rooms + 4 walls + 8 components incl.
    a 2-gang switch with switch_controls) through the public API — the
@@ -2337,7 +2500,7 @@ The cycle-20 G20 polish work introduces custom Modal primitives and on-canvas dr
 
 The cycle-14 G12 rooms work introduces axis-aligned rectangle "rooms" with center text labels. Pin these three decisions — future cycles (polygons, label-editing UX, etc.) must respect them.
 
-1. **Rooms are stored as `(x, y, w, h)` int columns**, not a polygon points blob. Polygons are deferred. Future migration if polygons are added: add a `points` JSON column, backfill 4-point arrays from each rectangle, drop the `x/y/w/h` columns. Same one-way-migration discipline as G13 — back up the DB before deploy.
+1. **Rooms are now POLYGONS** (`points` JSONB), with `(x, y, w, h)` kept as the derived bounding box. ~~Polygons are deferred.~~ **SUPERSEDED 2026-05** — see "Polygon rooms + wall-graph (2026-05)" below. The migration predicted here (add a `points` column, backfill 4-point arrays from each rectangle) is exactly what shipped, except `x/y/w/h` are KEPT (as the bbox for label centering + the rectangle X/Y/W/H editor) rather than dropped.
 2. **Schema invariants**: `name TEXT NOT NULL` (zod rejects empty), `floor_id TEXT NOT NULL REFERENCES floors(id) ON DELETE CASCADE` (rooms die with their floor, same as walls). `w` and `h` must be ≥ 1 (zero-area rectangles rejected at both the DB CHECK and zod layers). **PATCH never accepts `floor_id`** — rooms don't migrate between floors.
 3. **Room label rendering = SVG `<text>` centered inside the existing `FloorPlanVectorOverlay` viewBox.** No HTML overlay layer. Font-size is in viewbox units (320 ≈ 3% of canvas) and scales naturally with zoom. Don't introduce per-zoom pixel-sizing logic.
 
@@ -2346,6 +2509,126 @@ Additional notes:
 - The cycle-14 room-name UX uses `window.prompt` for first-time naming. A sheet/popover replacement is acceptable future polish but NOT load-bearing — VISION's "sketching tool" framing accepts utilitarian inputs.
 - Room edit mode is a **3-way mutually-exclusive `tool` state** on `PanelMapScreen`: `'pin' | 'walls' | 'rooms'`. Switching modes disables the other two layers' pointer events. Don't introduce a separate route for the editor.
 - Corner-drag uses the same PATCH-only-on-pointerup rule as wall endpoint drags + pin drops. PATCH-on-pointermove would flood the backend at 60Hz.
+
+## Unbounded coordinate space (2026-05)
+
+The floor-plan coordinate space was widened so the plan feels effectively
+infinite (user feedback: "the plan should span infinite x and y, I look
+constraint from x = 0 and x = 8250. I can't move anything past those
+boundaries"). Pin these decisions — they RECONCILE the many historical
+"0-10000 normalized" references scattered through the ADRs below.
+
+1. **The `10000` NORMALIZATION SCALE is unchanged.** Coordinates are still
+   per-ten-thousand integers; the SVG renders through a FIXED
+   `viewBox="0 0 10000 10000"` *window*; `vbToPctX` still divides by 100;
+   image-backed floors still normalize pins relative to the image's natural
+   size as `pos / 10000`. Historical "0-10000 normalized coord space" notes
+   describe THIS scale + window — NOT a hard clamp.
+
+2. **What changed is the CLAMP.** Geometry may now live anywhere in
+   `COORD_MIN..COORD_MAX` (= ±100000; room w/h up to `ROOM_DIM_MAX` = 200000),
+   exported from `@he/shared`. The viewport (pan + zoom) slides the 0-10000
+   window across this larger logical canvas, so far-out / negative geometry
+   is reached by panning. `useViewport` `MIN_SCALE` was lowered to `0.05` so
+   fit-to-content can frame a sprawling plan.
+
+3. **Three sync points — keep them aligned, do NOT re-narrow to 0-10000:**
+   (a) `@he/shared` `COORD_MIN`/`COORD_MAX`/`ROOM_DIM_MAX` + the `coord` /
+   `roomCoord` / `roomDim` / `posX` / `posY` zod schemas; (b) the walls/rooms
+   `*_bounds` CHECK constraints in `backend/src/repository.ts` (CREATE TABLE +
+   the idempotent `DO $$` widening migration that converts the legacy
+   auto-named `*_check` constraints); (c) `frontend/src/lib/snap.ts`'s clamp.
+
+4. **FloorEditScreen is the only "infinite" surface.** It has the viewport
+   (pan/zoom) so off-window geometry is reachable. `PanelMapScreen` has NO
+   viewport — its pointer input is naturally bounded by the visible canvas
+   rect, so it's unaffected and was intentionally left alone.
+
+5. **Component pins are drag-to-move in FloorEditScreen (pointer mode).**
+   A pin pointerdown starts a pointer-captured drag (window pointermove via
+   `viewport.screenToViewbox` + `snapPoint`); a movement threshold
+   (`PIN_DRAG_THRESHOLD_PX`) separates a reposition from a tap-select. PATCH
+   only fires on release (never on pointermove — the `useMapDrag` rule). The
+   live position flows through `displayedComponentsOnFloor` so the pin + its
+   gang handles + control lines track in lockstep. Room auto-binds only when
+   the component's room is null (the G26 cycle-32 "never overwrite a manual
+   room" rule). The sidebar X/Y/W/H + corner handles already read
+   `displayedRooms`, so they live-update during a resize too.
+
+## Polygon rooms + wall-graph (2026-05)
+
+Implements the deferred G12 polygon-room path + a shared-vertex wall model
+(user feedback: "Converging walls together should link them together. Closing
+walls to a fully [enclosed] room should ask for room name and create a room
+using those walls as delimiters. Each wall end becomes a point that can be
+drag to resize and reshape the room"). Pin these decisions.
+
+1. **A "vertex" is a coordinate — there is NO vertex table.** Wall endpoints
+   that share an exact coordinate are the same graph vertex; that's how
+   "converging walls link." Snapping makes them coincide: `useWallEditor`
+   takes `getSnapVertices()` and snaps a drawn/dragged endpoint onto any
+   existing wall endpoint or room vertex within `VERTEX_SNAP_DIST` (350 vb
+   units) via `lib/snap.snapWithVertices`. Do NOT add a `vertices` table —
+   coincident-coordinate identity is the model.
+
+2. **Rooms are polygons** (`points: {x,y}[]` JSONB, >= 3) with `x/y/w/h` kept
+   as the derived bounding box (label centering + the rectangle X/Y/W/H
+   editor). `@he/shared` owns the shape helpers: `rectToPolygon`,
+   `polygonBounds`, `isAxisAlignedRect`. The backend `normalizeRoomShape`
+   accepts EITHER a rectangle (`x/y/w/h`) OR a polygon (`points`) and stores
+   both; `roomInputSchema` refines that one complete shape is present.
+   Migration: `ALTER TABLE rooms ADD COLUMN IF NOT EXISTS points JSONB` +
+   backfill each rectangle as its 4 corners.
+
+3. **Closed-loop detection → room.** `lib/wallGraph.findLoopThrough(walls,
+   wallId)` BFS-finds the MINIMAL cycle through a just-drawn/dragged wall
+   (BFS = tightest enclosing face, not a rambling one). On a new loop that
+   doesn't already match a room (`loopMatchesAnyRoom`), FloorEditScreen
+   prompts for a name and `createRoom(floorId, { name, points })`. Wired into
+   BOTH the wall `onCommit` (draw) and `onEndpointCommit` (drag-to-close).
+
+4. **Editing model splits on `isAxisAlignedRect(points)`:** rectangle rooms
+   keep the existing corner-resize (resize-keeps-rectangle) + translate +
+   X/Y/W/H sidebar; polygon rooms get per-vertex drag handles
+   (`data-testid="room-vertex-handle"`) + a read-only sidebar hint. A
+   rectangle is NOT free-deformed by its corners (that stays a resize) — to
+   get a polygon room you draw walls and close a loop. This honors the user's
+   "keep both" choice (rectangle tool unchanged).
+
+5. **Vertex drag moves walls + room together.** Dragging a room vertex moves
+   the room's point AND every coincident wall endpoint AND every other room's
+   coincident vertex (they share a coordinate). Live preview via
+   `displayedRooms` (vertexDrag branch) + a new `displayedWalls` memo; commit
+   on pointerup PATCHes the affected room(s) `points` + wall(s) endpoints in
+   one `Promise.all`, with full rollback on failure. PATCH-only-on-pointerup
+   (the load-bearing 60Hz rule).
+
+6. **`findRoomForPoint` is now point-in-polygon** (ray-cast, boundary-
+   inclusive — preserves the G26 "on the wall counts as in the room" intent),
+   so component room auto-bind works for L-shaped rooms. Rectangles are
+   4-point polygons, so this subsumes the old rect test.
+
+7. **`PanelMapScreen` is unaffected** beyond rendering rooms as `<polygon>`
+   (rectangles ARE 4-point polygons, identical pixels). It has no wall-loop
+   flow / vertex handles — that's FloorEditScreen-only (the viewport surface).
+
+8. **Walls absorbed into a room outline are hidden + non-selectable.**
+   `lib/wallGraph.roomBoundaryWallIds(walls, rooms)` returns the IDs of walls
+   whose segment IS a room polygon edge (direction-independent). FloorEditScreen
+   filters those out of the wall render (overlay `visibleWalls`), the wall
+   hit-layers, and the endpoint handles — so once a loop becomes a room the
+   canvas reads as a clean room (the room's thin outline), NOT a room ringed by
+   the thick `--color-fg-default` `.floor-plan__wall` strokes, and you can't
+   select the constituent walls (clicking the edge selects the room). This is
+   DERIVED from current geometry + the walls are NOT deleted: deleting or
+   reshaping the room re-evaluates the set, and vertex-drag keeps the hidden
+   walls coincident with the room edges so they stay absorbed. Creating a room
+   deselects the closing wall and selects the new room.
+
+Pure logic is unit-tested: `lib/wallGraph.test.ts` (loop detection, minimal
+face, degenerate rejection) + `lib/roomLookup.test.ts` (point-in-polygon).
+Backend: `rooms.test.ts` covers polygon create / bbox derivation / points
+PATCH / name-only no-op / < 3-point rejection.
 
 ## Wall editor (G12 walls)
 
@@ -2406,13 +2689,13 @@ There are **two complementary URLs for viewing a floor**. They are NOT redundant
 
 ## Cascade behavior (data-integrity rules)
 
-- **`components.breaker_id` has `ON DELETE SET NULL`** at the FK level. Belt-and-suspenders: `SqliteBreakerRepository.delete()` *also* runs `UPDATE components SET breaker_id = NULL WHERE breaker_id = ?` inside the same transaction before the `DELETE FROM breakers`. This is intentional duplication — the FK is the database-level invariant, the app-level update is greppable and survives a future migration that forgets the FK clause.
-- **Panel delete** in `SqlitePanelRepository.delete()` iterates the panel's breakers and runs the breaker-delete logic (`UPDATE components SET breaker_id=NULL` + `DELETE FROM breakers`) inline for each, then deletes the panel — all inside one outer transaction. **Do not call `breakerRepo.delete()` recursively** from `panelRepo.delete()`: `node:sqlite` doesn't support nested transactions, so the cascade has to be flattened.
+- **`components.breaker_id` has `ON DELETE SET NULL`** at the FK level. Belt-and-suspenders: `PgBreakerRepository.delete()` *also* runs `UPDATE components SET breaker_id = NULL WHERE breaker_id = $1` inside the same transaction before the `DELETE FROM breakers`. This is intentional duplication — the FK is the database-level invariant, the app-level update is greppable and survives a future migration that forgets the FK clause.
+- **Panel delete** in `PgPanelRepository.delete()` iterates the panel's breakers and runs the breaker-delete logic (`UPDATE components SET breaker_id=NULL` + `DELETE FROM breakers`) inline for each, then deletes the panel — all inside one `db.transaction(...)` callback. **Do not call `breakerRepo.delete()` recursively** from `panelRepo.delete()`: the cascade runs on the single transactional client handed to the callback, so the breaker-delete logic is flattened inline rather than re-entering another repository's own transaction.
 - The end-to-end invariant: deleting a breaker OR a panel never deletes components. Components survive as Unassigned (`breaker_id IS NULL`).
 
 ## List filters (search vs exact-match)
 
-- **`/api/v1/components?room=<value>`** is exact-match, case-sensitive (SQLite default `BINARY` collation). Used when the caller knows the exact room name.
+- **`/api/v1/components?room=<value>`** is exact-match, case-sensitive (Postgres default collation — `=` comparison, no `LOWER()`). Used when the caller knows the exact room name.
 - **`/api/v1/components?search=<term>`** is case-insensitive substring matching `name` OR `room` OR `service_entries.note` (via `LOWER(...) LIKE LOWER('%term%')`). Used for typeahead / fuzzy filtering from a search box.
 - **As of cycle-67 (G40 Part 2), search ALSO matches `service_entries.note` content** for the `?search=` query on `/api/v1/components`. The widened clause uses an `EXISTS` subquery against `service_entries` filtered by `parent_type='component' AND parent_id=c.id`. Result rows are still per-component (deduplicated via `EXISTS` — a component appears once even if multiple log entries match). The note LIKE is intentionally NOT extended to `breakers.label` or `breaker_tests.outcome` — those have their own surfaces (`/audit`, panel details). Performance: the EXISTS uses the cycle-66 `idx_service_entries_parent(parent_type, parent_id, occurred_at DESC)` composite for the parent_id lookup; the note LIKE is a table-scan within matching entries, acceptable given the small per-component entry count in practice.
 - All filters AND-combine: `?room=Kitchen&type=outlet&search=plug` returns outlets in (exact) "Kitchen" whose name OR room OR ANY service-entry note contains "plug" case-insensitively.
@@ -2434,8 +2717,8 @@ There are **two complementary URLs for viewing a floor**. They are NOT redundant
 ## Future-cycle commitments (don't break these)
 
 - **`components.breaker_id` stays nullable through G3 and beyond.** It was added in cycle 5 with a nullable FK and stays that way: the app's UX model is "components can be unassigned." Never add a NOT NULL constraint or auto-assign migration.
-- **Component types are frozen** at the 7 values in the `components.type` CHECK constraint: `outlet`, `light`, `switch`, `appliance`, `junction_box`, `smoke_detector`, `other`. Adding new values requires an SQLite table rebuild (no ALTER for CHECK). If a new type is needed, write a migration with explicit ADR and bump the constraint atomically.
-- **`?room=` and other text filters are exact-match, case-sensitive** (SQLite default `BINARY` collation). If a future cycle wants typeahead or fuzzy match, build it client-side from the row set or add a separate fuzzy endpoint — don't change the existing contract.
+- **Component types are frozen** at the 7 values in the `components.type` CHECK constraint: `outlet`, `light`, `switch`, `appliance`, `junction_box`, `smoke_detector`, `other`. Adding new values requires `ALTER TABLE components DROP CONSTRAINT … ; ADD CONSTRAINT … CHECK(...)` (Postgres can drop + re-add a CHECK without a full table rebuild). If a new type is needed, write a migration with explicit ADR and bump the constraint atomically.
+- **`?room=` and other text filters are exact-match, case-sensitive** (Postgres default collation). If a future cycle wants typeahead or fuzzy match, build it client-side from the row set or add a separate fuzzy endpoint — don't change the existing contract.
 
 ## Request validation
 
@@ -2445,17 +2728,17 @@ There are **two complementary URLs for viewing a floor**. They are NOT redundant
 
 ## Persistence
 
-- All DB writes go through a `Repository` interface defined in `@he/shared` (`PanelRepository`, `BreakerRepository`). The SQLite implementation is in `packages/backend/src/repository.ts`.
-- A single `DatabaseSync` (`openDatabase`) is shared across repos so cross-table operations like the panel→breakers cascade can run in one transaction.
-- **Cascade deletes are application-level, not FK `ON DELETE CASCADE`.** This is intentional: future cycles (G7 breaker-test history) may want retention; an early FK CASCADE silently destroys child rows. Use `db.prepare('BEGIN'/'COMMIT'/'ROLLBACK')` around multi-table deletes (see `SqlitePanelRepository.delete`).
+- All DB writes go through a `Repository` interface defined in `@he/shared` (`PanelRepository`, `BreakerRepository`, …). The Postgres implementation is in `packages/backend/src/repository.ts` (the `Pg*Repository` classes); the `pg` access layer is `packages/backend/src/db.ts`. See "Persistence is PostgreSQL" at the top of this file for the full contract.
+- A single `Db` (pool-backed, from `createPool`) is shared across repos. Cross-table operations like the panel→breakers cascade run inside `db.transaction(fn)`, which hands `fn` a single transactional `Querier` so every statement lands on the same connection.
+- **Cascade deletes are application-level, not FK `ON DELETE CASCADE`.** This is intentional: future cycles (G7 breaker-test history) may want retention; an early FK CASCADE silently destroys child rows. Wrap multi-table deletes in `db.transaction(...)` (see `PgPanelRepository.delete`).
 - IDs are ULIDs via `newId()` from `@he/shared`. **Use `monotonicFactory()`** (already wired) so same-millisecond inserts sort consistently.
-- Timestamps are **epoch milliseconds** (`Date.now()`), stored as `INTEGER`. Pinned in shared types as `createdAt: number`.
+- Timestamps are **epoch milliseconds** (`Date.now()`), stored as `BIGINT` (Postgres `INTEGER` is 32-bit and would overflow). The `pg` BIGINT→number type parser is registered in `db.ts`. Pinned in shared types as `createdAt: number`.
 
 ## Testing
 
-- Backend tests run via `tsx --test src/**/*.test.ts`. **Do NOT reintroduce vitest** in the backend — it mis-resolves `node:sqlite` (strips the `node:` prefix and fails to find a package `sqlite`).
+- Backend tests run via `tsx --test src/**/*.test.ts`. **Do NOT reintroduce vitest** in the backend (it mis-resolved `node:sqlite` historically; the runner choice is now just project convention — keep `tsx --test`).
 - Tests live next to source as `*.test.ts`; tsconfig excludes them from emit.
-- Each test suite opens a temp SQLite via `mkdtempSync` + `openDatabase`, closes the DB and `rm`s the temp dir in `afterEach`.
+- **Tests run against a REAL Postgres**, isolated per-suite by schema. `createTestDb()` (`test-helpers.ts`) makes a pool scoped to a unique `test_<ulid>` schema (via `-c search_path=…`), runs `initSchema`, and returns `{ db, schema, cleanup }`; `cleanup()` drops the schema CASCADE + closes the pool in `afterEach`. Point `DATABASE_URL` at a dev Postgres — default `postgresql://postgres:postgres@localhost:5433/house_electricals` (start it with `docker compose -f docker-compose.dev.yml up -d`).
 
 ## Frontend write paths (optimistic UI)
 
@@ -2505,12 +2788,21 @@ Frontend dev URL: `http://localhost:5173/`. Backend dev URL: `http://127.0.0.1:3
 
 `predev` script ensures `./data/floor-plans/` exists and runs an initial `@he/shared` build so the dependent packages have valid `.d.ts` to read from on first tick.
 
-`.env.dev` (committed at repo root) overrides the docker-absolute defaults:
-- `DB_PATH=./data/panels.db` (instead of `/data/panels.db`)
+`.env.dev` (committed at repo root) overrides the docker defaults:
+- `DATABASE_URL=postgresql://postgres:postgres@localhost:5433/house_electricals`
+  — points the dev backend at the local Postgres container
+  (`docker-compose.dev.yml`, host port 5433 so it never clashes with a
+  system Postgres on 5432).
 - `FLOOR_PLAN_DIR=./data/floor-plans` (instead of `/data/floor-plans`)
+- `DATA_DIR=./data` (where the auto-generated `.auth-secret` is written —
+  in the container this defaults to `/data`)
 - `HOST=127.0.0.1` (loopback only — dev mode doesn't expose to LAN)
 
-`./data/` is gitignored — wipe it freely.
+Relational data lives in the dev Postgres container; only floor-plan
+images + `.auth-secret` live under `./data/`. Start Postgres with
+`docker compose -f docker-compose.dev.yml up -d`; wipe it (and the data
+dir) with `docker compose -f docker-compose.dev.yml down -v` + `rm -rf
+./data`. `./data/` is gitignored.
 
 **`routes/dev-static.ts`** mounts `GET /files/floor-plans/:filename` on the backend. After the single-image consolidation this is the CANONICAL floor-plan serving path in both dev and prod — there is no nginx fronting the backend anymore; Hono is the only thing serving uploaded floor-plan images. The file kept its historical `devStaticRoutes` name; the logic was already production-grade (path-traversal hardened via filename sanitization + resolved-path-must-live-inside-dir check, immutable cache header).
 
@@ -2557,16 +2849,23 @@ stays single-image. The cycle-33 ADR is superseded by this.
 ## Deployment
 
 - One canonical deploy path: `docker compose up -d` from the repo root.
-- **One service** named `app` running the unified `house-electricals` image
-  (distroless Node 22 + Hono + node:sqlite, distroless nonroot UID 65532).
-  Hono serves `/api/v1/*`, `/files/floor-plans/*`, and `/*` (SPA) on a
-  single internal port (3000), mapped to `${HOST_PORT:-8070}` on the host.
+- **Two services**: `app` (the unified `house-electricals` image —
+  distroless Node 22 + Hono + `pg`, distroless nonroot UID 65532) and
+  `db` (`postgres:16-alpine`, container `house-electricals-db`, on the
+  internal compose network only). `app` serves `/api/v1/*`,
+  `/files/floor-plans/*`, and `/*` (SPA) on a single internal port (3000),
+  mapped to `${HOST_PORT:-8070}` on the host, and connects to `db` via the
+  `DATABASE_URL` both compose files derive from `POSTGRES_USER` /
+  `POSTGRES_PASSWORD` / `POSTGRES_DB`. `app` waits on `db` via
+  `depends_on: condition: service_healthy`.
 - **No TLS in the stack.** Inside-the-container port 3000 maps to host
   `${HOST_PORT:-8070}`. HTTPS termination is the operator's responsibility
   — typically via an external Caddy or a Cloudflare Tunnel pointing at
   `http://localhost:${HOST_PORT}`.
-- Persistent bind-mount: `${DATA_PATH:-./data}` holds the SQLite file +
-  floor-plan images. Mounted at `/data` RW. No separate proxy bind-mount.
+- Persistent state lives in **two** places: the `he-pgdata` named volume
+  (all relational data — owned by Postgres) and the `${DATA_PATH:-./data}`
+  bind-mount (floor-plan images + `.auth-secret`, mounted at `/data` RW).
+  Back up both together.
 - Before first `up` on Linux: `sudo chown -R 65532:65532 ${DATA_PATH}`
   (the container runs as distroless nonroot UID 65532).
 - Local browser testing: `http://localhost:8070/` works as a real PWA
@@ -2574,9 +2873,11 @@ stays single-image. The cycle-33 ADR is superseded by this.
 
 ## What NOT to do
 
-- Don't introduce `better-sqlite3` (we use Node's built-in `node:sqlite`).
+- Don't reintroduce `node:sqlite` / `better-sqlite3` — persistence is
+  PostgreSQL via `pg` (see the "Persistence is PostgreSQL" section at the
+  top of this file).
 - Don't add desktop-only CSS — this is a mobile-first PWA.
 - Don't add CORS middleware — same-origin via Caddy.
 - Don't write to VISION.md from inside a meta-ralph cycle.
-- Don't bypass the `Repository` interface to query SQLite directly from routes.
+- Don't bypass the `Repository` interface to query the database directly from routes.
 - Don't switch the URL convention without an ADR update here first.

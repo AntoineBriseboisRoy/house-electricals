@@ -3,19 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
-import {
-  openDatabase,
-  SqliteBreakerRepository,
-  SqliteBreakerTestRepository,
-  SqliteComponentRepository,
-  SqliteFloorRepository,
-  SqlitePanelRepository,
-  SqliteRoomRepository,
-  SqliteServiceEntryRepository,
-  SqliteWallRepository,
-} from './repository.js';
-import { buildApp } from './server.js';
+import type { Hono } from 'hono';
+import { buildTestApp, createTestDb } from './test-helpers.js';
 import { sniffImage } from './image-meta.js';
 
 // Minimal 2x3 PNG (Red 2x3 image) for tests.
@@ -60,28 +49,17 @@ describe('sniffImage', () => {
 describe('floor-plan routes (now scoped to floors, G13)', () => {
   let dir: string;
   let dataDir: string;
-  let db: DatabaseSync;
-  let app: ReturnType<typeof buildApp>;
+  let cleanup: () => Promise<void>;
+  let app: Hono;
   let floorId: string;
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'he-fp-'));
     dataDir = join(dir, 'floor-plans');
     process.env.FLOOR_PLAN_DIR = dataDir;
-    db = openDatabase(join(dir, 'test.db'));
-    app = buildApp({
-      panelRepository: new SqlitePanelRepository(db),
-      breakerRepository: new SqliteBreakerRepository(db),
-      breakerTestRepository: new SqliteBreakerTestRepository(db),
-      componentRepository: new SqliteComponentRepository(db),
-      floorRepository: new SqliteFloorRepository(db),
-      wallRepository: new SqliteWallRepository(db),
-      roomRepository: new SqliteRoomRepository(db),
-      serviceEntryRepository: new SqliteServiceEntryRepository(db),
-      db,
-      appUserRepository: null,
-      auth: null,
-    });
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    app = buildTestApp(t.db);
     const r = await app.request('/api/v1/floors', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -90,8 +68,8 @@ describe('floor-plan routes (now scoped to floors, G13)', () => {
     floorId = ((await r.json()) as { data: { id: string } }).data.id;
   });
 
-  afterEach(() => {
-    db.close();
+  afterEach(async () => {
+    await cleanup();
     rmSync(dir, { recursive: true, force: true });
     delete process.env.FLOOR_PLAN_DIR;
   });

@@ -1,11 +1,13 @@
 import { Hono } from 'hono';
 import { jwt } from 'hono/jwt';
-import type { DatabaseSync } from 'node:sqlite';
+import { secureHeaders } from 'hono/secure-headers';
+import type { Db } from './db.js';
 import type {
   ApiError,
   AppUserRepository,
   BreakerRepository,
   BreakerTestRepository,
+  BuildingRepository,
   ComponentRepository,
   FloorRepository,
   PanelRepository,
@@ -13,6 +15,7 @@ import type {
   ServiceEntryRepository,
   WallRepository,
 } from '@he/shared';
+import { buildBuildingRoutes } from './routes/buildings.js';
 import { buildPanelRoutes } from './routes/panels.js';
 import { buildBreakerRoutes } from './routes/breakers.js';
 import { buildBreakerTestRoutes } from './routes/breaker-tests.js';
@@ -33,6 +36,8 @@ import {
 import { AUTH_COOKIE_NAME, type AuthConfig } from './auth.js';
 
 export type AppDeps = {
+  /** 2026-05 — top-level building owner of panels/floors/components. */
+  buildingRepository: BuildingRepository;
   panelRepository: PanelRepository;
   breakerRepository: BreakerRepository;
   /** G36 cycle-61 — audit-trail repo (breaker_tests). */
@@ -43,9 +48,9 @@ export type AppDeps = {
   roomRepository: RoomRepository;
   /** G40 cycle-66 — dated service-log repo (service_entries). */
   serviceEntryRepository: ServiceEntryRepository;
-  /** Raw DB handle — switch_controls is a thin join table, easier to
+  /** Postgres handle — switch_controls is a thin join table, easier to
    *  query directly than via a full repo class for G19 scope. */
-  db: DatabaseSync;
+  db: Db;
   /** feat/auth-gate (sign-up flow) — single-user account table. The
    *  JWT-protected auth routes read this; sign-up writes the (one)
    *  row. May be null in tests that don't exercise auth. */
@@ -60,6 +65,24 @@ export type AppDeps = {
 
 export const buildApp = (deps: AppDeps): Hono => {
   const app = new Hono();
+
+  // ── SECURITY HEADERS ─────────────────────────────────────────────────
+  // Mounted first so EVERY response (API, SPA, uploaded images, the 401
+  // envelope) carries baseline hardening headers. Hono's defaults are a
+  // good fit for this same-origin self-hosted PWA:
+  //   • X-Content-Type-Options: nosniff
+  //   • X-Frame-Options: SAMEORIGIN (the app is never meant to be iframed)
+  //   • Referrer-Policy: no-referrer
+  //   • Cross-Origin-{Resource,Opener}-Policy: same-origin
+  //   • Strict-Transport-Security (ignored by browsers over plain HTTP /
+  //     localhost; honored once a TLS-terminating reverse proxy fronts us)
+  //   • strips X-Powered-By
+  // Two defaults are deliberately LEFT OFF by Hono and we keep them off:
+  //   • Cross-Origin-Embedder-Policy (require-corp would break image loads)
+  //   • Content-Security-Policy — a CSP tuned to the Vite/PWA bundle's
+  //     inline styles + service-worker needs is its own tested change;
+  //     shipping a wrong CSP would white-screen the app. Deferred.
+  app.use('*', secureHeaders());
 
   // ── PUBLIC ROUTES ────────────────────────────────────────────────────
   // Health stays open so reverse-proxy / monitoring probes work without
@@ -106,6 +129,7 @@ export const buildApp = (deps: AppDeps): Hono => {
   }
 
   // ── PROTECTED API ROUTES ─────────────────────────────────────────────
+  app.route('/api/v1', buildBuildingRoutes(deps.buildingRepository));
   app.route(
     '/api/v1',
     buildPanelRoutes(deps.panelRepository, deps.breakerRepository)

@@ -6,22 +6,8 @@
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
-import {
-  openDatabase,
-  SqliteBreakerRepository,
-  SqliteBreakerTestRepository,
-  SqliteComponentRepository,
-  SqliteFloorRepository,
-  SqlitePanelRepository,
-  SqliteRoomRepository,
-  SqliteServiceEntryRepository,
-  SqliteWallRepository,
-} from './repository.js';
-import { buildApp } from './server.js';
+import type { Hono } from 'hono';
+import { buildTestApp, createTestDb } from './test-helpers.js';
 
 type PanelLike = {
   id: string;
@@ -30,9 +16,8 @@ type PanelLike = {
 };
 
 describe('subpanel hierarchy (G39)', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let app: ReturnType<typeof buildApp>;
+  let cleanup: () => Promise<void>;
+  let app: Hono;
 
   const json = async <T,>(res: Response): Promise<T> =>
     (await res.json()) as T;
@@ -85,27 +70,14 @@ describe('subpanel hierarchy (G39)', () => {
     return body.data;
   };
 
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'he-sub-'));
-    db = openDatabase(join(dir, 'srv.db'));
-    app = buildApp({
-      panelRepository: new SqlitePanelRepository(db),
-      breakerRepository: new SqliteBreakerRepository(db),
-      breakerTestRepository: new SqliteBreakerTestRepository(db),
-      componentRepository: new SqliteComponentRepository(db),
-      floorRepository: new SqliteFloorRepository(db),
-      wallRepository: new SqliteWallRepository(db),
-      roomRepository: new SqliteRoomRepository(db),
-      serviceEntryRepository: new SqliteServiceEntryRepository(db),
-      db,
-      appUserRepository: null,
-      auth: null,
-    });
+  beforeEach(async () => {
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    app = buildTestApp(t.db);
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   it('POST /panels accepts parentBreakerId, GET returns it', async () => {

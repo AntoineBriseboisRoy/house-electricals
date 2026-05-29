@@ -36,8 +36,65 @@ permissions:
   packages: write
 
 jobs:
+  # ───────────────────────────────────────────────────────────────────────
+  # Gate: typecheck + build + backend test suite must pass before we publish
+  # an image. The backend tests run against a real Postgres (the engine the
+  # app ships with) spun up as a service container — schema-per-suite
+  # isolation means they need a reachable Postgres, not a mock.
+  # ───────────────────────────────────────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: house_electricals
+        # Host port 5433 matches the repo's default DATABASE_URL + the dev
+        # compose file, so local and CI hit the same connection string.
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        # Version is read from the root package.json "packageManager" field.
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build all packages
+        # Topological: @he/shared builds first so backend/frontend resolve
+        # its emitted .d.ts. Also catches Vite build breaks before we bother
+        # building a Docker image.
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Backend tests (against the Postgres service)
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5433/house_electricals
+        run: pnpm --filter @he/backend test
+
   build-and-push:
     runs-on: ubuntu-latest
+    # Never publish an image from a red build.
+    needs: test
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

@@ -1,45 +1,21 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Hono } from 'hono';
 import type { Floor, Wall } from '@he/shared';
-import {
-  openDatabase,
-  SqliteBreakerRepository,
-  SqliteBreakerTestRepository,
-  SqliteComponentRepository,
-  SqliteFloorRepository,
-  SqlitePanelRepository,
-  SqliteRoomRepository,
-  SqliteServiceEntryRepository,
-  SqliteWallRepository,
-} from './repository.js';
-import { buildApp } from './server.js';
+import type { Db } from './db.js';
+import { buildTestApp, createTestDb } from './test-helpers.js';
 
 describe('wall routes (G12)', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let app: ReturnType<typeof buildApp>;
+  let cleanup: () => Promise<void>;
+  let db: Db;
+  let app: Hono;
   let floorId: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'he-walls-'));
-    db = openDatabase(join(dir, 'w.db'));
-    app = buildApp({
-      panelRepository: new SqlitePanelRepository(db),
-      breakerRepository: new SqliteBreakerRepository(db),
-      breakerTestRepository: new SqliteBreakerTestRepository(db),
-      componentRepository: new SqliteComponentRepository(db),
-      floorRepository: new SqliteFloorRepository(db),
-      wallRepository: new SqliteWallRepository(db),
-      roomRepository: new SqliteRoomRepository(db),
-      serviceEntryRepository: new SqliteServiceEntryRepository(db),
-      db,
-      appUserRepository: null,
-      auth: null,
-    });
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    db = t.db;
+    app = buildTestApp(t.db);
     const r = await app.request('/api/v1/floors', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -48,9 +24,8 @@ describe('wall routes (G12)', () => {
     floorId = ((await r.json()) as { data: { id: string } }).data.id;
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   it('GET /api/v1/floors/:floorId/walls returns empty initially', async () => {
@@ -81,12 +56,32 @@ describe('wall routes (G12)', () => {
   });
 
   it('POST rejects out-of-range coords (zod 400)', async () => {
+    // Beyond the widened COORD_MIN..COORD_MAX bounds (±100000). The legacy
+    // 0..10000 window no longer bounds geometry — the plan is unbounded.
     const res = await app.request(`/api/v1/floors/${floorId}/walls`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ x1: 0, y1: 0, x2: 10001, y2: 0 }),
+      body: JSON.stringify({ x1: 0, y1: 0, x2: 100001, y2: 0 }),
     });
     assert.equal(res.status, 400);
+  });
+
+  it('POST accepts coords beyond the legacy 0–10000 window', async () => {
+    // Regression for the unbounded-canvas widening: negative + far-out
+    // coordinates are now valid (they live off the initial viewBox window
+    // and are reached by panning).
+    const res = await app.request(`/api/v1/floors/${floorId}/walls`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ x1: -5000, y1: 0, x2: 50000, y2: 25000 }),
+    });
+    assert.equal(res.status, 201);
+    const body = (await res.json()) as {
+      data: { x1: number; x2: number; y2: number };
+    };
+    assert.equal(body.data.x1, -5000);
+    assert.equal(body.data.x2, 50000);
+    assert.equal(body.data.y2, 25000);
   });
 
   it('POST rejects non-integer coords', async () => {
@@ -169,11 +164,11 @@ describe('wall routes (G12)', () => {
     assert.equal(del.status, 204);
 
     // Floor is gone, AND its walls are gone (ON DELETE CASCADE).
-    type CountRow = { n: number };
-    const remaining = (
-      db.prepare('SELECT COUNT(*) AS n FROM walls WHERE floor_id = ?').get(floor.id) as CountRow
-    ).n;
-    assert.equal(remaining, 0);
+    const row = await db.queryOne<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM walls WHERE floor_id = $1',
+      [floor.id]
+    );
+    assert.equal(Number(row?.n), 0);
   });
 
   it('happy-path: create → list-by-floor → get → patch → delete', async () => {

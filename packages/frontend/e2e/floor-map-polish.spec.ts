@@ -73,6 +73,9 @@ test.describe('G26 floor-map polish @cycle-32', () => {
   test('selecting a room shows X/Y/W/H numeric inputs', async ({ page }) => {
     const { floorId } = loadSeeded();
     await page.goto(`/floors/${floorId}/edit`);
+    // Wait for the editor to hydrate (and the keydown listener to attach)
+    // before driving the keyboard — matches the sibling tests in this file.
+    await expect(page.getByRole('heading', { name: /Main Floor/i })).toBeVisible();
 
     // Switch to room tool — keyboard shortcut R.
     await page.keyboard.press('r');

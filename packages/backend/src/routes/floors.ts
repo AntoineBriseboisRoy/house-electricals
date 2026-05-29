@@ -3,6 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import {
   floorInputSchema,
   floorPatchSchema,
+  moveToBuildingSchema,
   type ApiEnvelope,
   type ApiError,
   type Floor,
@@ -10,6 +11,12 @@ import {
   type PanelRepository,
 } from '@he/shared';
 import { isUniqueConstraintError, uniqueNameTakenBody } from './unique-name.js';
+
+/** True for a Postgres FK-violation error (SQLSTATE 23503 on `err.code`). */
+const isForeignKeyError = (err: unknown): boolean =>
+  err !== null &&
+  typeof err === 'object' &&
+  (err as { code?: string }).code === '23503';
 
 export const buildFloorRoutes = (
   repo: FloorRepository,
@@ -38,7 +45,11 @@ export const buildFloorRoutes = (
   };
 
   router.get('/floors', async (c) => {
-    const floors = await repo.list();
+    // 2026-05 — optional ?buildingId scopes to one building.
+    const buildingId = c.req.query('buildingId');
+    const floors = await repo.list(
+      buildingId !== undefined && buildingId !== '' ? { buildingId } : undefined
+    );
     const body: ApiEnvelope<Floor[]> = { data: floors };
     return c.json(body, 200);
   });
@@ -112,6 +123,48 @@ export const buildFloorRoutes = (
       } catch (err) {
         if (isUniqueConstraintError(err) && patch.name !== undefined) {
           return c.json(uniqueNameTakenBody(patch.name), 409);
+        }
+        throw err;
+      }
+    }
+  );
+
+  // 2026-05 — move a floor (and the components placed on it) to another
+  // building. Walls/rooms follow via floor_id; cross-building refs cleaned up.
+  router.post(
+    '/floors/:id/move',
+    zValidator('json', moveToBuildingSchema, (result, c) => {
+      if (!result.success) {
+        const err: ApiError = {
+          error: { message: result.error.issues[0]?.message ?? 'Invalid body.' },
+        };
+        return c.json(err, 400);
+      }
+      return undefined;
+    }),
+    async (c) => {
+      const id = c.req.param('id');
+      const { buildingId } = c.req.valid('json');
+      try {
+        const moved = await repo.moveToBuilding(id, buildingId);
+        if (moved === null) {
+          const err: ApiError = { error: { message: 'Floor not found.' } };
+          return c.json(err, 404);
+        }
+        const body: ApiEnvelope<Floor> = { data: moved };
+        return c.json(body, 200);
+      } catch (err) {
+        if (isUniqueConstraintError(err)) {
+          const e: ApiError = {
+            error: {
+              message: 'A floor with that name already exists in the target building.',
+            },
+          };
+          return c.json(e, 409);
+        }
+        if (isForeignKeyError(err)) {
+          const e: ApiError = { error: { message: 'Building not found.' } };
+          return c.json(e, 400);
         }
         throw err;
       }

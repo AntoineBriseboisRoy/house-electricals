@@ -37,7 +37,7 @@ server needs a Personal Access Token to pull them. Making them public
 removes that friction.
 
 1. Push to main once so the workflow runs and creates the package
-   (`ghcr.io/antoinebriseboisroy/house-electricals`).
+   (`ghcr.io/<your-github-username>/house-electricals`).
 2. On GitHub, go to your profile → **Packages** → click the image →
    **Package settings** → **Change visibility** → Public.
 
@@ -73,8 +73,9 @@ sudo chown -R 65532:65532 /srv/house-electricals/data
 ```
 
 The `65532:65532` ownership matches the distroless `nonroot` UID/GID the
-backend container runs as. Without this the container will fail to write
-SQLite into `/data`.
+app container runs as. Without this the container will fail to write
+floor-plan images and the `.auth-secret` into `/data`. (Relational data
+lives in the Postgres volume, not here.)
 
 ---
 
@@ -204,9 +205,10 @@ Build the `.env` file from `.env.example` and copy it:
 ```bash
 # Locally, edit a copy:
 cp .env.example .env.production
-# Set IMAGE to ghcr.io/antoinebriseboisroy/house-electricals:latest
+# Set IMAGE to ghcr.io/<your-github-username>/house-electricals:latest
 # Set DATA_PATH to /srv/house-electricals/data
 # Set HOST_PORT to the port your reverse proxy will forward to (default 8070)
+# Set a strong POSTGRES_PASSWORD (POSTGRES_USER / POSTGRES_DB can stay default)
 
 scp .env.production your-user@server:/tmp/env
 ssh your-user@server "

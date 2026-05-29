@@ -13,12 +13,13 @@
 
 - 📱 **Mobile-first PWA** — installs to your phone's home screen
 - ⚡ **Click any component → see its breaker** — the daily-driver workflow
-- 🗺️ **Floor-plan editor** — draw walls and rooms in-app, place pins for outlets / lights / switches with drag-and-drop
+- 🏢 **Multiple buildings** — manage several houses/buildings in one app; switch between them from the top dropdown, and move panels or floors from one to another
+- 🗺️ **Floor-plan editor** — sketch walls on a pan/zoom canvas (converging walls link; close a loop and it becomes a room), then place and drag outlet / light / switch pins
 - 🔌 **Multi-panel + subpanel support** — feeder breakers cascade to subpanel components in test mode
 - 🧪 **Walk-through test mode** — flip a breaker IRL, tap the components that lost power, the app records the wiring
 - 🛡️ **GFCI/AFCI tracking** with monthly test reminders + printable panel-door diagram
 - 📒 **Per-breaker audit log** and per-component service log
-- 🔐 **Sign-up on first boot, login after** — single-user account, scrypt-hashed password, change-password from the floating Account chip
+- 🔐 **Sign-up on first boot, login after** — single-user account, scrypt-hashed password, change it from the Account button in the bottom tab bar
 - 🌗 Dark and light themes
 - 🏠 100% **self-hosted**, no cloud, no telemetry — your wiring data stays on your hardware
 
@@ -26,18 +27,45 @@
 
 You need a host with [Docker Engine](https://docs.docker.com/engine/install/) 24+ and Compose v2.
 
-Create `compose.yaml`:
+Create `compose.yaml` — two containers: the app (one Node process serving the
+API + SPA + uploaded images) and Postgres (all relational data):
 
 ```yaml
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: house-electricals-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres        # set a strong value in production
+      POSTGRES_DB: house_electricals
+    volumes:
+      - he-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d house_electricals"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   app:
     image: ghcr.io/antoinebriseboisroy/house-electricals:latest
     container_name: house-electricals
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - 8070:3000
     volumes:
-      - ./data:/data
+      - ./data:/data        # floor-plan uploads + .auth-secret
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/house_electricals
+      HOST: 0.0.0.0
+      PORT: 3000
+
+volumes:
+  he-pgdata:
 ```
 
 On Linux, prepare the data directory so the non-root container can write to it:
@@ -61,11 +89,11 @@ Open **http://your-host:8070/**. The very first visit shows a **sign-up screen**
 
 Every screen sits behind a single-user login gate.
 
-- **First-boot sign-up.** The first time you open the app, a sign-up form appears (the SQLite DB has no user yet). Pick a username + password; the password is hashed with scrypt and stored in `data/panels.db`. Subsequent visits go to the login screen.
-- **No env vars to set.** There is no `AUTH_PASSWORD` — credentials live in the DB, not the environment.
-- **Change password from the app.** Click the floating Account chip at the top-right of any screen → Change password modal.
-- **`data/.auth-secret`** is auto-generated on first boot (mode 600) and used to sign session cookies. Back it up alongside `data/panels.db`. Deleting it invalidates every active session (user row is untouched — they sign back in with the same password).
-- **Forgot your password?** Sessions are 30 days. To reset, stop the container, delete the row: `sqlite3 data/panels.db "DELETE FROM app_users"`, then start the container — first visit shows sign-up again. (No e-mail-based recovery flow, by design.)
+- **First-boot sign-up.** The first time you open the app, a sign-up form appears (no user exists yet). Pick a username + password; the password is hashed with scrypt and stored in Postgres (the `app_users` table). Subsequent visits go to the login screen.
+- **No env vars to set.** There is no `AUTH_PASSWORD` — credentials live in the database, not the environment.
+- **Change password from the app.** Tap the Account button in the bottom tab bar → Change password.
+- **`data/.auth-secret`** is auto-generated on first boot (mode 600) and used to sign session cookies. Back it up alongside the Postgres volume. Deleting it invalidates every active session (user row is untouched — they sign back in with the same password).
+- **Forgot your password?** Sessions are 30 days. To reset, delete the user row and reload — first visit shows sign-up again: `docker compose exec db psql -U postgres -d house_electricals -c "DELETE FROM app_users"`. (No e-mail-based recovery flow, by design.)
 
 There is no public sign-up beyond the first user, no second account, no roles. This is a single-user app on a LAN — the password protects the data from a casual visitor on your network, not from a determined attacker. Put it behind HTTPS (see below) before exposing it to the internet.
 
@@ -76,8 +104,11 @@ Set under `environment:` in `compose.yaml` or in a sibling `.env` file.
 | Variable | Default | Notes |
 |---|---|---|
 | `HOST_PORT` | `8070` | Host port the container binds to. Change the left side of `ports:` to match. |
-| `DATA_PATH` | `./data` | Host directory holding the SQLite DB (including the `app_users` row), floor-plan uploads, and the auto-generated `.auth-secret`. Back this up. |
-| `IMAGE` | `ghcr.io/antoinebriseboisroy/house-electricals:latest` | Pin to a commit SHA (e.g. `:a1b2c3d…`) or a `vX.Y.Z` tag for a stable rollback target. |
+| `POSTGRES_USER` | `postgres` | Postgres role. Seeds the `db` container **and** builds the app's `DATABASE_URL` — keep them in sync. |
+| `POSTGRES_PASSWORD` | `postgres` | Postgres password. **Set a strong value in production.** |
+| `POSTGRES_DB` | `house_electricals` | Database name. |
+| `DATA_PATH` | `./data` | Host directory holding floor-plan uploads + the auto-generated `.auth-secret`. (Relational data lives in the Postgres volume, not here.) Back up both. |
+| `IMAGE` | _(required for `compose.prod.yaml`)_ | Your fork's GHCR image, e.g. `ghcr.io/<your-github-username>/house-electricals:latest`. Pin to a commit SHA (e.g. `:a1b2c3d…`) or a `vX.Y.Z` tag for a stable rollback target. |
 
 ## HTTPS
 
@@ -131,19 +162,28 @@ docker compose pull
 docker compose up -d
 ```
 
-The bind-mounted `data/` directory survives image rebuilds.
+Both the `he-pgdata` Postgres volume and the bind-mounted `data/` directory survive image rebuilds.
 
 ## Backup
 
-The entire app state is one directory.
+App state lives in **two** places — back up both:
+
+1. The **Postgres volume** (`he-pgdata`) — all relational data: buildings,
+   panels, breakers, floors, rooms, components, logs, and the user account.
+2. The **`data/` directory** — uploaded floor-plan images + the
+   `.auth-secret` session-signing key.
 
 ```bash
-docker compose stop
-tar czf house-electricals-$(date +%F).tgz data/
-docker compose start
+# Relational data — pg_dump the database to a SQL file.
+docker compose exec -T db pg_dump -U postgres house_electricals > house-electricals-db-$(date +%F).sql
+
+# Files — the bind-mounted data directory.
+tar czf house-electricals-data-$(date +%F).tgz data/
 ```
 
-Restore by stopping the container, replacing `data/` with the unpacked archive, and starting again.
+Restore: recreate the stack, pipe the SQL dump back in
+(`docker compose exec -T db psql -U postgres -d house_electricals < house-electricals-db-YYYY-MM-DD.sql`),
+and unpack the `data/` archive in place.
 
 ## Versioning
 
@@ -156,8 +196,8 @@ Browse tags on the [package page](https://github.com/AntoineBriseboisRoy/house-e
 ## Uninstall
 
 ```bash
-docker compose down
-rm -rf data/    # only if you really want to delete your wiring data
+docker compose down -v   # -v also removes the he-pgdata volume (all relational data)
+rm -rf data/             # only if you really want to delete floor-plan images too
 ```
 
 ## More
@@ -169,7 +209,7 @@ rm -rf data/    # only if you really want to delete your wiring data
 
 ## Stack
 
-Node 22 · [Hono](https://hono.dev/) · [node:sqlite](https://nodejs.org/api/sqlite.html) · React 18 · [Vite](https://vitejs.dev/) · [vite-plugin-pwa](https://vite-pwa-org.netlify.app/) · TypeScript · Playwright
+Node 22 · [Hono](https://hono.dev/) · [Postgres](https://www.postgresql.org/) ([pg](https://node-postgres.com/)) · React 18 · [Vite](https://vitejs.dev/) · [vite-plugin-pwa](https://vite-pwa-org.netlify.app/) · TypeScript · Playwright
 
 ## License
 

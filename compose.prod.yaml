@@ -1,8 +1,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # House Electricals — Production Docker Compose (single-image)
 # ─────────────────────────────────────────────────────────────────────────────
-# Pulls the pre-built image from GitHub Container Registry and runs it.
-# One container, one process, one bind-mount for data.
+# Pulls the pre-built app image from GitHub Container Registry and runs it
+# alongside a Postgres database. Two containers: the app (one Node process
+# serving the API + SPA + uploaded images) and Postgres (all relational data).
 #
 # Quick start on a self-hosted server:
 #
@@ -10,7 +11,7 @@
 #   sudo chown -R 65532:65532 /srv/house-electricals/data
 #   sudo cp compose.prod.yaml /srv/house-electricals/compose.yaml
 #   sudo cp .env.example     /srv/house-electricals/.env
-#   # edit .env — set IMAGE, HOST_PORT, DATA_PATH
+#   # edit .env — set IMAGE, HOST_PORT, DATA_PATH, POSTGRES_PASSWORD
 #   cd /srv/house-electricals
 #   docker compose pull
 #   docker compose up -d
@@ -20,26 +21,48 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: house-electricals-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-house_electricals}
+    volumes:
+      # All relational data lives in Postgres — back up this volume.
+      - he-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-house_electricals}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   app:
     # No default — fails loudly if IMAGE isn't set so the operator can't
-    # accidentally pull a stale public maintainer image.
-    image: ${IMAGE:-ghcr.io/antoinebriseboisroy/house-electricals:latest}
+    # accidentally pull a stale public maintainer image. Set it in .env
+    # (e.g. ghcr.io/<your-github-username>/house-electricals:latest).
+    image: ${IMAGE:?IMAGE must be set in .env — see .env.example}
     container_name: house-electricals
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
-      # SQLite + WAL files + uploaded floor-plan images. Back up this
-      # directory regularly — it is the only state the app has.
+      # Uploaded floor-plan images + the auto-generated .auth-secret live
+      # on disk; all relational data lives in Postgres (the `db` service).
       - ${DATA_PATH:-./data}:/data
     environment:
       NODE_ENV: production
-      DB_PATH: /data/panels.db
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-house_electricals}
       FLOOR_PLAN_DIR: /data/floor-plans
       PUBLIC_DIR: /app/public
       PORT: 3000
       HOST: 0.0.0.0
       # Auth: no AUTH_USERNAME / AUTH_PASSWORD here. First-time setup
       # is a sign-up screen the first time you open the app — the
-      # backend stores the (one) user row in /data/panels.db.
+      # backend stores the (one) user row in the `app_users` table.
     ports:
       # Your reverse proxy (Caddy / Cloudflare Tunnel / Nginx / Traefik)
       # forwards to this host port.
@@ -50,3 +73,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+volumes:
+  he-pgdata:

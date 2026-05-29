@@ -15,10 +15,10 @@ Homeowners don't have a reliable way to know which breaker controls which outlet
 - **G3 — Breaker-to-component mapping** (shipped): each component assigned to one breaker; reverse view per-breaker.
 - **G4 — House map** (shipped, baseline): place components onto a 2D floor plan with draggable, click-targetable touch-sized icons.
 - **G5 — Click-to-identify** (shipped): tap component → breaker callout; tap breaker → list its components.
-- **G6 — Durable server-side storage** (shipped): SQLite in a bind-mounted volume; backup = copy one directory.
+- **G6 — Durable server-side storage** (shipped): PostgreSQL (migrated from SQLite — see CLAUDE.md "Persistence is PostgreSQL"); relational data in a named Docker volume, floor-plan images + `.auth-secret` in a bind-mounted directory. Backup = `pg_dump` + a tar of the bind-mount.
 - **G7 — Breaker-test workflow** (shipped): walk-up "flip a breaker, tag what just lost power" mode.
 - **G8 — Mobile-first PWA** (shipped, baseline): installable on iOS Safari + Android Chrome; touch hit targets ≥44px.
-- **G9 — LAN-only access** (shipped): no public internet required. Single-user login gate added in feat/auth-gate — first-time sign-up + scrypt-hashed password stored in SQLite; details in CLAUDE.md "Auth gate (feat/auth-gate + sign-up flow)".
+- **G9 — LAN-only access** (shipped): no public internet required. Single-user login gate added in feat/auth-gate — first-time sign-up + scrypt-hashed password stored in Postgres; details in CLAUDE.md "Auth gate (feat/auth-gate + sign-up flow)".
 - **G10 — `docker compose up` deployment** (shipped): single compose stack; one host port; HTTPS terminated by the operator's external reverse proxy (Caddy / Cloudflare Tunnel) — matches the user's HousesTracker deployment pattern.
 
 ### New goals (post cycle-10 vision extension)
@@ -39,7 +39,7 @@ Homeowners don't have a reliable way to know which breaker controls which outlet
   - **Walls** are line segments with endpoints in normalized coordinates. Tools: draw wall (tap two endpoints), move endpoint, delete wall.
   - **Rooms** are named rectangles (or polygons) drawn by dragging corners. Each room has a free-text label rendered in the center.
   - **Snap-to-grid** at a configurable grid size (default 1/40 of canvas dimension) so walls connect cleanly.
-  - **Vector storage**: walls and rooms persist as structured rows in SQLite, NOT as a rasterized image. They remain editable forever.
+  - **Vector storage**: walls and rooms persist as structured rows in Postgres, NOT as a rasterized image. They remain editable forever.
   - The existing image-upload path (G4 baseline) coexists — a floor can have a drawn plan, an uploaded image background, or both stacked (image as background, walls on top).
   - **Touch + mouse parity**: drag, two-finger zoom, two-finger pan all work; mouse + wheel zoom works on desktop dev viewport.
 
@@ -135,7 +135,7 @@ These become G22 / G23 / G24 in the Done-when checklist below. Cycle-22's in-pro
 - Kubernetes / Swarm / multi-node / Helm.
 - Host-OS-specific installers (no MSI, no .deb, no Homebrew).
 - **CAD-like precision floor planning** — G12 is a sketching tool for "approximately where the walls are," not AutoCAD. No dimensioning, no scale calibration, no DXF/SVG import beyond simple line+rectangle primitives.
-- **A separate floor-plan format with proprietary semantics** — `walls` and `rooms` are simple line/polygon records in SQLite; they're not a separate file format the user has to learn or back up separately.
+- **A separate floor-plan format with proprietary semantics** — `walls` and `rooms` are simple line/polygon records in Postgres; they're not a separate file format the user has to learn or back up separately.
 
 ## Done-when (vision-complete signal)
 
@@ -192,13 +192,13 @@ After the cycle-42 research synthesis (codebase audit + UX walkthrough + commerc
 
 ## Constraints (technical, legal, operational)
 
-- **Deployment unit:** single `docker-compose.yml` with two services (backend + nginx web). One host port exposed (`HOST_PORT=8050` by default). No in-stack TLS — HTTPS is handled by the operator's external reverse proxy (Caddy / Cloudflare Tunnel / etc.). This matches the user's HousesTracker deployment pattern.
+- **Deployment unit:** single `docker-compose.yml` with two services — `app` (a single Node/Hono process serving the API, uploaded floor-plan images, AND the built PWA) and `db` (Postgres). One host port exposed (`HOST_PORT=8070` by default). No in-stack TLS — HTTPS is handled by the operator's external reverse proxy (Caddy / Cloudflare Tunnel / etc.). This matches the user's HousesTracker deployment pattern. (The original cycle-33 backend+nginx split was collapsed into the single `app` image; see CLAUDE.md "Single-image consolidation".)
 - **Server host:** any Docker-capable Linux / Windows / macOS machine. Images target `linux/amd64` + `linux/arm64`.
 - **Frontend host:** the user's phone. Installable as PWA.
 - **Network:** LAN-only or via a tunnel. No port-forwarding required; no public internet exposure assumed.
 - **TLS / HTTPS:** terminated by the operator's external proxy, not by the stack. The compose stack serves plain HTTP on the host port.
-- **Auth:** single-user login gate (feat/auth-gate). First-time sign-up screen on empty DB; scrypt-hashed password in SQLite; 30-day JWT cookie. Trust boundary stays the LAN or the operator's reverse proxy / tunnel — auth is "casual visitor" deterrence, not "internet-exposed hardening".
-- **Database:** SQLite, file in a bind-mounted volume.
+- **Auth:** single-user login gate (feat/auth-gate). First-time sign-up screen on empty DB; scrypt-hashed password in Postgres; 30-day JWT cookie. Trust boundary stays the LAN or the operator's reverse proxy / tunnel — auth is "casual visitor" deterrence, not "internet-exposed hardening".
+- **Database:** PostgreSQL (the `db` compose service), relational data in a named Docker volume. Floor-plan images + the `.auth-secret` live in a separate bind-mounted directory.
 - **Licenses:** MIT / Apache-2 / BSD / ISC dependencies only. No GPL.
 - **Touch:** all interactive targets ≥44×44 CSS px.
 - **Resilience:** brief loss of LAN connectivity should not crash the PWA. Cached last-known data with a clear "not connected" indicator.
@@ -207,10 +207,10 @@ After the cycle-42 research synthesis (codebase audit + UX walkthrough + commerc
 
 ## Out-of-loop decisions (the meta-loop is not allowed to change these without human review)
 
-- **Two-tier architecture:** phone-side PWA + server-side Node backend in a container, fronted by nginx for static + `/api` proxy + `/files` alias. External proxy for HTTPS.
+- **Two-tier architecture:** phone-side PWA + server-side Node backend in a container. A single Node/Hono process serves the static PWA bundle + `/api` + `/files`; a sibling Postgres container holds the data. External proxy for HTTPS.
 - **Frontend = PWA.** Not Electron, Capacitor, native, or desktop-only.
-- **Backend persistence = SQLite file** in a bind-mounted volume.
-- **Single-user, LAN-only** (or behind operator's tunnel) + a minimal login gate (feat/auth-gate: sign-up on first boot, scrypt-hashed password in SQLite, JWT cookie). No multi-user, no roles, no signup beyond the first user.
+- **Backend persistence = PostgreSQL** (the `db` compose service) in a named Docker volume; floor-plan images + `.auth-secret` in a bind-mounted directory.
+- **Single-user, LAN-only** (or behind operator's tunnel) + a minimal login gate (feat/auth-gate: sign-up on first boot, scrypt-hashed password in Postgres, JWT cookie). No multi-user, no roles, no signup beyond the first user.
 - **Mobile-first.** Desktop browser is incidental.
 - **Docker Compose is the deployment surface.** No K8s / Swarm / Helm / host-package-manager installers.
 - **No in-stack TLS** (locked in by the HousesTracker-pattern conversion). HTTPS is external. Operator picks the tool.

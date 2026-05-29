@@ -1,69 +1,42 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
-import {
-  openDatabase,
-  SqliteAppUserRepository,
-  SqliteBreakerRepository,
-  SqliteBreakerTestRepository,
-  SqliteComponentRepository,
-  SqliteFloorRepository,
-  SqlitePanelRepository,
-  SqliteRoomRepository,
-  SqliteServiceEntryRepository,
-  SqliteWallRepository,
-} from './repository.js';
-import { buildApp } from './server.js';
+import type { Hono } from 'hono';
+import { PgAppUserRepository } from './repository.js';
+import type { Db } from './db.js';
 import { hashPassword } from './password.js';
 import {
+  buildTestApp,
+  createTestDb,
   TEST_AUTH,
   TEST_PASSWORD,
   TEST_USERNAME,
   testAuthCookie,
 } from './test-helpers.js';
 
-const buildAuthedApp = (
-  db: DatabaseSync
-): ReturnType<typeof buildApp> => {
-  return buildApp({
-    panelRepository: new SqlitePanelRepository(db),
-    breakerRepository: new SqliteBreakerRepository(db),
-    breakerTestRepository: new SqliteBreakerTestRepository(db),
-    componentRepository: new SqliteComponentRepository(db),
-    floorRepository: new SqliteFloorRepository(db),
-    wallRepository: new SqliteWallRepository(db),
-    roomRepository: new SqliteRoomRepository(db),
-    serviceEntryRepository: new SqliteServiceEntryRepository(db),
-    db,
-    appUserRepository: new SqliteAppUserRepository(db),
-    auth: TEST_AUTH,
-  });
-};
-
 /** Seed the canonical test user (username + scrypt hash of TEST_PASSWORD). */
-const seedTestUser = async (db: DatabaseSync): Promise<void> => {
-  const users = new SqliteAppUserRepository(db);
+const seedTestUser = async (db: Db): Promise<void> => {
+  const users = new PgAppUserRepository(db);
   const passwordHash = await hashPassword(TEST_PASSWORD);
-  users.create({ username: TEST_USERNAME, passwordHash });
+  await users.create({ username: TEST_USERNAME, passwordHash });
 };
 
 describe('auth gate (feat/auth-gate + sign-up flow)', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let app: ReturnType<typeof buildApp>;
+  let cleanup: () => Promise<void>;
+  let db: Db;
+  let app: Hono;
 
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'he-auth-'));
-    db = openDatabase(join(dir, 's.db'));
-    app = buildAuthedApp(db);
+  beforeEach(async () => {
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    db = t.db;
+    app = buildTestApp(t.db, {
+      auth: TEST_AUTH,
+      appUserRepository: new PgAppUserRepository(t.db),
+    });
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   describe('GET /api/v1/auth/setup-status', () => {

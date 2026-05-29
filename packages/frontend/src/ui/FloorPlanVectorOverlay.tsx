@@ -44,15 +44,18 @@ export const FloorPlanVectorOverlay = ({
       {/* Rooms render BEHIND walls so wall strokes stay crisp on top of
          room fills. Labels render inside their room <g> at the center. */}
       {rooms.map((r) => {
+        // Label sits at the bbox center (cheap + stable for both rectangles
+        // and arbitrary wall-loop polygons). The shape itself is the polygon.
         const cx = r.x + r.w / 2;
         const cy = r.y + r.h / 2;
         const isSelected = selectedRoomId === r.id;
+        const ptStr = r.points.map((p) => `${p.x},${p.y}`).join(' ');
         return (
           <g
             key={r.id}
             className={isSelected ? 'floor-plan__room floor-plan__room--selected' : 'floor-plan__room'}
           >
-            <rect x={r.x} y={r.y} width={r.w} height={r.h} className="floor-plan__room-rect" />
+            <polygon points={ptStr} className="floor-plan__room-rect" />
             {/* Center text label — SVG <text> scales with the viewbox.
              *  Font-size + letter-spacing live in styles.css; mobile shrinks
              *  the font further so long names fit in narrow rooms. */}

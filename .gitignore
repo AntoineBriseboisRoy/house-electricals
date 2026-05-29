@@ -17,6 +17,7 @@ build/
 
 # Runtime data (bind-mounted into containers)
 data/
+data-prod/
 caddy-data/
 caddy-config/
 

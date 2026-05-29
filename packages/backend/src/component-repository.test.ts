@@ -1,31 +1,26 @@
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
 import {
-  openDatabase,
-  SqliteBreakerRepository,
-  SqliteComponentRepository,
-  SqlitePanelRepository,
-  SqliteServiceEntryRepository,
+  PgBreakerRepository,
+  PgComponentRepository,
+  PgPanelRepository,
+  PgServiceEntryRepository,
 } from './repository.js';
+import { createTestDb } from './test-helpers.js';
+import type { Db } from './db.js';
 
-describe('SqliteComponentRepository', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let repo: SqliteComponentRepository;
+describe('PgComponentRepository', () => {
+  let cleanup: () => Promise<void>;
+  let repo: PgComponentRepository;
 
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'he-cmp-'));
-    db = openDatabase(join(dir, 'test.db'));
-    repo = new SqliteComponentRepository(db);
+  beforeEach(async () => {
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    repo = new PgComponentRepository(t.db);
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   it('lists empty initially', async () => {
@@ -145,23 +140,21 @@ describe('SqliteComponentRepository', () => {
 });
 
 describe('component <-> breaker mapping cascade', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let panelRepo: SqlitePanelRepository;
-  let breakerRepo: SqliteBreakerRepository;
-  let componentRepo: SqliteComponentRepository;
+  let cleanup: () => Promise<void>;
+  let panelRepo: PgPanelRepository;
+  let breakerRepo: PgBreakerRepository;
+  let componentRepo: PgComponentRepository;
 
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'he-map-'));
-    db = openDatabase(join(dir, 'test.db'));
-    panelRepo = new SqlitePanelRepository(db);
-    breakerRepo = new SqliteBreakerRepository(db);
-    componentRepo = new SqliteComponentRepository(db);
+  beforeEach(async () => {
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    panelRepo = new PgPanelRepository(t.db);
+    breakerRepo = new PgBreakerRepository(t.db);
+    componentRepo = new PgComponentRepository(t.db);
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   it('create accepts a breakerId pointing at a valid breaker', async () => {
@@ -210,7 +203,7 @@ describe('component <-> breaker mapping cascade', () => {
     assert.equal(unassigned?.breakerId, null);
   });
 
-  it('SqliteBreakerRepository.delete nulls components.breaker_id transactionally', async () => {
+  it('PgBreakerRepository.delete nulls components.breaker_id transactionally', async () => {
     const panel = await panelRepo.create({ name: 'M' });
     const breaker = await breakerRepo.create(panel.id, {
       slot: '1',
@@ -235,7 +228,7 @@ describe('component <-> breaker mapping cascade', () => {
     assert.equal((await componentRepo.get(c2.id))?.breakerId, null);
   });
 
-  it('SqlitePanelRepository.delete cascades through breakers nulling component refs', async () => {
+  it('PgPanelRepository.delete cascades through breakers nulling component refs', async () => {
     const panel = await panelRepo.create({ name: 'M' });
     const breaker = await breakerRepo.create(panel.id, {
       slot: '1',
@@ -405,21 +398,21 @@ describe('component <-> breaker mapping cascade', () => {
 });
 
 describe('G40 Part 2 (cycle-67) — search matches service_entries.note', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let componentRepo: SqliteComponentRepository;
-  let serviceEntryRepo: SqliteServiceEntryRepository;
+  let cleanup: () => Promise<void>;
+  let db: Db;
+  let componentRepo: PgComponentRepository;
+  let serviceEntryRepo: PgServiceEntryRepository;
 
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'he-cmp-srch-'));
-    db = openDatabase(join(dir, 'test.db'));
-    componentRepo = new SqliteComponentRepository(db);
-    serviceEntryRepo = new SqliteServiceEntryRepository(db);
+  beforeEach(async () => {
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    db = t.db;
+    componentRepo = new PgComponentRepository(t.db);
+    serviceEntryRepo = new PgServiceEntryRepository(t.db);
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   it('finds a component whose service-entry note matches the search term', async () => {
@@ -483,8 +476,8 @@ describe('G40 Part 2 (cycle-67) — search matches service_entries.note', () => 
 
   it('breaker-parented service entries do not leak into component search', async () => {
     // Verifies the parent_type='component' filter on the EXISTS subquery.
-    const panelRepo = new SqlitePanelRepository(db);
-    const breakerRepo = new SqliteBreakerRepository(db);
+    const panelRepo = new PgPanelRepository(db);
+    const breakerRepo = new PgBreakerRepository(db);
     const panel = await panelRepo.create({ name: 'P' });
     const breaker = await breakerRepo.create(panel.id, {
       slot: '1',

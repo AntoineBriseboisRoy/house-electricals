@@ -6,7 +6,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from 'react';
-import { snapPoint } from '../lib/snap.js';
+import { snapPoint, snapWithVertices } from '../lib/snap.js';
 
 /**
  * Wall-editor state machine (G12).
@@ -43,11 +43,12 @@ export type UseWallEditorResult = {
     onPointerDown: (e: ReactPointerEvent<SVGElement>) => void;
     onPointerMove: (e: ReactPointerEvent<SVGElement>) => void;
   };
-  /** Begin dragging an endpoint of a specific wall. */
+  /** Begin dragging an endpoint of a specific wall. Accepts any Element so
+   *  HTML overlay handles (not just SVG circles) can drive it. */
   startEndpointDrag: (
     wallId: string,
     endpoint: 1 | 2,
-    e: ReactPointerEvent<SVGElement>
+    e: ReactPointerEvent<Element>
   ) => void;
   /** Force-reset the state machine (called when user toggles edit-mode off). */
   reset: () => void;
@@ -71,16 +72,11 @@ type Options = {
    *  hook calls this instead of the built-in normalize so drawing on a
    *  zoomed/panned canvas produces correct viewbox coords. */
   screenToViewbox?: (clientX: number, clientY: number, rect: DOMRect) => Point;
-};
-
-const defaultNormalize = (
-  e: ReactPointerEvent<SVGElement>,
-  container: HTMLElement
-): Point => {
-  const rect = container.getBoundingClientRect();
-  const x = ((e.clientX - rect.left) / rect.width) * 10000;
-  const y = ((e.clientY - rect.top) / rect.height) * 10000;
-  return { x, y };
+  /** Optional supplier of existing vertices (other wall endpoints + room
+   *  polygon vertices) to snap to. When a drawn/dragged endpoint lands within
+   *  VERTEX_SNAP_DIST of one, it snaps EXACTLY onto it so converging walls
+   *  share a coordinate ("link together"). Called per snap; keep it cheap. */
+  getSnapVertices?: () => ReadonlyArray<Point>;
 };
 
 export const useWallEditor = ({
@@ -89,16 +85,37 @@ export const useWallEditor = ({
   onEndpointCommit,
   active,
   screenToViewbox,
+  getSnapVertices,
 }: Options): UseWallEditorResult => {
+  // Keep the latest vertex supplier in a ref so `snapWithTargets` has a stable
+  // identity (no callback-dep churn) while always reading current vertices.
+  const snapVerticesRef = useRef(getSnapVertices);
+  snapVerticesRef.current = getSnapVertices;
+  /** Grid snap, upgraded to vertex snap when a supplier is provided. */
+  const snapWithTargets = useCallback((p: Point): Point => {
+    const fn = snapVerticesRef.current;
+    return fn ? snapWithVertices(p, fn()) : snapPoint(p);
+  }, []);
+  // Normalize raw client coords (React synthetic events OR native window
+  // PointerEvents) to the 0-10000 viewbox space, applying the optional
+  // viewport transform when supplied (G15).
+  const normalizeClient = useCallback(
+    (clientX: number, clientY: number, container: HTMLElement): Point => {
+      const rect = container.getBoundingClientRect();
+      if (screenToViewbox !== undefined) {
+        return screenToViewbox(clientX, clientY, rect);
+      }
+      return {
+        x: ((clientX - rect.left) / rect.width) * 10000,
+        y: ((clientY - rect.top) / rect.height) * 10000,
+      };
+    },
+    [screenToViewbox]
+  );
   const normalize = (
-    e: ReactPointerEvent<SVGElement>,
+    e: ReactPointerEvent<Element>,
     container: HTMLElement
-  ): Point => {
-    if (screenToViewbox !== undefined) {
-      return screenToViewbox(e.clientX, e.clientY, container.getBoundingClientRect());
-    }
-    return defaultNormalize(e, container);
-  };
+  ): Point => normalizeClient(e.clientX, e.clientY, container);
   const [firstEndpoint, setFirstEndpoint] = useState<Point | null>(null);
   const [ghostEndpoint, setGhostEndpoint] = useState<Point | null>(null);
   const [endpointDrag, setEndpointDrag] = useState<EndpointDrag | null>(null);
@@ -128,14 +145,14 @@ export const useWallEditor = ({
   }, [active, reset]);
 
   const startEndpointDrag = useCallback(
-    (wallId: string, endpoint: 1 | 2, e: ReactPointerEvent<SVGElement>): void => {
+    (wallId: string, endpoint: 1 | 2, e: ReactPointerEvent<Element>): void => {
       if (!active) return;
       const container = containerRef.current;
       if (!container) return;
       e.stopPropagation();
       e.preventDefault();
       const raw = normalize(e, container);
-      const snapped = snapPoint(raw);
+      const snapped = snapWithTargets(raw);
       try {
         e.currentTarget.setPointerCapture(e.pointerId);
       } catch {
@@ -160,7 +177,7 @@ export const useWallEditor = ({
       if (commitInFlight.current) return;
       e.preventDefault();
       const raw = normalize(e, container);
-      const snapped = snapPoint(raw);
+      const snapped = snapWithTargets(raw);
 
       if (firstEndpoint === null) {
         setFirstEndpoint(snapped);
@@ -184,23 +201,38 @@ export const useWallEditor = ({
   const handlePointerMove = useCallback(
     (e: ReactPointerEvent<SVGElement>): void => {
       if (!active) return;
+      // Endpoint drags are tracked at the window level (below) so they keep
+      // updating even when the pointer leaves the SVG or the gesture started
+      // from an HTML overlay handle. The SVG handler only owns the two-tap
+      // draw ghost.
+      if (endpointDrag !== null) return;
+      if (firstEndpoint === null) return;
       const container = containerRef.current;
       if (!container) return;
-      const raw = normalize(e, container);
-      const snapped = snapPoint(raw);
-
-      // Endpoint drag in flight — track snapped current point.
-      if (endpointDrag !== null) {
-        setEndpointDrag({ ...endpointDrag, current: snapped });
-        return;
-      }
-      // Two-tap draw flow — track ghost.
-      if (firstEndpoint !== null) {
-        setGhostEndpoint(snapped);
-      }
+      setGhostEndpoint(snapWithTargets(normalize(e, container)));
     },
     [active, containerRef, endpointDrag, firstEndpoint]
   );
+
+  // Window-level pointermove tracks endpoint drags. Handles may be HTML
+  // overlays (CSS %-space, immune to preserveAspectRatio="none" distortion)
+  // that pointer-capture the gesture, so the SVG's onPointerMove never fires.
+  // Functional setState avoids stale closures; the effect re-registers only
+  // on the null↔active edge.
+  const isEndpointDragging = endpointDrag !== null;
+  useEffect(() => {
+    if (!isEndpointDragging) return;
+    const onMove = (ev: PointerEvent): void => {
+      const container = containerRef.current;
+      if (!container) return;
+      const snapped = snapWithTargets(
+        normalizeClient(ev.clientX, ev.clientY, container)
+      );
+      setEndpointDrag((cur) => (cur ? { ...cur, current: snapped } : cur));
+    };
+    window.addEventListener('pointermove', onMove);
+    return () => window.removeEventListener('pointermove', onMove);
+  }, [isEndpointDragging, containerRef, normalizeClient]);
 
   // Wire pointerup as a window-level listener so we catch releases outside
   // the SVG hit-rect (the SVG already pointer-captures, but defense in depth).

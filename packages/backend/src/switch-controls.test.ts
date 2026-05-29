@@ -1,54 +1,29 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Hono } from 'hono';
 import type {
   Component,
   Floor,
   ResolvedSwitchControl,
   SwitchControl,
 } from '@he/shared';
-import {
-  openDatabase,
-  SqliteBreakerRepository,
-  SqliteBreakerTestRepository,
-  SqliteComponentRepository,
-  SqliteFloorRepository,
-  SqlitePanelRepository,
-  SqliteRoomRepository,
-  SqliteServiceEntryRepository,
-  SqliteWallRepository,
-} from './repository.js';
-import { buildApp } from './server.js';
+import type { Db } from './db.js';
+import { buildTestApp, createTestDb } from './test-helpers.js';
 
 describe('switch_controls routes (G19)', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let app: ReturnType<typeof buildApp>;
+  let cleanup: () => Promise<void>;
+  let db: Db;
+  let app: Hono;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'he-sc-'));
-    db = openDatabase(join(dir, 's.db'));
-    app = buildApp({
-      panelRepository: new SqlitePanelRepository(db),
-      breakerRepository: new SqliteBreakerRepository(db),
-      breakerTestRepository: new SqliteBreakerTestRepository(db),
-      componentRepository: new SqliteComponentRepository(db),
-      floorRepository: new SqliteFloorRepository(db),
-      wallRepository: new SqliteWallRepository(db),
-      roomRepository: new SqliteRoomRepository(db),
-      serviceEntryRepository: new SqliteServiceEntryRepository(db),
-      db,
-      appUserRepository: null,
-      auth: null,
-    });
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    db = t.db;
+    app = buildTestApp(t.db);
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   const createComp = async (
@@ -167,11 +142,11 @@ describe('switch_controls routes (G19)', () => {
       body: JSON.stringify({ gangIndex: 0, controlledId: l.id }),
     });
     await app.request(`/api/v1/components/${sw.id}`, { method: 'DELETE' });
-    type CountRow = { n: number };
-    const remaining = (
-      db.prepare('SELECT COUNT(*) AS n FROM switch_controls').get() as CountRow
-    ).n;
-    assert.equal(remaining, 0);
+    const row = await db.queryOne<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM switch_controls',
+      []
+    );
+    assert.equal(Number(row?.n), 0);
   });
 
   // Refactor 2026-05 follow-up — switch + controlled share one circuit.
@@ -344,11 +319,11 @@ describe('switch_controls routes (G19)', () => {
       body: JSON.stringify({ gangIndex: 0, controlledId: l.id }),
     });
     await app.request(`/api/v1/components/${l.id}`, { method: 'DELETE' });
-    type CountRow = { n: number };
-    const remaining = (
-      db.prepare('SELECT COUNT(*) AS n FROM switch_controls').get() as CountRow
-    ).n;
-    assert.equal(remaining, 0);
+    const row = await db.queryOne<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM switch_controls',
+      []
+    );
+    assert.equal(Number(row?.n), 0);
   });
 
   // G38 cycle-64 — flat per-floor list endpoint.

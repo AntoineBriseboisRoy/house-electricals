@@ -8,13 +8,16 @@
 #   - User-uploaded floor-plan images at /files/floor-plans/*
 #   - The Vite-built React PWA at /* (with SPA fallback to index.html)
 #
-# Self-host with one command:
+# Self-host with one command (the container needs a reachable Postgres —
+# supply its connection string via DATABASE_URL):
 #   docker run -d --name house-electricals \
 #     -p 8070:3000 \
+#     -e DATABASE_URL=postgresql://user:pass@db-host:5432/house_electricals \
 #     -v /srv/house-electricals/data:/data \
-#     ghcr.io/antoinebriseboisroy/house-electricals:latest
+#     ghcr.io/OWNER/house-electricals:latest
 #
-# See compose.prod.yaml for the canonical reverse-proxy-friendly wiring.
+# See compose.prod.yaml for the canonical reverse-proxy-friendly wiring
+# (it ships a Postgres service so you don't have to run one separately).
 # ============================================================================
 
 # ── Stage 1: frontend bundle ────────────────────────────────────────────────
@@ -85,7 +88,10 @@ COPY --from=backend-builder --chown=nonroot:nonroot /build/deploy /app
 COPY --from=frontend-builder --chown=nonroot:nonroot /build/packages/frontend/dist /app/public
 
 ENV NODE_ENV=production
-ENV DB_PATH=/data/panels.db
+# DATABASE_URL is intentionally NOT defaulted here — it carries credentials
+# and is deployment-specific, so the operator MUST supply it (compose/run -e).
+# DATA_DIR holds filesystem state: uploaded floor plans + the auth secret.
+ENV DATA_DIR=/data
 ENV FLOOR_PLAN_DIR=/data/floor-plans
 ENV PUBLIC_DIR=/app/public
 ENV PORT=3000
@@ -93,5 +99,6 @@ ENV HOST=0.0.0.0
 
 EXPOSE 3000
 
-# distroless nodejs ENTRYPOINT is already `node`; CMD provides flags + script.
-CMD ["--experimental-sqlite", "dist/index.js"]
+# distroless nodejs ENTRYPOINT is already `node`; CMD provides the script.
+# (No --experimental-sqlite flag — persistence is Postgres via the `pg` driver.)
+CMD ["dist/index.js"]

@@ -25,7 +25,7 @@ export const buildComponentRoutes = (
 
   router.get(
     '/components',
-    // Note: ?room= matches exactly and is case-sensitive (SQLite default collation).
+    // Note: ?room= matches exactly and is case-sensitive (Postgres default collation).
     zValidator('query', componentsListQuerySchema, (result, c) => {
       if (!result.success) {
         const err: ApiError = {
@@ -43,6 +43,7 @@ export const buildComponentRoutes = (
         ...(query.breakerId !== undefined ? { breakerId: query.breakerId } : {}),
         ...(query.floorId !== undefined ? { floorId: query.floorId } : {}),
         ...(query.search !== undefined ? { search: query.search } : {}),
+        ...(query.buildingId !== undefined ? { buildingId: query.buildingId } : {}),
       });
       const body: ApiEnvelope<ResolvedComponent[]> = { data: components };
       return c.json(body, 200);

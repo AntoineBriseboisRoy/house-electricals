@@ -4,11 +4,13 @@
  * Verifies the `<Modal presentation="sheet">` opt-in variant renders as
  * a bottom-sheet at phone-width viewports:
  *  - Add-→-Modal on /components renders with `.modal--sheet` class +
- *    a visible decorative drag-handle.
+ *    a visible drag-handle (now a functional swipe-to-dismiss affordance,
+ *    2026-05 — superseding the cycle-73 "decorative only" decision).
  *  - ServiceLogModal triggered from a BreakerRow Log pill renders with
  *    the same sheet treatment.
  *  - Dismissal via the Close button still works (cycle-20 G20 ADR
- *    preserved — drag-handle is decorative only).
+ *    preserved); the drag-handle stays aria-hidden (ESC/Close/overlay are
+ *    the accessible dismiss paths; the swipe is a touch enhancement).
  *
  * Mobile-only — desktop falls back to centered visuals automatically
  * via the cycle-36 G29 useNarrowViewport hook (matchMedia 720px). The
@@ -63,10 +65,11 @@ test.describe('cycle-73 mobile bottom-sheet Modal @cycle-73', () => {
     const overlay = page.locator('.modal-overlay--sheet').first();
     await expect(overlay).toBeVisible();
 
-    // Decorative drag-handle is rendered.
+    // Drag-handle (swipe-to-dismiss) is rendered.
     const dragHandle = modal.locator('.modal__drag-handle');
     await expect(dragHandle).toBeVisible();
-    // Cycle-73 invariant: drag-handle is aria-hidden (decorative).
+    // Stays aria-hidden: ESC/Close/overlay are the accessible dismiss paths;
+    // the swipe is a touch enhancement layered on top.
     await expect(dragHandle).toHaveAttribute('aria-hidden', 'true');
 
     await page.screenshot({

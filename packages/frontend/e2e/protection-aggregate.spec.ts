@@ -8,7 +8,7 @@
  *     component-level protection (when both are set)
  *
  * Hard rules (per CLAUDE.md):
- *   - REST seeding only, no direct SQLite writes
+ *   - REST seeding only, no direct DB writes
  *   - Deterministic waits only (auto-waiting locators)
  *   - Desktop-only (the aggregate card + confirm modal interact better
  *     at the wider viewport, mirroring cycle-63 audit-screen pattern)

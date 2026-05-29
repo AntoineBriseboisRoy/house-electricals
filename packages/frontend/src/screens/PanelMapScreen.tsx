@@ -10,6 +10,7 @@ import {
 import { createPortal } from 'react-dom';
 import { Link, useLocation, useRoute } from 'wouter';
 import { Upload, Trash2, Zap, Layers, Pencil, X } from 'lucide-react';
+import { rectToPolygon } from '@he/shared';
 import type {
   Breaker,
   ComponentInput,
@@ -598,6 +599,7 @@ export const PanelMapScreen = (): JSX.Element => {
           y: rect.y,
           w: rect.w,
           h: rect.h,
+          points: rectToPolygon(rect.x, rect.y, rect.w, rect.h),
           createdAt: Date.now(),
         };
         setRooms((prev) => [...prev, optimistic]);
@@ -672,6 +674,50 @@ export const PanelMapScreen = (): JSX.Element => {
       }
     },
   });
+
+  // While a room corner-resize is in flight, the affected room renders at its
+  // live size for visual feedback — parity with FloorEditScreen's displayedRooms.
+  // Canonical rooms[] stays at its pre-drag value until pointerup commits, so a
+  // failed PATCH rolls back cleanly. PanelMapScreen has no translate-drag, so
+  // only the corner-resize branch is needed here. Uses the same corner→rect
+  // math as onCornerCommit so the visible rectangle tracks the handle exactly.
+  const displayedRooms = useMemo<Room[]>(() => {
+    const cd = roomEditor.cornerDrag;
+    if (cd === null) return rooms;
+    return rooms.map((r) => {
+      if (r.id !== cd.roomId) return r;
+      let newX = r.x;
+      let newY = r.y;
+      let newRight = r.x + r.w;
+      let newBottom = r.y + r.h;
+      switch (cd.corner) {
+        case 'tl':
+          newX = cd.current.x;
+          newY = cd.current.y;
+          break;
+        case 'tr':
+          newRight = cd.current.x;
+          newY = cd.current.y;
+          break;
+        case 'bl':
+          newX = cd.current.x;
+          newBottom = cd.current.y;
+          break;
+        case 'br':
+          newRight = cd.current.x;
+          newBottom = cd.current.y;
+          break;
+      }
+      const x = Math.min(newX, newRight);
+      const y = Math.min(newY, newBottom);
+      const w = Math.abs(newRight - newX);
+      const h = Math.abs(newBottom - newY);
+      // Keep the last valid rect while the drag is momentarily degenerate
+      // (matches onCornerCommit's w<1||h<1 reject).
+      if (w < 1 || h < 1) return r;
+      return { ...r, x, y, w, h };
+    });
+  }, [rooms, roomEditor.cornerDrag]);
 
   const handleDeleteRoom = useCallback(async (): Promise<void> => {
     if (selectedRoomId === null) return;
@@ -1074,7 +1120,7 @@ export const PanelMapScreen = (): JSX.Element => {
                    when not in their respective edit mode. */}
                 <FloorPlanVectorOverlay
                   walls={walls}
-                  rooms={rooms}
+                  rooms={displayedRooms}
                   selectedWallId={editingWalls ? selectedWallId : null}
                   selectedRoomId={editingRooms ? selectedRoomId : null}
                   ghostWall={
@@ -1135,53 +1181,10 @@ export const PanelMapScreen = (): JSX.Element => {
                         }}
                       />
                     ))}
-                    {/* First-endpoint marker during draw. */}
-                    {wallEditor.firstEndpoint && (
-                      <circle
-                        cx={wallEditor.firstEndpoint.x}
-                        cy={wallEditor.firstEndpoint.y}
-                        r={90}
-                        className="floor-plan__wall-handle"
-                      />
-                    )}
-                    {/* Endpoint handles for the selected wall. */}
-                    {selectedWallId !== null &&
-                      (() => {
-                        const sel = walls.find((w) => w.id === selectedWallId);
-                        if (!sel) return null;
-                        // While dragging, render the handle at the snapped current point
-                        const drag = wallEditor.endpointDrag;
-                        const e1: Point =
-                          drag && drag.wallId === sel.id && drag.endpoint === 1
-                            ? drag.current
-                            : { x: sel.x1, y: sel.y1 };
-                        const e2: Point =
-                          drag && drag.wallId === sel.id && drag.endpoint === 2
-                            ? drag.current
-                            : { x: sel.x2, y: sel.y2 };
-                        return (
-                          <>
-                            <circle
-                              cx={e1.x}
-                              cy={e1.y}
-                              r={180}
-                              className="floor-plan__wall-handle"
-                              onPointerDown={(e) =>
-                                wallEditor.startEndpointDrag(sel.id, 1, e)
-                              }
-                            />
-                            <circle
-                              cx={e2.x}
-                              cy={e2.y}
-                              r={180}
-                              className="floor-plan__wall-handle"
-                              onPointerDown={(e) =>
-                                wallEditor.startEndpointDrag(sel.id, 2, e)
-                              }
-                            />
-                          </>
-                        );
-                      })()}
+                    {/* Wall endpoint handles + first-endpoint marker are
+                       rendered as round HTML overlays below (NOT SVG
+                       circles, which distort to ellipses under
+                       preserveAspectRatio="none"). */}
                   </svg>
                 )}
                 {/* G12 rooms interactive edit layer */}
@@ -1222,46 +1225,107 @@ export const PanelMapScreen = (): JSX.Element => {
                         }}
                       />
                     ))}
-                    {/* Corner handles for the selected room. While a corner
-                       drag is in flight, render the handle at the snapped
-                       current point so the user sees what they're committing. */}
-                    {selectedRoomId !== null &&
-                      (() => {
-                        const sel = rooms.find((r) => r.id === selectedRoomId);
-                        if (!sel) return null;
-                        const drag = roomEditor.cornerDrag;
-                        // Per-corner positions, overridden by drag.current if active.
-                        const corners: { corner: Corner; x: number; y: number }[] = [
-                          { corner: 'tl', x: sel.x, y: sel.y },
-                          { corner: 'tr', x: sel.x + sel.w, y: sel.y },
-                          { corner: 'bl', x: sel.x, y: sel.y + sel.h },
-                          { corner: 'br', x: sel.x + sel.w, y: sel.y + sel.h },
-                        ];
-                        return (
-                          <>
-                            {corners.map((c) => {
-                              const pt =
-                                drag && drag.roomId === sel.id && drag.corner === c.corner
-                                  ? drag.current
-                                  : { x: c.x, y: c.y };
-                              return (
-                                <circle
-                                  key={c.corner}
-                                  cx={pt.x}
-                                  cy={pt.y}
-                                  r={180}
-                                  className="floor-plan__corner-handle"
-                                  onPointerDown={(e) =>
-                                    roomEditor.startCornerDrag(sel.id, c.corner, e)
-                                  }
-                                />
-                              );
-                            })}
-                          </>
-                        );
-                      })()}
+                    {/* Room corner handles are rendered as round HTML
+                       overlays below (NOT SVG circles, which distort to
+                       ellipses under preserveAspectRatio="none"). */}
                   </svg>
                 )}
+                {/* === Resize handle overlay ===
+                   Round HTML handles for wall endpoints + room corners.
+                   PanelMapScreen has no viewport transform, so positions
+                   map identity from the 0-10000 coord space to CSS %. */}
+                {editingWalls && wallEditor.firstEndpoint !== null && (
+                  <span
+                    className="floor-plan__handle floor-plan__handle--marker"
+                    aria-hidden="true"
+                    style={
+                      {
+                        left: `${(wallEditor.firstEndpoint.x / 10000) * 100}%`,
+                        top: `${(wallEditor.firstEndpoint.y / 10000) * 100}%`,
+                      } as CSSProperties
+                    }
+                  />
+                )}
+                {editingWalls &&
+                  selectedWallId !== null &&
+                  (() => {
+                    const sel = walls.find((w) => w.id === selectedWallId);
+                    if (!sel) return null;
+                    const drag = wallEditor.endpointDrag;
+                    const endpoints: { endpoint: 1 | 2; pt: Point }[] = [
+                      {
+                        endpoint: 1,
+                        pt:
+                          drag && drag.wallId === sel.id && drag.endpoint === 1
+                            ? drag.current
+                            : { x: sel.x1, y: sel.y1 },
+                      },
+                      {
+                        endpoint: 2,
+                        pt:
+                          drag && drag.wallId === sel.id && drag.endpoint === 2
+                            ? drag.current
+                            : { x: sel.x2, y: sel.y2 },
+                      },
+                    ];
+                    return endpoints.map(({ endpoint, pt }) => (
+                      <button
+                        key={endpoint}
+                        type="button"
+                        className="floor-plan__handle floor-plan__handle--endpoint"
+                        data-testid="wall-endpoint-handle"
+                        data-endpoint={endpoint}
+                        aria-label={`Drag to move wall endpoint ${endpoint}`}
+                        style={
+                          {
+                            left: `${(pt.x / 10000) * 100}%`,
+                            top: `${(pt.y / 10000) * 100}%`,
+                          } as CSSProperties
+                        }
+                        onPointerDown={(e) =>
+                          wallEditor.startEndpointDrag(sel.id, endpoint, e)
+                        }
+                      />
+                    ));
+                  })()}
+                {editingRooms &&
+                  selectedRoomId !== null &&
+                  (() => {
+                    // Read from displayedRooms so all four handles track the
+                    // live rect during a corner-resize (the dragged corner
+                    // follows the pointer; the two adjacent corners shift with
+                    // the rect edges).
+                    const sel = displayedRooms.find((r) => r.id === selectedRoomId);
+                    if (!sel) return null;
+                    const corners: { corner: Corner; x: number; y: number }[] = [
+                      { corner: 'tl', x: sel.x, y: sel.y },
+                      { corner: 'tr', x: sel.x + sel.w, y: sel.y },
+                      { corner: 'bl', x: sel.x, y: sel.y + sel.h },
+                      { corner: 'br', x: sel.x + sel.w, y: sel.y + sel.h },
+                    ];
+                    return corners.map((c) => {
+                      const pt = { x: c.x, y: c.y };
+                      return (
+                        <button
+                          key={c.corner}
+                          type="button"
+                          className="floor-plan__handle floor-plan__handle--corner"
+                          data-testid="room-corner-handle"
+                          data-corner={c.corner}
+                          aria-label={`Drag to resize room (${c.corner} corner)`}
+                          style={
+                            {
+                              left: `${(pt.x / 10000) * 100}%`,
+                              top: `${(pt.y / 10000) * 100}%`,
+                            } as CSSProperties
+                          }
+                          onPointerDown={(e) =>
+                            roomEditor.startCornerDrag(sel.id, c.corner, e)
+                          }
+                        />
+                      );
+                    });
+                  })()}
                 {!editingWalls && !editingRooms &&
                   placed.map((c) => {
                     const pinStyle: CSSProperties = {

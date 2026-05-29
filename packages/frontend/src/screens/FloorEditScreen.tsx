@@ -14,18 +14,25 @@ import {
   CornerDownRight,
   GitFork,
   Lightbulb,
+  Maximize2,
+  Minus,
   MousePointer2,
   Pencil,
+  Plus,
   Power,
   Square,
   ToggleRight,
   Trash2,
   X as XIcon,
   Zap,
-  ZoomIn,
 } from 'lucide-react';
 import {
   componentInputSchema,
+  COORD_MAX,
+  COORD_MIN,
+  isAxisAlignedRect,
+  polygonBounds,
+  rectToPolygon,
   type ComponentInput,
   type ComponentType,
   type Floor,
@@ -33,6 +40,7 @@ import {
   type ResolvedComponent,
   type ResolvedSwitchControl,
   type Room,
+  type RoomVertex,
   type SwitchControl,
   type Wall,
 } from '@he/shared';
@@ -77,6 +85,7 @@ import {
   IconButton,
   Input,
   Modal,
+  MoveToBuildingButton,
   PanelVisualization,
   ScreenHeader,
   Select,
@@ -85,7 +94,7 @@ import {
   Tooltip,
 } from '../ui/index.js';
 import { ProtectionBadge } from '../components/ProtectionBadge.js';
-import { useViewport, type Point } from '../hooks/useViewport.js';
+import { useViewport, type Bounds, type Point } from '../hooks/useViewport.js';
 import { useWallEditor } from '../hooks/useWallEditor.js';
 import {
   rectFromCorners,
@@ -95,6 +104,12 @@ import {
 import { useModal } from '../hooks/useModal.js';
 import { useUndoableDelete } from '../hooks/useUndoableDelete.js';
 import { findRoomForPoint, findPointsInRect } from '../lib/roomLookup.js';
+import { snapPoint } from '../lib/snap.js';
+import {
+  findLoopThrough,
+  loopMatchesAnyRoom,
+  roomBoundaryWallIds,
+} from '../lib/wallGraph.js';
 
 /**
  * Desktop-class map builder for one floor (G15).
@@ -129,6 +144,11 @@ type Tool =
   | 'switch';
 
 const QUICK_CREATE_TOOLS: ReadonlySet<Tool> = new Set(['outlet', 'light', 'switch']);
+
+/** Pointer travel (client px) before a pin pointerdown counts as a drag-move
+ *  rather than a tap-select. Small enough to feel responsive, large enough to
+ *  absorb the jitter of a deliberate tap. */
+const PIN_DRAG_THRESHOLD_PX = 4;
 
 export const FloorEditScreen = (): JSX.Element => {
   const [, params] = useRoute<{ id: string }>('/floors/:id/edit');
@@ -180,6 +200,37 @@ export const FloorEditScreen = (): JSX.Element => {
     /** Currently-hovered pin id (for visual highlight + early invalid
      *  feedback). null when not over a valid link target. */
     hoverPinId: string | null;
+  } | null>(null);
+
+  // Component pin drag-to-move (pointer mode). Mirrors the gang-link drag:
+  // pointer-capture on the pin + window-level pointermove keep tracking even
+  // when the pointer leaves the pin/canvas. A movement threshold separates a
+  // reposition (drag) from a select (tap) so click-to-select still works.
+  const [componentDrag, setComponentDrag] = useState<{
+    id: string;
+    /** client px where the press started — drives the move-vs-tap threshold. */
+    startClient: { x: number; y: number };
+    /** live snapped position in viewbox coords. */
+    current: Point;
+    /** true once travel exceeded the threshold → release commits a move;
+     *  otherwise the gesture is a tap and the pin's onClick selects. */
+    moved: boolean;
+  } | null>(null);
+  /** Set true mid-drag; read by the pin's onClick to swallow the click that
+   *  the browser fires after a drag (so a move doesn't also re-select). */
+  const componentDragMovedRef = useRef(false);
+
+  // Polygon-room vertex drag (wall-loop reshape). Dragging a vertex moves the
+  // room's point AND every coincident wall endpoint / other-room vertex (they
+  // share a coordinate), committing all on pointerup.
+  const [vertexDrag, setVertexDrag] = useState<{
+    roomId: string;
+    index: number;
+    /** the vertex's coordinate when the drag began — used to find every
+     *  coincident wall endpoint / room vertex to move together. */
+    orig: RoomVertex;
+    /** live snapped position. */
+    current: RoomVertex;
   } | null>(null);
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -766,6 +817,218 @@ export const FloorEditScreen = (): JSX.Element => {
     };
   }, [linkDrag, viewport]);
 
+  // === Component pin drag-to-move (pointer mode) ==========================
+  //
+  // Press a pin and drag to reposition it; a tap (no movement past the
+  // threshold) still selects. The live position flows through
+  // displayedComponentsOnFloor so the pin follows the cursor; the PATCH only
+  // fires on release (never on pointermove — same rule as useMapDrag).
+
+  const startComponentDrag = useCallback(
+    (id: string, e: ReactPointerEvent<HTMLElement>): void => {
+      if (tool !== 'pointer') return;
+      // Left button / touch / pen only — ignore right/middle mouse.
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      if (canvasRef.current === null) return;
+      e.stopPropagation();
+      const rect = canvasRef.current.getBoundingClientRect();
+      const cur = viewport.screenToViewbox(e.clientX, e.clientY, rect);
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // some browsers reject setPointerCapture on certain elements; ignore
+      }
+      componentDragMovedRef.current = false;
+      setComponentDrag({
+        id,
+        startClient: { x: e.clientX, y: e.clientY },
+        current: snapPoint(cur),
+        moved: false,
+      });
+    },
+    [tool, viewport]
+  );
+
+  useEffect(() => {
+    if (componentDrag === null) return;
+    const onMove = (e: PointerEvent): void => {
+      if (canvasRef.current === null) return;
+      const rect = canvasRef.current.getBoundingClientRect();
+      const cur = snapPoint(viewport.screenToViewbox(e.clientX, e.clientY, rect));
+      setComponentDrag((prev) => {
+        if (prev === null) return null;
+        const dist = Math.hypot(
+          e.clientX - prev.startClient.x,
+          e.clientY - prev.startClient.y
+        );
+        const moved = prev.moved || dist > PIN_DRAG_THRESHOLD_PX;
+        if (moved) componentDragMovedRef.current = true;
+        return { ...prev, current: cur, moved };
+      });
+    };
+    const onUp = (): void => {
+      const drag = componentDrag;
+      setComponentDrag(null);
+      if (drag === null || !drag.moved) return; // tap → onClick selects
+      const before = componentsOnFloor.find((c) => c.id === drag.id);
+      if (!before) return;
+      const nx = Math.max(COORD_MIN, Math.min(COORD_MAX, drag.current.x));
+      const ny = Math.max(COORD_MIN, Math.min(COORD_MAX, drag.current.y));
+      if (before.posX === nx && before.posY === ny) return;
+      // Auto-bind the room under the new point ONLY when none is set yet —
+      // never overwrite a manually-chosen room (G26 cycle-32 rule).
+      const autoRoom =
+        before.room === null ? findRoomForPoint(rooms, nx, ny) : null;
+      const optimistic: ResolvedComponent = {
+        ...before,
+        posX: nx,
+        posY: ny,
+        room: autoRoom !== null ? autoRoom.name : before.room,
+      };
+      setComponentsOnFloor((prev) =>
+        prev.map((c) => (c.id === drag.id ? optimistic : c))
+      );
+      void (async () => {
+        try {
+          await updateComponent(
+            drag.id,
+            autoRoom !== null
+              ? { posX: nx, posY: ny, room: autoRoom.name }
+              : { posX: nx, posY: ny }
+          );
+        } catch (err) {
+          setComponentsOnFloor((prev) =>
+            prev.map((c) => (c.id === drag.id ? before : c))
+          );
+          toast.error(
+            err instanceof Error ? err.message : 'Failed to move component.'
+          );
+        }
+      })();
+    };
+    const onCancel = (): void => setComponentDrag(null);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+  }, [componentDrag, viewport, componentsOnFloor, rooms]);
+
+  // === Polygon-room vertex drag (wall-loop reshape) =======================
+  //
+  // A vertex is a shared coordinate. Dragging it moves the room's point AND
+  // every coincident wall endpoint + other-room vertex, so walls + room
+  // reshape together — "each wall end is a draggable point." PATCH on release.
+
+  const startVertexDrag = useCallback(
+    (roomId: string, index: number, e: ReactPointerEvent<Element>): void => {
+      if (tool !== 'pointer' && tool !== 'room') return;
+      if (canvasRef.current === null) return;
+      e.stopPropagation();
+      e.preventDefault();
+      const room = rooms.find((r) => r.id === roomId);
+      const orig = room?.points[index];
+      if (orig === undefined) return;
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
+      const at = { x: orig.x, y: orig.y };
+      setVertexDrag({ roomId, index, orig: at, current: at });
+    },
+    [tool, rooms]
+  );
+
+  const commitVertexMove = useCallback(
+    async (orig: RoomVertex, current: RoomVertex): Promise<void> => {
+      const coincides = (x: number, y: number): boolean =>
+        x === orig.x && y === orig.y;
+      // Rooms: move EVERY vertex sitting on the original coordinate.
+      const roomUpdates = rooms
+        .filter((r) => r.points.some((p) => coincides(p.x, p.y)))
+        .map((r) => ({
+          room: r,
+          points: r.points.map((p) =>
+            coincides(p.x, p.y) ? { x: current.x, y: current.y } : p
+          ),
+        }));
+      // Walls: move every endpoint sitting on the original coordinate.
+      const wallUpdates = walls
+        .map((w) => {
+          const patch: Partial<Wall> = {};
+          if (coincides(w.x1, w.y1)) {
+            patch.x1 = current.x;
+            patch.y1 = current.y;
+          }
+          if (coincides(w.x2, w.y2)) {
+            patch.x2 = current.x;
+            patch.y2 = current.y;
+          }
+          return { wall: w, patch };
+        })
+        .filter((u) => Object.keys(u.patch).length > 0);
+
+      if (roomUpdates.length === 0 && wallUpdates.length === 0) return;
+
+      const prevRooms = rooms;
+      const prevWalls = walls;
+      // Optimistic local update (rooms recompute their bbox from new points).
+      setRooms((prev) =>
+        prev.map((r) => {
+          const u = roomUpdates.find((x) => x.room.id === r.id);
+          return u ? { ...r, points: u.points, ...polygonBounds(u.points) } : r;
+        })
+      );
+      setWalls((prev) =>
+        prev.map((w) => {
+          const u = wallUpdates.find((x) => x.wall.id === w.id);
+          return u ? { ...w, ...u.patch } : w;
+        })
+      );
+      try {
+        await Promise.all([
+          ...roomUpdates.map((u) => updateRoom(u.room.id, { points: u.points })),
+          ...wallUpdates.map((u) => updateWall(u.wall.id, u.patch)),
+        ]);
+      } catch (err) {
+        setRooms(prevRooms);
+        setWalls(prevWalls);
+        toast.error(err instanceof Error ? err.message : 'Failed to reshape room.');
+      }
+    },
+    [rooms, walls]
+  );
+
+  useEffect(() => {
+    if (vertexDrag === null) return;
+    const onMove = (e: PointerEvent): void => {
+      if (canvasRef.current === null) return;
+      const rect = canvasRef.current.getBoundingClientRect();
+      const snapped = snapPoint(viewport.screenToViewbox(e.clientX, e.clientY, rect));
+      setVertexDrag((prev) => (prev ? { ...prev, current: snapped } : prev));
+    };
+    const onUp = (): void => {
+      const vd = vertexDrag;
+      setVertexDrag(null);
+      if (vd === null) return;
+      if (vd.current.x === vd.orig.x && vd.current.y === vd.orig.y) return;
+      void commitVertexMove(vd.orig, vd.current);
+    };
+    const onCancel = (): void => setVertexDrag(null);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+  }, [vertexDrag, viewport, commitVertexMove]);
+
   // === Editors ============================================================
 
   // G32 cycle-40 — wall + room editors are active in BOTH their dedicated
@@ -774,10 +1037,73 @@ export const FloorEditScreen = (): JSX.Element => {
   // that captures pointerdown→draw is only rendered in the dedicated tool
   // modes. In pointer mode the hooks expose startEndpointDrag,
   // startCornerDrag, startTranslateDrag for handles + hit-rects.
+  // When a freshly drawn / dragged wall closes a loop, offer to make a room
+  // from it. `nextWalls` is the wall list INCLUDING the just-committed wall
+  // (state setters are async, so callers pass it explicitly). Skips loops that
+  // already match an existing room so re-editing nearby walls doesn't re-prompt.
+  const maybeCreateRoomFromLoop = useCallback(
+    async (nextWalls: Wall[], seedWallId: string): Promise<void> => {
+      if (floor === null) return;
+      const loop = findLoopThrough(nextWalls, seedWallId);
+      if (loop === null) return;
+      if (loopMatchesAnyRoom(loop, rooms)) return;
+      const name = await prompt({
+        title: 'New room',
+        label: 'These walls enclose a room — name it',
+        defaultValue: 'Room',
+        placeholder: 'e.g. Kitchen',
+      });
+      if (name === null) return;
+      const points: RoomVertex[] = loop.map((p) => ({ x: p.x, y: p.y }));
+      const attempt = async (candidate: string): Promise<void> => {
+        if (floor === null) return;
+        try {
+          const real = await createRoom(floor.id, { name: candidate, points });
+          setRooms((prev) => [...prev, real]);
+          // The loop's walls are now absorbed into the room outline — drop any
+          // wall selection and select the new room instead.
+          setSelectedWallId(null);
+          setSelectedRoomId(real.id);
+          toast.success(`Created room “${candidate}”`);
+        } catch (err) {
+          if (err instanceof ApiHttpError && err.status === 409) {
+            const suggested = suffixDuplicate(candidate);
+            toast.error(`Name "${candidate}" is taken — try "${suggested}"?`);
+            const retry = await prompt({
+              title: 'Pick a different name',
+              label: 'Name',
+              defaultValue: suggested,
+            });
+            if (retry === null) return;
+            await attempt(retry);
+            return;
+          }
+          toast.error(
+            err instanceof Error ? err.message : 'Failed to create room.'
+          );
+        }
+      };
+      await attempt(name);
+    },
+    [floor, rooms, prompt]
+  );
+
   const wallEditor = useWallEditor({
     containerRef: canvasRef,
     active: (tool === 'wall' || tool === 'pointer') && floor !== null,
     screenToViewbox: viewport.screenToViewbox,
+    // Converging walls link: snap a drawn/dragged endpoint onto any existing
+    // wall endpoint or room vertex it lands near (so they share a coordinate).
+    getSnapVertices: () => {
+      const verts: Point[] = [];
+      for (const w of walls) {
+        verts.push({ x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 });
+      }
+      for (const r of rooms) {
+        for (const p of r.points) verts.push({ x: p.x, y: p.y });
+      }
+      return verts;
+    },
     onCommit: async (start, end) => {
       if (floor === null) return;
       if (start.x === end.x && start.y === end.y) return;
@@ -800,6 +1126,8 @@ export const FloorEditScreen = (): JSX.Element => {
           y2: end.y,
         });
         setWalls((prev) => prev.map((w) => (w.id === tempId ? real : w)));
+        // Did this wall close a loop? If so, offer to make a room from it.
+        void maybeCreateRoomFromLoop([...walls, real], real.id);
       } catch (err) {
         setWalls((prev) => prev.filter((w) => w.id !== tempId));
         toast.error(err instanceof Error ? err.message : 'Failed to add wall.');
@@ -817,6 +1145,10 @@ export const FloorEditScreen = (): JSX.Element => {
             : w
         )
       );
+      const movedWall: Wall =
+        endpoint === 1
+          ? { ...before, x1: point.x, y1: point.y }
+          : { ...before, x2: point.x, y2: point.y };
       try {
         await updateWall(
           wallId,
@@ -824,6 +1156,9 @@ export const FloorEditScreen = (): JSX.Element => {
             ? { x1: point.x, y1: point.y }
             : { x2: point.x, y2: point.y }
         );
+        // Dragging an endpoint onto another vertex can close a loop too.
+        const nextWalls = walls.map((w) => (w.id === wallId ? movedWall : w));
+        void maybeCreateRoomFromLoop(nextWalls, wallId);
       } catch (err) {
         setWalls((prev) => prev.map((w) => (w.id === wallId ? before : w)));
         toast.error(err instanceof Error ? err.message : 'Failed to move endpoint.');
@@ -858,6 +1193,7 @@ export const FloorEditScreen = (): JSX.Element => {
           y: rect.y,
           w: rect.w,
           h: rect.h,
+          points: rectToPolygon(rect.x, rect.y, rect.w, rect.h),
           createdAt: Date.now(),
         };
         setRooms((prev) => [...prev, optimistic]);
@@ -919,7 +1255,7 @@ export const FloorEditScreen = (): JSX.Element => {
       const w = Math.abs(newRight - newX);
       const h = Math.abs(newBottom - newY);
       if (w < 1 || h < 1) return;
-      const patched: Room = { ...before, x, y, w, h };
+      const patched: Room = { ...before, x, y, w, h, points: rectToPolygon(x, y, w, h) };
       setRooms((prev) => prev.map((r) => (r.id === roomId ? patched : r)));
       try {
         await updateRoom(roomId, { x, y, w, h });
@@ -935,9 +1271,9 @@ export const FloorEditScreen = (): JSX.Element => {
     onTranslateCommit: async (roomId, dx, dy) => {
       const beforeRoom = rooms.find((r) => r.id === roomId);
       if (!beforeRoom) return;
-      // Clamp the translated room so it stays inside the 0–10000 viewbox.
-      const newX = Math.max(0, Math.min(10000 - beforeRoom.w, beforeRoom.x + dx));
-      const newY = Math.max(0, Math.min(10000 - beforeRoom.h, beforeRoom.y + dy));
+      // Clamp the translated room to the (generous) coordinate bounds.
+      const newX = Math.max(COORD_MIN, Math.min(COORD_MAX - beforeRoom.w, beforeRoom.x + dx));
+      const newY = Math.max(COORD_MIN, Math.min(COORD_MAX - beforeRoom.h, beforeRoom.y + dy));
       // Recompute the effective delta after clamp (so contained pins
       // move by the same delta the room actually moves).
       const ddx = newX - beforeRoom.x;
@@ -951,7 +1287,12 @@ export const FloorEditScreen = (): JSX.Element => {
         h: beforeRoom.h,
       });
       // Optimistic local update for the room + all contained pins.
-      const patchedRoom: Room = { ...beforeRoom, x: newX, y: newY };
+      const patchedRoom: Room = {
+        ...beforeRoom,
+        x: newX,
+        y: newY,
+        points: beforeRoom.points.map((p) => ({ x: p.x + ddx, y: p.y + ddy })),
+      };
       const containedIds = new Set(contained.map((c) => c.id));
       setRooms((prev) => prev.map((r) => (r.id === roomId ? patchedRoom : r)));
       setComponentsOnFloor((prev) =>
@@ -959,9 +1300,9 @@ export const FloorEditScreen = (): JSX.Element => {
           if (!containedIds.has(c.id)) return c;
           const px = (c.posX ?? 0) + ddx;
           const py = (c.posY ?? 0) + ddy;
-          // Clamp to viewbox.
-          const clampedX = Math.max(0, Math.min(10000, px));
-          const clampedY = Math.max(0, Math.min(10000, py));
+          // Clamp to coordinate bounds.
+          const clampedX = Math.max(COORD_MIN, Math.min(COORD_MAX, px));
+          const clampedY = Math.max(COORD_MIN, Math.min(COORD_MAX, py));
           return {
             ...c,
             posX: clampedX,
@@ -984,8 +1325,8 @@ export const FloorEditScreen = (): JSX.Element => {
       await Promise.all(
         contained.map(async (c) => {
           if (c.posX === null || c.posY === null) return;
-          const nx = Math.max(0, Math.min(10000, c.posX + ddx));
-          const ny = Math.max(0, Math.min(10000, c.posY + ddy));
+          const nx = Math.max(COORD_MIN, Math.min(COORD_MAX, c.posX + ddx));
+          const ny = Math.max(COORD_MIN, Math.min(COORD_MAX, c.posY + ddy));
           try {
             await updateComponent(c.id, { posX: nx, posY: ny });
           } catch (err) {
@@ -1087,8 +1428,8 @@ export const FloorEditScreen = (): JSX.Element => {
   }, [rooms, selectedRoomId, prompt, attemptRenameRoom]);
 
   /** G26 — commit a numeric edit to one of x/y/w/h on the selected room.
-   *  Clamps to [0, 10000], snaps to 250 (the SNAP_STEP), no-ops on
-   *  identity, optimistic local update + PATCH + rollback on failure. */
+   *  Clamps to the coordinate bounds, snaps to 250 (the SNAP_STEP), no-ops
+   *  on identity, optimistic local update + PATCH + rollback on failure. */
   const handleEditRoomDimension = useCallback(
     async (field: 'x' | 'y' | 'w' | 'h', rawNext: number): Promise<void> => {
       if (selectedRoomId === null) return;
@@ -1096,10 +1437,23 @@ export const FloorEditScreen = (): JSX.Element => {
       if (!before) return;
       // Clamp + snap. min 250 for w/h to avoid degenerate rects.
       let next = Number.isFinite(rawNext) ? rawNext : before[field];
-      next = Math.max(0, Math.min(10000, Math.round(next / 250) * 250));
+      next = Math.max(COORD_MIN, Math.min(COORD_MAX, Math.round(next / 250) * 250));
       if (field === 'w' || field === 'h') next = Math.max(250, next);
       if (next === before[field]) return;
-      const patched: Room = { ...before, [field]: next };
+      // X/Y/W/H editing is a rectangle-room gesture; rebuild the 4-corner
+      // polygon from the merged bbox so points stay in sync.
+      const rx = field === 'x' ? next : before.x;
+      const ry = field === 'y' ? next : before.y;
+      const rw = field === 'w' ? next : before.w;
+      const rh = field === 'h' ? next : before.h;
+      const patched: Room = {
+        ...before,
+        x: rx,
+        y: ry,
+        w: rw,
+        h: rh,
+        points: rectToPolygon(rx, ry, rw, rh),
+      };
       setRooms((prev) =>
         prev.map((r) => (r.id === before.id ? patched : r))
       );
@@ -1226,6 +1580,60 @@ export const FloorEditScreen = (): JSX.Element => {
     }
   };
 
+  // === Auto-fit viewport =================================================
+  //
+  // The single biggest robustness win of the rework: the floor never opens
+  // to a blank-looking void or with its geometry parked off-screen. We frame
+  // the actual content (walls + rooms + placed pins) on load and whenever
+  // the user asks to "fit". Image-backed floors frame the whole underlay so
+  // the plan reads in full. An empty vector floor falls back to the full
+  // 0–10000 canvas (viewport.reset) so the snap grid fills the frame.
+  const contentBounds = useMemo<Bounds | null>(() => {
+    if (floor?.floorPlan != null) {
+      return { minX: 0, minY: 0, maxX: 10000, maxY: 10000 };
+    }
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    const acc = (x: number, y: number): void => {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    };
+    for (const w of walls) {
+      acc(w.x1, w.y1);
+      acc(w.x2, w.y2);
+    }
+    for (const r of rooms) {
+      acc(r.x, r.y);
+      acc(r.x + r.w, r.y + r.h);
+    }
+    for (const c of componentsOnFloor) {
+      if (c.posX !== null && c.posY !== null) acc(c.posX, c.posY);
+    }
+    if (!Number.isFinite(minX)) return null;
+    return { minX, minY, maxX, maxY };
+  }, [floor?.floorPlan, walls, rooms, componentsOnFloor]);
+
+  /** Frame the floor's content (or the full canvas when empty). Wired to the
+   *  palette "Fit" button, the on-canvas fit control, and the `0` shortcut. */
+  const frameContent = useCallback((): void => {
+    if (contentBounds === null) viewport.reset();
+    else viewport.fitTo(contentBounds);
+  }, [contentBounds, viewport]);
+
+  /** Frame once per floor load (re-frames when navigating to another floor).
+   *  Guard keeps later data refreshes from yanking the user's manual pan. */
+  const didFitRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loading || floor === null) return;
+    if (didFitRef.current === floorId) return;
+    didFitRef.current = floorId;
+    frameContent();
+  }, [loading, floor, floorId, frameContent]);
+
   // === Keyboard shortcuts ================================================
 
   useEffect(() => {
@@ -1252,12 +1660,13 @@ export const FloorEditScreen = (): JSX.Element => {
         else if (selectedRoomId !== null) void handleDeleteSelectedRoom();
         else if (selectedComponentId !== null) void handleDeleteSelectedComponent();
       } else if (k === '0') {
-        viewport.reset();
+        frameContent();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [
+    frameContent,
     handleDeleteSelectedComponent,
     handleDeleteSelectedRoom,
     handleDeleteSelectedWall,
@@ -1265,7 +1674,6 @@ export const FloorEditScreen = (): JSX.Element => {
     roomEditor,
     selectedRoomId,
     selectedWallId,
-    viewport,
     wallEditor,
   ]);
 
@@ -1289,31 +1697,125 @@ export const FloorEditScreen = (): JSX.Element => {
     );
   }, [componentsOnFloor, panels]);
 
-  // === G26 translate-drag display overrides ==============================
+  // === G26 drag display overrides =======================================
   //
-  // While roomEditor.translateDrag is non-null, the dragged room AND every
-  // pin inside its OLD rect render at a shifted position for visual
-  // feedback. Canonical state (rooms[] and componentsOnFloor[]) stays at
-  // its pre-drag values until pointerup commits — that's what enables
-  // smooth rollback if a PATCH fails.
+  // While a room gesture is in flight (translate OR corner-resize), the
+  // affected room renders at its live position/size for visual feedback.
+  // Canonical state (rooms[] and componentsOnFloor[]) stays at its pre-drag
+  // values until pointerup commits — that's what enables smooth rollback if
+  // a PATCH fails. Translate also shifts the pins inside the OLD rect (see
+  // displayedComponentsOnFloor); corner-resize leaves pins put.
   const displayedRooms = useMemo<Room[]>(() => {
+    // Vertex drag (polygon reshape): move every room vertex sitting on the
+    // dragged coordinate to the live position. Mutually exclusive with the
+    // rectangle corner/translate gestures below.
+    if (vertexDrag !== null) {
+      const { orig, current } = vertexDrag;
+      return rooms.map((r) => {
+        if (!r.points.some((p) => p.x === orig.x && p.y === orig.y)) return r;
+        const points = r.points.map((p) =>
+          p.x === orig.x && p.y === orig.y ? { x: current.x, y: current.y } : p
+        );
+        return { ...r, points, ...polygonBounds(points) };
+      });
+    }
+    // Corner-resize: live-recompute the rect from the dragged corner using
+    // the same corner→rect math as onCornerCommit, so the visible rectangle
+    // tracks the handle in real time instead of snapping only on release.
+    const cd = roomEditor.cornerDrag;
+    if (cd !== null) {
+      return rooms.map((r) => {
+        if (r.id !== cd.roomId) return r;
+        let newX = r.x;
+        let newY = r.y;
+        let newRight = r.x + r.w;
+        let newBottom = r.y + r.h;
+        switch (cd.corner) {
+          case 'tl':
+            newX = cd.current.x;
+            newY = cd.current.y;
+            break;
+          case 'tr':
+            newRight = cd.current.x;
+            newY = cd.current.y;
+            break;
+          case 'bl':
+            newX = cd.current.x;
+            newBottom = cd.current.y;
+            break;
+          case 'br':
+            newRight = cd.current.x;
+            newBottom = cd.current.y;
+            break;
+        }
+        const x = Math.min(newX, newRight);
+        const y = Math.min(newY, newBottom);
+        const w = Math.abs(newRight - newX);
+        const h = Math.abs(newBottom - newY);
+        // Keep the last valid rect while the drag is momentarily degenerate
+        // (matches onCornerCommit's w<1||h<1 reject). Corner-resize is a
+        // rectangle-room gesture, so points stay a 4-corner rectangle.
+        if (w < 1 || h < 1) return r;
+        return { ...r, x, y, w, h, points: rectToPolygon(x, y, w, h) };
+      });
+    }
     const td = roomEditor.translateDrag;
     if (td === null) return rooms;
     const dx = td.current.x - td.anchor.x;
     const dy = td.current.y - td.anchor.y;
     if (dx === 0 && dy === 0) return rooms;
-    return rooms.map((r) =>
-      r.id === td.roomId
-        ? {
-            ...r,
-            x: Math.max(0, Math.min(10000 - r.w, r.x + dx)),
-            y: Math.max(0, Math.min(10000 - r.h, r.y + dy)),
-          }
-        : r
-    );
-  }, [rooms, roomEditor.translateDrag]);
+    return rooms.map((r) => {
+      if (r.id !== td.roomId) return r;
+      const nx = Math.max(COORD_MIN, Math.min(COORD_MAX - r.w, r.x + dx));
+      const ny = Math.max(COORD_MIN, Math.min(COORD_MAX - r.h, r.y + dy));
+      // Shift every vertex by the effective (clamped) delta.
+      const ddx = nx - r.x;
+      const ddy = ny - r.y;
+      return {
+        ...r,
+        x: nx,
+        y: ny,
+        points: r.points.map((p) => ({ x: p.x + ddx, y: p.y + ddy })),
+      };
+    });
+  }, [rooms, roomEditor.translateDrag, roomEditor.cornerDrag, vertexDrag]);
+
+  // During a polygon-vertex drag, walls whose endpoint sits on the dragged
+  // coordinate follow it live (the room reshapes via displayedRooms above).
+  const displayedWalls = useMemo<Wall[]>(() => {
+    if (vertexDrag === null) return walls;
+    const { orig, current } = vertexDrag;
+    const at = (x: number, y: number): boolean => x === orig.x && y === orig.y;
+    return walls.map((w) => {
+      let nw = w;
+      if (at(w.x1, w.y1)) nw = { ...nw, x1: current.x, y1: current.y };
+      if (at(w.x2, w.y2)) nw = { ...nw, x2: current.x, y2: current.y };
+      return nw;
+    });
+  }, [walls, vertexDrag]);
+
+  // Walls absorbed into a room's outline (their segment IS a room polygon
+  // edge) are hidden + non-selectable — the room represents them, so the
+  // canvas reads as a room, not a room ringed by big white wall strokes.
+  const hiddenWallIds = useMemo(
+    () => roomBoundaryWallIds(walls, rooms),
+    [walls, rooms]
+  );
+  /** Walls actually drawn / hit-tested as walls (room-boundary walls removed). */
+  const visibleWalls = useMemo(
+    () => displayedWalls.filter((w) => !hiddenWallIds.has(w.id)),
+    [displayedWalls, hiddenWallIds]
+  );
 
   const displayedComponentsOnFloor = useMemo<ResolvedComponent[]>(() => {
+    // Pin drag-to-move: the dragged pin renders at its live (snapped)
+    // position. Mutually exclusive with a room translate (different tool).
+    if (componentDrag !== null && componentDrag.moved) {
+      const cd = componentDrag;
+      return componentsOnFloor.map((c) =>
+        c.id === cd.id ? { ...c, posX: cd.current.x, posY: cd.current.y } : c
+      );
+    }
     const td = roomEditor.translateDrag;
     if (td === null) return componentsOnFloor;
     const beforeRoom = rooms.find((r) => r.id === td.roomId);
@@ -1328,12 +1830,12 @@ export const FloorEditScreen = (): JSX.Element => {
       containedIds.has(c.id) && c.posX !== null && c.posY !== null
         ? {
             ...c,
-            posX: Math.max(0, Math.min(10000, c.posX + dx)),
-            posY: Math.max(0, Math.min(10000, c.posY + dy)),
+            posX: Math.max(COORD_MIN, Math.min(COORD_MAX, c.posX + dx)),
+            posY: Math.max(COORD_MIN, Math.min(COORD_MAX, c.posY + dy)),
           }
         : c
     );
-  }, [componentsOnFloor, rooms, roomEditor.translateDrag]);
+  }, [componentsOnFloor, rooms, roomEditor.translateDrag, componentDrag]);
 
   // === Render ============================================================
 
@@ -1378,6 +1880,21 @@ export const FloorEditScreen = (): JSX.Element => {
 
   const selectedWall = walls.find((w) => w.id === selectedWallId) ?? null;
   const selectedRoom = rooms.find((r) => r.id === selectedRoomId) ?? null;
+  // While a room drag (corner-resize or translate) is in flight, the sidebar
+  // X/Y/W/H should reflect the LIVE rect so the numbers update in real time.
+  // displayedRooms === rooms when idle, so this is a no-op when not dragging.
+  const selectedRoomDisplay =
+    displayedRooms.find((r) => r.id === selectedRoomId) ?? selectedRoom;
+
+  // Viewbox → canvas-percent projection. The SVG geometry is transformed by
+  // `translate(tx ty) scale(s)` then mapped 0-10000 → 0-100% of the canvas
+  // (preserveAspectRatio="none"). HTML overlays (pins, gang handles, resize
+  // handles) live in CSS %-space, so they must apply the SAME transform to
+  // stay glued to the geometry as the user zooms/pans. At the identity
+  // viewport (scale 1, tx/ty 0) this reduces to `v / 100`.
+  const { scale: vbScale, tx: vbTx, ty: vbTy } = viewport.viewport;
+  const vbToPctX = (vx: number): number => (vx * vbScale + vbTx) / 100;
+  const vbToPctY = (vy: number): number => (vy * vbScale + vbTy) / 100;
 
   return (
     <div className="floor-edit">
@@ -1413,6 +1930,7 @@ export const FloorEditScreen = (): JSX.Element => {
           >
             Rename
           </Button>
+          <MoveToBuildingButton kind="floor" id={floor.id} name={floor.name} />
         </ScreenHeader>
           );
         })()}
@@ -1498,17 +2016,10 @@ export const FloorEditScreen = (): JSX.Element => {
                   <span className="kbd-badge" aria-hidden="true">S</span>
                 </Button>
               </li>
-              <li className="tool-palette__divider" aria-hidden="true" />
-              <li>
-                <Tooltip content="Reset zoom (0)">
-                  <IconButton
-                    icon={<ZoomIn size={18} strokeWidth={2.25} />}
-                    aria-label="Reset zoom (0)"
-                    variant="default"
-                    onClick={() => viewport.reset()}
-                  />
-                </Tooltip>
-              </li>
+              {/* Fit-to-view lives ONLY in the floating on-canvas zoom
+                 controls (grouped with zoom in/out) — a duplicate here was
+                 semantically out of place among the tool/component buttons
+                 and ate palette space. Keyboard shortcut "0" still fits. */}
             </ul>
           </aside>
 
@@ -1525,21 +2036,32 @@ export const FloorEditScreen = (): JSX.Element => {
               {...viewport.pinchHandlers}
             >
               {floor.floorPlan !== null && (
-                // Underlay image is NOT transformed in cycle 16 — CSS-pixel
-                // vs viewbox-unit mismatch makes a same-transform redundant
-                // and a converted transform requires container-rect tracking.
-                // The SVG geometry pans/zooms on top; the underlay stays
-                // static. Documented in CLAUDE.md G15 section as a known
-                // limitation to revisit.
+                // The underlay image tracks the viewport transform so it
+                // pans/zooms in lockstep with the SVG geometry AND the HTML
+                // pin/handle overlays — nothing shifts relative to anything
+                // else when the user zooms or fits-to-view. The CSS
+                // `translate(%) scale()` mirrors the SVG `translate(tx ty)
+                // scale(s)`: CSS resolves scale-then-translate (right-to-left),
+                // matching the SVG order, and CSS translate-% is relative to
+                // the element's own box, so `tx/100 %` reproduces the viewbox
+                // `tx` pixel offset (tx is in 0-10000 viewbox units; the box
+                // spans 100% = 10000 units). transform-origin 0 0 anchors the
+                // scale at the top-left, same as the SVG viewBox origin.
                 <img
                   src={floorPlanUrl(floor.floorPlan.filename)}
                   alt={`${floor.name} floor plan`}
-                  className="floor-plan__img"
+                  className="floor-plan__img floor-plan__img--transformed"
                   draggable={false}
+                  style={
+                    {
+                      transform: `translate(${vbTx / 100}%, ${vbTy / 100}%) scale(${vbScale})`,
+                      transformOrigin: '0 0',
+                    } as CSSProperties
+                  }
                 />
               )}
               <FloorPlanVectorOverlay
-                walls={walls}
+                walls={visibleWalls}
                 rooms={displayedRooms}
                 /* G32 cycle-40: highlight selections in pointer mode too,
                    not just the dedicated edit tools. */
@@ -1594,7 +2116,7 @@ export const FloorEditScreen = (): JSX.Element => {
                         }
                       }}
                     />
-                    {walls.map((w) => (
+                    {visibleWalls.map((w) => (
                       <line
                         key={`hit-${w.id}`}
                         x1={w.x1}
@@ -1608,50 +2130,10 @@ export const FloorEditScreen = (): JSX.Element => {
                         }}
                       />
                     ))}
-                    {wallEditor.firstEndpoint && (
-                      <circle
-                        cx={wallEditor.firstEndpoint.x}
-                        cy={wallEditor.firstEndpoint.y}
-                        r={90}
-                        className="floor-plan__wall-handle"
-                      />
-                    )}
-                    {selectedWallId !== null &&
-                      (() => {
-                        const sel = walls.find((w) => w.id === selectedWallId);
-                        if (!sel) return null;
-                        const drag = wallEditor.endpointDrag;
-                        const e1: Point =
-                          drag && drag.wallId === sel.id && drag.endpoint === 1
-                            ? drag.current
-                            : { x: sel.x1, y: sel.y1 };
-                        const e2: Point =
-                          drag && drag.wallId === sel.id && drag.endpoint === 2
-                            ? drag.current
-                            : { x: sel.x2, y: sel.y2 };
-                        return (
-                          <>
-                            <circle
-                              cx={e1.x}
-                              cy={e1.y}
-                              r={180}
-                              className="floor-plan__wall-handle"
-                              onPointerDown={(e) =>
-                                wallEditor.startEndpointDrag(sel.id, 1, e)
-                              }
-                            />
-                            <circle
-                              cx={e2.x}
-                              cy={e2.y}
-                              r={180}
-                              className="floor-plan__wall-handle"
-                              onPointerDown={(e) =>
-                                wallEditor.startEndpointDrag(sel.id, 2, e)
-                              }
-                            />
-                          </>
-                        );
-                      })()}
+                    {/* Endpoint handles + first-endpoint marker are rendered
+                       as HTML overlays below (see "Resize handle overlay") —
+                       SVG <circle> under preserveAspectRatio="none" renders as
+                       a distorted ellipse, so handles live in CSS %-space. */}
                   </g>
                 </svg>
               )}
@@ -1676,13 +2158,10 @@ export const FloorEditScreen = (): JSX.Element => {
                         }
                       }}
                     />
-                    {rooms.map((r) => (
-                      <rect
+                    {displayedRooms.map((r) => (
+                      <polygon
                         key={`rhit-${r.id}`}
-                        x={r.x}
-                        y={r.y}
-                        width={r.w}
-                        height={r.h}
+                        points={r.points.map((p) => `${p.x},${p.y}`).join(' ')}
                         className={
                           'floor-plan__room-hit' +
                           (selectedRoomId === r.id
@@ -1693,10 +2172,12 @@ export const FloorEditScreen = (): JSX.Element => {
                         data-room-id={r.id}
                         onPointerDown={(e) => {
                           e.stopPropagation();
-                          // G26 — if the room is ALREADY selected, the
-                          // pointerdown begins a translate drag. Otherwise
-                          // it just selects (existing behavior).
-                          if (selectedRoomId === r.id) {
+                          // G26 — if the room is ALREADY selected AND it's a
+                          // rectangle, the pointerdown begins a translate drag.
+                          // Polygon (wall-loop) rooms reshape via vertex drag
+                          // instead, so we don't translate them. Otherwise it
+                          // just selects (existing behavior).
+                          if (selectedRoomId === r.id && isAxisAlignedRect(r.points)) {
                             roomEditor.startTranslateDrag(r.id, e);
                           } else {
                             setSelectedRoomId(r.id);
@@ -1704,40 +2185,8 @@ export const FloorEditScreen = (): JSX.Element => {
                         }}
                       />
                     ))}
-                    {selectedRoomId !== null &&
-                      (() => {
-                        const sel = rooms.find((r) => r.id === selectedRoomId);
-                        if (!sel) return null;
-                        const drag = roomEditor.cornerDrag;
-                        const corners: { corner: Corner; x: number; y: number }[] = [
-                          { corner: 'tl', x: sel.x, y: sel.y },
-                          { corner: 'tr', x: sel.x + sel.w, y: sel.y },
-                          { corner: 'bl', x: sel.x, y: sel.y + sel.h },
-                          { corner: 'br', x: sel.x + sel.w, y: sel.y + sel.h },
-                        ];
-                        return (
-                          <>
-                            {corners.map((c) => {
-                              const pt =
-                                drag && drag.roomId === sel.id && drag.corner === c.corner
-                                  ? drag.current
-                                  : { x: c.x, y: c.y };
-                              return (
-                                <circle
-                                  key={c.corner}
-                                  cx={pt.x}
-                                  cy={pt.y}
-                                  r={180}
-                                  className="floor-plan__corner-handle"
-                                  onPointerDown={(e) =>
-                                    roomEditor.startCornerDrag(sel.id, c.corner, e)
-                                  }
-                                />
-                              );
-                            })}
-                          </>
-                        );
-                      })()}
+                    {/* Corner handles are rendered as HTML overlays below
+                       (see "Resize handle overlay"). */}
                   </g>
                 </svg>
               )}
@@ -1769,13 +2218,10 @@ export const FloorEditScreen = (): JSX.Element => {
                     />
                     {/* Room hit-rects render FIRST (behind walls) so a
                        wall sitting on a room boundary is still tappable. */}
-                    {rooms.map((r) => (
-                      <rect
+                    {displayedRooms.map((r) => (
+                      <polygon
                         key={`prhit-${r.id}`}
-                        x={r.x}
-                        y={r.y}
-                        width={r.w}
-                        height={r.h}
+                        points={r.points.map((p) => `${p.x},${p.y}`).join(' ')}
                         className={
                           'floor-plan__room-hit' +
                           (selectedRoomId === r.id
@@ -1786,7 +2232,9 @@ export const FloorEditScreen = (): JSX.Element => {
                         data-room-id={r.id}
                         onPointerDown={(e) => {
                           e.stopPropagation();
-                          if (selectedRoomId === r.id) {
+                          // Rectangle rooms translate on a second pointerdown;
+                          // polygon rooms reshape via vertex handles instead.
+                          if (selectedRoomId === r.id && isAxisAlignedRect(r.points)) {
                             roomEditor.startTranslateDrag(r.id, e);
                           } else {
                             setSelectedRoomId(r.id);
@@ -1797,7 +2245,7 @@ export const FloorEditScreen = (): JSX.Element => {
                     ))}
                     {/* Wall hit-rects — tap to select. Endpoint drag fires
                        from the visible handles below. */}
-                    {walls.map((w) => (
+                    {visibleWalls.map((w) => (
                       <line
                         key={`phit-${w.id}`}
                         x1={w.x1}
@@ -1814,78 +2262,9 @@ export const FloorEditScreen = (): JSX.Element => {
                         }}
                       />
                     ))}
-                    {/* Endpoint handles for the selected wall. */}
-                    {selectedWallId !== null &&
-                      (() => {
-                        const sel = walls.find((w) => w.id === selectedWallId);
-                        if (!sel) return null;
-                        const drag = wallEditor.endpointDrag;
-                        const e1: Point =
-                          drag && drag.wallId === sel.id && drag.endpoint === 1
-                            ? drag.current
-                            : { x: sel.x1, y: sel.y1 };
-                        const e2: Point =
-                          drag && drag.wallId === sel.id && drag.endpoint === 2
-                            ? drag.current
-                            : { x: sel.x2, y: sel.y2 };
-                        return (
-                          <>
-                            <circle
-                              cx={e1.x}
-                              cy={e1.y}
-                              r={180}
-                              className="floor-plan__wall-handle"
-                              onPointerDown={(e) =>
-                                wallEditor.startEndpointDrag(sel.id, 1, e)
-                              }
-                            />
-                            <circle
-                              cx={e2.x}
-                              cy={e2.y}
-                              r={180}
-                              className="floor-plan__wall-handle"
-                              onPointerDown={(e) =>
-                                wallEditor.startEndpointDrag(sel.id, 2, e)
-                              }
-                            />
-                          </>
-                        );
-                      })()}
-                    {/* Corner handles for the selected room. */}
-                    {selectedRoomId !== null &&
-                      (() => {
-                        const sel = rooms.find((r) => r.id === selectedRoomId);
-                        if (!sel) return null;
-                        const drag = roomEditor.cornerDrag;
-                        const corners: { corner: Corner; x: number; y: number }[] = [
-                          { corner: 'tl', x: sel.x, y: sel.y },
-                          { corner: 'tr', x: sel.x + sel.w, y: sel.y },
-                          { corner: 'bl', x: sel.x, y: sel.y + sel.h },
-                          { corner: 'br', x: sel.x + sel.w, y: sel.y + sel.h },
-                        ];
-                        return (
-                          <>
-                            {corners.map((c) => {
-                              const pt =
-                                drag && drag.roomId === sel.id && drag.corner === c.corner
-                                  ? drag.current
-                                  : { x: c.x, y: c.y };
-                              return (
-                                <circle
-                                  key={c.corner}
-                                  cx={pt.x}
-                                  cy={pt.y}
-                                  r={180}
-                                  className="floor-plan__corner-handle"
-                                  onPointerDown={(e) =>
-                                    roomEditor.startCornerDrag(sel.id, c.corner, e)
-                                  }
-                                />
-                              );
-                            })}
-                          </>
-                        );
-                      })()}
+                    {/* Endpoint + corner handles for the selected wall/room
+                       are rendered as HTML overlays below (see "Resize handle
+                       overlay"). */}
                   </g>
                 </svg>
               )}
@@ -1900,15 +2279,151 @@ export const FloorEditScreen = (): JSX.Element => {
                     if (canvasRef.current === null) return;
                     const rect = canvasRef.current.getBoundingClientRect();
                     const pt = viewport.screenToViewbox(e.clientX, e.clientY, rect);
-                    // Clamp to viewbox bounds.
-                    const x = Math.max(0, Math.min(10000, pt.x));
-                    const y = Math.max(0, Math.min(10000, pt.y));
+                    // Clamp to coordinate bounds.
+                    const x = Math.max(COORD_MIN, Math.min(COORD_MAX, pt.x));
+                    const y = Math.max(COORD_MIN, Math.min(COORD_MAX, pt.y));
                     void handleQuickCreate({ x, y });
                   }}
                 >
                   <rect x="0" y="0" width="10000" height="10000" fill="transparent" />
                 </svg>
               )}
+              {/* === Resize handle overlay ===
+                 HTML handles (NOT SVG <circle>) for wall endpoints + room
+                 corners. SVG circles inside preserveAspectRatio="none" render
+                 as distorted ellipses; HTML elements in CSS %-space stay
+                 perfectly round and apply the viewport transform via
+                 vbToPctX/vbToPctY so they track pan/zoom. They pointer-capture
+                 the drag, so the editors' window-level pointermove listeners
+                 (not the SVG handlers) drive the gesture. */}
+              {/* Wall first-endpoint marker (drawing in progress). */}
+              {tool === 'wall' && wallEditor.firstEndpoint !== null && (
+                <span
+                  className="floor-plan__handle floor-plan__handle--marker"
+                  aria-hidden="true"
+                  style={
+                    {
+                      left: `${vbToPctX(wallEditor.firstEndpoint.x)}%`,
+                      top: `${vbToPctY(wallEditor.firstEndpoint.y)}%`,
+                    } as CSSProperties
+                  }
+                />
+              )}
+              {/* Wall endpoint handles (selected wall, wall + pointer tools).
+                 Skipped for walls absorbed into a room outline — those aren't
+                 selectable as walls (you edit them via the room's vertices). */}
+              {(tool === 'wall' || tool === 'pointer') &&
+                selectedWallId !== null &&
+                !hiddenWallIds.has(selectedWallId) &&
+                (() => {
+                  const sel = walls.find((w) => w.id === selectedWallId);
+                  if (!sel) return null;
+                  const drag = wallEditor.endpointDrag;
+                  const endpoints: { endpoint: 1 | 2; pt: Point }[] = [
+                    {
+                      endpoint: 1,
+                      pt:
+                        drag && drag.wallId === sel.id && drag.endpoint === 1
+                          ? drag.current
+                          : { x: sel.x1, y: sel.y1 },
+                    },
+                    {
+                      endpoint: 2,
+                      pt:
+                        drag && drag.wallId === sel.id && drag.endpoint === 2
+                          ? drag.current
+                          : { x: sel.x2, y: sel.y2 },
+                    },
+                  ];
+                  return endpoints.map(({ endpoint, pt }) => (
+                    <button
+                      key={endpoint}
+                      type="button"
+                      className="floor-plan__handle floor-plan__handle--endpoint"
+                      data-testid="wall-endpoint-handle"
+                      data-endpoint={endpoint}
+                      aria-label={`Drag to move wall endpoint ${endpoint}`}
+                      style={
+                        {
+                          left: `${vbToPctX(pt.x)}%`,
+                          top: `${vbToPctY(pt.y)}%`,
+                        } as CSSProperties
+                      }
+                      onPointerDown={(e) =>
+                        wallEditor.startEndpointDrag(sel.id, endpoint, e)
+                      }
+                    />
+                  ));
+                })()}
+              {/* Rectangle-room corner handles (selected room, room + pointer
+                 tools). Reads from displayedRooms so the handles follow a
+                 translate/resize drag in lockstep. Only RECTANGLE rooms get
+                 the resize-keeps-rectangle corners; polygon (wall-loop) rooms
+                 get per-vertex handles below instead. */}
+              {(tool === 'room' || tool === 'pointer') &&
+                selectedRoomId !== null &&
+                (() => {
+                  // sel comes from displayedRooms, which already reflects the
+                  // live corner-resize (and translate) — so every corner is
+                  // derived from the live rect; no per-corner drag override.
+                  const sel = displayedRooms.find((r) => r.id === selectedRoomId);
+                  if (!sel || !isAxisAlignedRect(sel.points)) return null;
+                  const corners: { corner: Corner; x: number; y: number }[] = [
+                    { corner: 'tl', x: sel.x, y: sel.y },
+                    { corner: 'tr', x: sel.x + sel.w, y: sel.y },
+                    { corner: 'bl', x: sel.x, y: sel.y + sel.h },
+                    { corner: 'br', x: sel.x + sel.w, y: sel.y + sel.h },
+                  ];
+                  return corners.map((c) => {
+                    const pt = { x: c.x, y: c.y };
+                    return (
+                      <button
+                        key={c.corner}
+                        type="button"
+                        className="floor-plan__handle floor-plan__handle--corner"
+                        data-testid="room-corner-handle"
+                        data-corner={c.corner}
+                        aria-label={`Drag to resize room (${c.corner} corner)`}
+                        style={
+                          {
+                            left: `${vbToPctX(pt.x)}%`,
+                            top: `${vbToPctY(pt.y)}%`,
+                          } as CSSProperties
+                        }
+                        onPointerDown={(e) =>
+                          roomEditor.startCornerDrag(sel.id, c.corner, e)
+                        }
+                      />
+                    );
+                  });
+                })()}
+              {/* Polygon-room vertex handles (wall-loop rooms). One draggable
+                 handle per vertex; dragging reshapes the room AND drags any
+                 coincident wall endpoints with it ("each wall end is a point").
+                 Reads displayedRooms so handles track the live vertex drag. */}
+              {(tool === 'room' || tool === 'pointer') &&
+                selectedRoomId !== null &&
+                (() => {
+                  const sel = displayedRooms.find((r) => r.id === selectedRoomId);
+                  if (!sel || isAxisAlignedRect(sel.points)) return null;
+                  return sel.points.map((p, i) => (
+                    <button
+                      key={`v-${i}`}
+                      type="button"
+                      className="floor-plan__handle floor-plan__handle--corner"
+                      data-testid="room-vertex-handle"
+                      data-vertex-index={i}
+                      aria-label={`Drag to reshape room (vertex ${i + 1})`}
+                      style={
+                        {
+                          left: `${vbToPctX(p.x)}%`,
+                          top: `${vbToPctY(p.y)}%`,
+                        } as CSSProperties
+                      }
+                      onPointerDown={(e) => startVertexDrag(sel.id, i, e)}
+                    />
+                  ));
+                })()}
               {/* Component pins overlay — absolutely-positioned buttons,
                  rendered above the SVG so they're tappable in pointer mode.
                  Each pin carries `data-link-target` + `data-pin-id` so the
@@ -1920,8 +2435,8 @@ export const FloorEditScreen = (): JSX.Element => {
                 displayedComponentsOnFloor
                   .filter((c) => c.posX !== null && c.posY !== null)
                   .map((c) => {
-                    const left = ((c.posX ?? 0) / 10000) * 100;
-                    const top = ((c.posY ?? 0) / 10000) * 100;
+                    const left = vbToPctX(c.posX ?? 0);
+                    const top = vbToPctY(c.posY ?? 0);
                     const isSel = selectedComponentId === c.id;
                     const isHoverTarget =
                       linkDrag !== null && linkDrag.hoverPinId === c.id;
@@ -1934,10 +2449,28 @@ export const FloorEditScreen = (): JSX.Element => {
                           'floor-plan__pin' +
                           (isSel ? ' floor-plan__pin--selected' : '') +
                           (isHoverTarget ? ' floor-plan__pin--link-target' : '') +
-                          (isInert ? ' floor-plan__pin--inert' : '')
+                          (isInert ? ' floor-plan__pin--inert' : '') +
+                          (componentDrag?.id === c.id && componentDrag.moved
+                            ? ' floor-plan__pin--moving'
+                            : '')
                         }
                         style={{ left: `${left}%`, top: `${top}%` } as CSSProperties}
-                        onClick={isInert ? undefined : () => handleSelectComponent(c.id)}
+                        onPointerDown={
+                          isInert ? undefined : (e) => startComponentDrag(c.id, e)
+                        }
+                        onClick={
+                          isInert
+                            ? undefined
+                            : () => {
+                                // Swallow the click the browser fires after a
+                                // real drag so a move doesn't also re-select.
+                                if (componentDragMovedRef.current) {
+                                  componentDragMovedRef.current = false;
+                                  return;
+                                }
+                                handleSelectComponent(c.id);
+                              }
+                        }
                         aria-label={`${c.name} (${c.type})`}
                         title={c.name}
                         data-link-target={c.type}
@@ -1958,7 +2491,10 @@ export const FloorEditScreen = (): JSX.Element => {
               {tool === 'pointer' &&
                 (selectedComponentId !== null || linkDrag !== null) &&
                 (() => {
-                  const sel = componentsOnFloor.find(
+                  // displayedComponentsOnFloor so the lines track a pin that's
+                  // being dragged (live position) instead of lagging at the
+                  // canonical coords until release.
+                  const sel = displayedComponentsOnFloor.find(
                     (c) => c.id === selectedComponentId
                   );
                   const showControls =
@@ -1989,7 +2525,7 @@ export const FloorEditScreen = (): JSX.Element => {
                            switch (gang origin) to each controlled pin. */}
                         {showControls &&
                           switchControls.map((link) => {
-                            const target = componentsOnFloor.find(
+                            const target = displayedComponentsOnFloor.find(
                               (c) => c.id === link.controlled.id
                             );
                             if (
@@ -2029,7 +2565,7 @@ export const FloorEditScreen = (): JSX.Element => {
                             if (selX === null || selY === null) return null;
                             return (controlsByControlledId.get(sel.id) ?? []).map(
                               (link) => {
-                                const sw = componentsOnFloor.find(
+                                const sw = displayedComponentsOnFloor.find(
                                   (c) => c.id === link.switchId
                                 );
                                 if (
@@ -2082,7 +2618,9 @@ export const FloorEditScreen = (): JSX.Element => {
               {tool === 'pointer' &&
                 selectedComponentId !== null &&
                 (() => {
-                  const sel = componentsOnFloor.find(
+                  // displayedComponentsOnFloor so the gang handles ride along
+                  // when the switch pin is being dragged.
+                  const sel = displayedComponentsOnFloor.find(
                     (c) => c.id === selectedComponentId
                   );
                   if (
@@ -2092,8 +2630,8 @@ export const FloorEditScreen = (): JSX.Element => {
                     sel.posY === null
                   )
                     return null;
-                  const left = (sel.posX / 10000) * 100;
-                  const top = (sel.posY / 10000) * 100;
+                  const left = vbToPctX(sel.posX);
+                  const top = vbToPctY(sel.posY);
                   return (
                     <div
                       className="gang-link-handles"
@@ -2167,6 +2705,31 @@ export const FloorEditScreen = (): JSX.Element => {
                     </div>
                   );
                 })()}
+              {/* On-canvas zoom controls — floating bottom-right so zoom is
+                  always within reach without hunting the tool palette. */}
+              <div className="floor-zoom" data-testid="floor-zoom-controls">
+                <Tooltip content="Zoom in">
+                  <IconButton
+                    icon={<Plus size={18} strokeWidth={2.25} />}
+                    aria-label="Zoom in"
+                    onClick={() => viewport.zoomBy(1.2)}
+                  />
+                </Tooltip>
+                <Tooltip content="Zoom out">
+                  <IconButton
+                    icon={<Minus size={18} strokeWidth={2.25} />}
+                    aria-label="Zoom out"
+                    onClick={() => viewport.zoomBy(1 / 1.2)}
+                  />
+                </Tooltip>
+                <Tooltip content="Fit floor to view (0)">
+                  <IconButton
+                    icon={<Maximize2 size={18} strokeWidth={2.25} />}
+                    aria-label="Fit floor to view"
+                    onClick={frameContent}
+                  />
+                </Tooltip>
+              </div>
             </div>
             <p className="muted floor-edit__caption">
               {walls.length} wall{walls.length === 1 ? '' : 's'} · {rooms.length} room
@@ -2229,45 +2792,57 @@ export const FloorEditScreen = (): JSX.Element => {
                     </dd>
                   </div>
                 </dl>
-                {/* G26 — editable numeric dimensions. Snap step 250 matches
-                    the canvas grid; clamped 0–10000. Commits on Enter or blur. */}
-                <div className="room-dim-grid" data-testid="room-dim-grid">
-                  <RoomDimensionInput
-                    label="X"
-                    value={selectedRoom.x}
-                    onCommit={(v) => {
-                      void handleEditRoomDimension('x', v);
-                    }}
-                    testId="room-dim-x"
-                  />
-                  <RoomDimensionInput
-                    label="Y"
-                    value={selectedRoom.y}
-                    onCommit={(v) => {
-                      void handleEditRoomDimension('y', v);
-                    }}
-                    testId="room-dim-y"
-                  />
-                  <RoomDimensionInput
-                    label="W"
-                    value={selectedRoom.w}
-                    onCommit={(v) => {
-                      void handleEditRoomDimension('w', v);
-                    }}
-                    testId="room-dim-w"
-                  />
-                  <RoomDimensionInput
-                    label="H"
-                    value={selectedRoom.h}
-                    onCommit={(v) => {
-                      void handleEditRoomDimension('h', v);
-                    }}
-                    testId="room-dim-h"
-                  />
-                </div>
-                <p className="muted room-dim-hint">
-                  Drag inside the rectangle to move it.
-                </p>
+                {/* Rectangle rooms get the editable X/Y/W/H grid (G26 — snap
+                    step 250, auto-commits live). Polygon (wall-loop) rooms are
+                    reshaped by dragging their vertices on the canvas, so the
+                    sidebar shows a read-only summary + a hint instead. */}
+                {isAxisAlignedRect((selectedRoomDisplay ?? selectedRoom).points) ? (
+                  <>
+                    <div className="room-dim-grid" data-testid="room-dim-grid">
+                      <RoomDimensionInput
+                        label="X"
+                        value={(selectedRoomDisplay ?? selectedRoom).x}
+                        onCommit={(v) => {
+                          void handleEditRoomDimension('x', v);
+                        }}
+                        testId="room-dim-x"
+                      />
+                      <RoomDimensionInput
+                        label="Y"
+                        value={(selectedRoomDisplay ?? selectedRoom).y}
+                        onCommit={(v) => {
+                          void handleEditRoomDimension('y', v);
+                        }}
+                        testId="room-dim-y"
+                      />
+                      <RoomDimensionInput
+                        label="W"
+                        value={(selectedRoomDisplay ?? selectedRoom).w}
+                        onCommit={(v) => {
+                          void handleEditRoomDimension('w', v);
+                        }}
+                        testId="room-dim-w"
+                      />
+                      <RoomDimensionInput
+                        label="H"
+                        value={(selectedRoomDisplay ?? selectedRoom).h}
+                        onCommit={(v) => {
+                          void handleEditRoomDimension('h', v);
+                        }}
+                        testId="room-dim-h"
+                      />
+                    </div>
+                    <p className="muted room-dim-hint">
+                      Drag inside the rectangle to move it.
+                    </p>
+                  </>
+                ) : (
+                  <p className="muted room-dim-hint" data-testid="room-polygon-hint">
+                    {(selectedRoomDisplay ?? selectedRoom).points.length}-corner room
+                    — drag the vertices on the canvas to reshape it. Walls sharing a
+                    corner move with it.
+                  </p>
+                )}
                 <Button
                   variant="danger"
                   block
@@ -2847,8 +3422,11 @@ const FloorComponentEditFormHost = ({
   );
 };
 
-/** G26 — small uncontrolled numeric input for one of room's x/y/w/h.
- *  Commits on blur AND on Enter. Esc reverts to last-known value. Lives
+/** G26 — small numeric input for one of room's x/y/w/h. Auto-commits live
+ *  (debounced 300ms) as the user types OR clicks the stepper arrows, plus an
+ *  immediate commit on blur and on Enter. Esc reverts to last-known value.
+ *  While focused, an external canonical-value change (e.g. a grid-snap
+ *  round-trip from the commit) does NOT clobber the in-progress draft. Lives
  *  here (rather than ui/) because it's a narrow editor specific to room
  *  dimensions; promoting later if a second consumer shows up. */
 const RoomDimensionInput = ({
@@ -2863,20 +3441,43 @@ const RoomDimensionInput = ({
   testId: string;
 }): JSX.Element => {
   const [draft, setDraft] = useState<string>(String(value));
-  // Re-seed draft whenever the canonical value changes (e.g. via a drag
-  // commit). Prevents stale user input from blocking external updates.
+  // Track focus so an external canonical-value change (e.g. a corner-drag
+  // commit) re-seeds the draft only while the user is NOT typing — otherwise
+  // the grid-snap round-trip would clobber an in-progress edit.
+  const focusedRef = useRef(false);
+  // Debounce timer so typing / holding a stepper arrow commits live without
+  // firing a PATCH on every keystroke.
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    setDraft(String(value));
+    if (!focusedRef.current) setDraft(String(value));
   }, [value]);
 
-  const commit = (): void => {
-    const n = Number.parseInt(draft, 10);
+  // Clear any pending debounce on unmount.
+  useEffect(
+    () => () => {
+      if (debounceRef.current !== null) clearTimeout(debounceRef.current);
+    },
+    []
+  );
+
+  const clearPending = (): void => {
+    if (debounceRef.current !== null) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+  };
+
+  // Commit `raw`, falling back to the canonical value when it can't parse.
+  const commit = (raw: string): void => {
+    const n = Number.parseInt(raw, 10);
     if (Number.isNaN(n)) {
       setDraft(String(value));
       return;
     }
     onCommit(n);
   };
+
   return (
     <label className="room-dim-input">
       <span className="room-dim-input__label">{label}</span>
@@ -2884,17 +3485,36 @@ const RoomDimensionInput = ({
         label={null}
         type="number"
         inputMode="numeric"
-        min={0}
-        max={10000}
+        min={COORD_MIN}
+        max={COORD_MAX}
         step={250}
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
+        onFocus={() => {
+          focusedRef.current = true;
+        }}
+        onChange={(e) => {
+          const next = e.target.value;
+          setDraft(next);
+          // Live auto-commit (debounced) — fires for typed input AND for
+          // the number-stepper arrow clicks, so the room updates without
+          // needing Enter or blur.
+          clearPending();
+          debounceRef.current = setTimeout(() => {
+            debounceRef.current = null;
+            commit(next);
+          }, 300);
+        }}
+        onBlur={() => {
+          focusedRef.current = false;
+          clearPending();
+          commit(draft);
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
             (e.target as HTMLInputElement).blur();
           } else if (e.key === 'Escape') {
+            clearPending();
             setDraft(String(value));
             (e.target as HTMLInputElement).blur();
           }

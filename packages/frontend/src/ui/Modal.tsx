@@ -4,8 +4,10 @@ import {
   useId,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
 import { X } from 'lucide-react';
@@ -25,9 +27,13 @@ import { IconButton } from './IconButton.js';
  * Cycle-73: `presentation` opt-in. Default `'centered'` is byte-identical
  * to cycle-20 G20 behavior. `'sheet'` pivots to a bottom-anchored sheet
  * below 720px viewport (matchMedia); above 720px the sheet falls back
- * to centered automatically. The drag-handle inside the sheet is
- * DECORATIVE ONLY — NO pointer handlers, NO drag-to-dismiss gesture.
- * Dismissal is via Close button, overlay click, and ESC (unchanged).
+ * to centered automatically.
+ *
+ * 2026-05 (user feedback): the sheet's drag-handle is now FUNCTIONAL —
+ * grab it and swipe down to dismiss (the sheet follows the finger; release
+ * past ~30% of its height, or ~150px, closes; otherwise it snaps back).
+ * This supersedes the cycle-73 "decorative only" decision. Close button,
+ * overlay click, and ESC still work as before.
  */
 
 /** Cycle-73: narrow-viewport media-query hook (mirrors the cycle-36 G29
@@ -61,6 +67,9 @@ export type ModalProps = {
   children: ReactNode;
   /** Footer actions (typically <Button>s). */
   footer?: ReactNode;
+  /** Optional action rendered in the header top-right, before the X (e.g. an
+   *  "Add" button). 2026-05. */
+  headerAction?: ReactNode;
   /** When true (default), clicking the dimmed overlay closes the modal. */
   closeOnOverlay?: boolean;
   /** When true, render an X icon in the top-right corner. Default true. */
@@ -81,6 +90,7 @@ export const Modal = ({
   title,
   children,
   footer,
+  headerAction,
   closeOnOverlay = true,
   showCloseButton = true,
   ariaLabel,
@@ -94,6 +104,71 @@ export const Modal = ({
   // Sheet variant only pivots below 720px. Above the breakpoint, fall
   // back to centered visuals so desktop renders match cycle-20 G20.
   const isSheet = presentation === 'sheet' && narrow;
+
+  // --- Sheet drag-to-dismiss (mobile) -----------------------------------
+  // Grab the handle and swipe down: the sheet follows the finger (downward
+  // only); releasing past a threshold closes, otherwise it snaps back. PATCH
+  // of state is local; pointer capture keeps the gesture even if the finger
+  // leaves the handle. Reset whenever the modal closes so a reopen starts
+  // flush.
+  const [dragY, setDragY] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const dragStartRef = useRef<{ y: number; pointerId: number } | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setDragY(0);
+      setDragging(false);
+      dragStartRef.current = null;
+    }
+  }, [open]);
+
+  const onHandlePointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>): void => {
+      if (!isSheet) return;
+      dragStartRef.current = { y: e.clientY, pointerId: e.pointerId };
+      setDragging(true);
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // some browsers reject setPointerCapture; ignore
+      }
+    },
+    [isSheet]
+  );
+
+  const onHandlePointerMove = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>): void => {
+      const st = dragStartRef.current;
+      if (st === null) return;
+      const dy = e.clientY - st.y;
+      setDragY(dy > 0 ? dy : 0); // downward only
+    },
+    []
+  );
+
+  const onHandlePointerEnd = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>): void => {
+      const st = dragStartRef.current;
+      if (st === null) return;
+      dragStartRef.current = null;
+      setDragging(false);
+      try {
+        e.currentTarget.releasePointerCapture(st.pointerId);
+      } catch {
+        // ignore
+      }
+      const dy = e.clientY - st.y;
+      const sheetH = dialogRef.current?.offsetHeight ?? 400;
+      const threshold = Math.min(150, sheetH * 0.3);
+      if (dy > threshold) {
+        onClose();
+      } else {
+        setDragY(0); // snap back
+      }
+    },
+    [onClose]
+  );
 
   // Capture/restore focus on open/close.
   useEffect(() => {
@@ -149,7 +224,12 @@ export const Modal = ({
   const overlayClassName = isSheet
     ? 'modal-overlay modal-overlay--sheet'
     : 'modal-overlay';
-  const modalClassName = isSheet ? 'modal modal--sheet' : 'modal';
+  const modalClassName = isSheet
+    ? 'modal modal--sheet' + (dragging ? ' modal--sheet-dragging' : '')
+    : 'modal';
+  // Follow-the-finger transform while the sheet is being dragged down.
+  const dialogStyle: CSSProperties | undefined =
+    isSheet && dragY > 0 ? { transform: `translateY(${dragY}px)` } : undefined;
 
   return (
     <div
@@ -166,25 +246,38 @@ export const Modal = ({
         aria-label={ariaLabel}
         data-testid={testId ?? 'modal'}
         className={modalClassName}
+        style={dialogStyle}
         // Click inside the modal must not bubble to the overlay's close handler.
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Cycle-73: decorative drag-handle at top of bottom-sheet — NO
-            pointer handlers, NO drag-to-dismiss gesture (per Lockin
-            FATAL #2 alternative). Visual cue for the sheet pattern. */}
+        {/* Bottom-sheet drag-handle — swipe down to dismiss (2026-05). The
+            visible bar is the ::before; the element itself is a taller touch
+            zone. ESC + Close button + overlay click remain the accessible
+            dismiss paths, so the handle stays aria-hidden. */}
         {isSheet && (
-          <div className="modal__drag-handle" aria-hidden="true" />
+          <div
+            className="modal__drag-handle"
+            aria-hidden="true"
+            data-testid="modal-drag-handle"
+            onPointerDown={onHandlePointerDown}
+            onPointerMove={onHandlePointerMove}
+            onPointerUp={onHandlePointerEnd}
+            onPointerCancel={onHandlePointerEnd}
+          />
         )}
         <header className="modal__header">
           <h2 id={titleId} className="modal__title">{title}</h2>
-          {showCloseButton && (
-            <IconButton
-              icon={<X size={18} strokeWidth={2.25} />}
-              aria-label="Close"
-              variant="ghost"
-              onClick={onClose}
-            />
-          )}
+          <div className="modal__header-actions">
+            {headerAction}
+            {showCloseButton && (
+              <IconButton
+                icon={<X size={18} strokeWidth={2.25} />}
+                aria-label="Close"
+                variant="ghost"
+                onClick={onClose}
+              />
+            )}
+          </div>
         </header>
         <div className="modal__body">{children}</div>
         {footer !== undefined && <footer className="modal__footer">{footer}</footer>}

@@ -33,7 +33,13 @@ export type Viewport = {
 
 export type Point = { x: number; y: number };
 
-const MIN_SCALE = 0.25;
+/** Axis-aligned bounding box in 0-10000 floor coords. */
+export type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
+
+// MIN_SCALE is intentionally tiny: the coordinate space is far larger than
+// the 0-10000 viewBox window (see COORD_MIN/MAX in @he/shared), so fit-to-
+// content must be able to zoom way out to frame a sprawling floor plan.
+const MIN_SCALE = 0.05;
 const MAX_SCALE = 8;
 const INITIAL: Viewport = { scale: 1, tx: 0, ty: 0 };
 
@@ -55,6 +61,15 @@ export type UseViewportResult = {
   pan: (dx: number, dy: number) => void;
   /** Restore initial scale=1, tx=ty=0. */
   reset: () => void;
+  /** Frame a bounding box (0-10000 floor coords) so it fills the canvas
+   *  centered, with `padding` viewbox units of breathing room on each
+   *  edge. Independent of the pixel rect — works purely in viewbox space
+   *  (the SVG uses preserveAspectRatio="none", so 0-10000 maps to the
+   *  full canvas on both axes regardless of aspect). */
+  fitTo: (bounds: Bounds, padding?: number) => void;
+  /** Step the zoom by `factor` around the canvas center (no rect needed).
+   *  Used by the on-screen +/- buttons. */
+  zoomBy: (factor: number) => void;
   /** Handler to spread onto the canvas div: mouse-wheel zoom + pan. */
   onWheel: (e: ReactWheelEvent<HTMLDivElement>) => void;
   /** Handlers for two-finger pinch zoom. Spread onto the canvas div. */
@@ -111,6 +126,34 @@ export const useViewport = (): UseViewportResult => {
 
   const reset = useCallback((): void => {
     setViewport(INITIAL);
+  }, []);
+
+  const fitTo = useCallback((bounds: Bounds, padding = 700): void => {
+    setViewport(() => {
+      // Guard against zero/near-zero spans (a single pin, a perfectly
+      // axis-aligned wall) so we don't divide by zero or zoom to MAX on
+      // a dot. A floor's content always reads better with a minimum span.
+      const MIN_SPAN = 1200;
+      const bw = Math.max(bounds.maxX - bounds.minX, MIN_SPAN);
+      const bh = Math.max(bounds.maxY - bounds.minY, MIN_SPAN);
+      const avail = 10000 - 2 * padding;
+      const scale = clamp(Math.min(avail / bw, avail / bh), MIN_SCALE, MAX_SCALE);
+      const cx = (bounds.minX + bounds.maxX) / 2;
+      const cy = (bounds.minY + bounds.maxY) / 2;
+      // Map content center onto the viewbox center (5000,5000).
+      return { scale, tx: 5000 - scale * cx, ty: 5000 - scale * cy };
+    });
+  }, []);
+
+  const zoomBy = useCallback((factor: number): void => {
+    setViewport((v) => {
+      const nextScale = clamp(v.scale * factor, MIN_SCALE, MAX_SCALE);
+      const realFactor = nextScale / v.scale;
+      // Keep the viewbox center (5000,5000) fixed.
+      const nextTx = 5000 - realFactor * (5000 - v.tx);
+      const nextTy = 5000 - realFactor * (5000 - v.ty);
+      return { scale: nextScale, tx: nextTx, ty: nextTy };
+    });
   }, []);
 
   // Mouse wheel: ctrl/cmd → zoom; plain → vertical pan; shift → horizontal.
@@ -201,6 +244,8 @@ export const useViewport = (): UseViewportResult => {
     zoomAt,
     pan,
     reset,
+    fitTo,
+    zoomBy,
     onWheel,
     pinchHandlers: { onPointerDown, onPointerMove, onPointerUp },
   };

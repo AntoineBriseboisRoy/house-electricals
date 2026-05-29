@@ -1,17 +1,24 @@
 /**
- * Playwright globalSetup (G21 cycle-21).
+ * Playwright globalSetup (G21 cycle-21; Postgres since migrate/postgres).
  *
- * Spawns an ISOLATED backend on port 3100 with DB_PATH + FLOOR_PLAN_DIR
- * pointing at a fresh tmpdir, waits for /api/v1/panels to respond, then
- * seeds fixtures via the public REST API (NEVER direct SQLite writes).
+ * Spawns an ISOLATED backend on port 3100 pointed at the dev Postgres
+ * (DATABASE_URL) but scoped to a dedicated `e2e` schema via DB_SCHEMA,
+ * with DB_RESET=1 so the schema is dropped + recreated on every run for
+ * a clean slate. FLOOR_PLAN_DIR still points at a fresh tmpdir (uploaded
+ * images are filesystem state, not DB state). It waits for /api/v1/health,
+ * then seeds fixtures via the public REST API (NEVER direct DB writes).
  *
  * Writes the runtime state (tmpdir path, backend pid, port) to
  * `e2e/.state.json` so globalTeardown can find + kill the backend and
  * rm the tmpdir.
  *
- * Hard rule: this MUST NEVER touch `./data/` — that is the user's
- * working data. The tmpdir convention is documented in CLAUDE.md
- * "E2E (Playwright — G21)".
+ * Hard rules:
+ *  - This MUST NEVER touch the user's `public` schema — the `e2e` schema
+ *    is fully isolated and the DB_RESET drop only ever names `e2e`.
+ *  - This MUST NEVER touch `./data/` (the user's working data). The
+ *    tmpdir convention is documented in CLAUDE.md "E2E (Playwright)".
+ *  - Requires the dev Postgres to be reachable (docker compose -f
+ *    docker-compose.dev.yml up -d). Point DATABASE_URL elsewhere for CI.
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -32,6 +39,15 @@ const AUTH_STORAGE_STATE_FILE = join(__dirname, '.auth.json');
 
 const E2E_BACKEND_PORT = 3100;
 const E2E_BACKEND_URL = `http://127.0.0.1:${E2E_BACKEND_PORT}`;
+
+// The isolated backend talks to the dev Postgres but lands every table in a
+// dedicated `e2e` schema (dropped + recreated on boot via DB_RESET) so it
+// never collides with the operator's `public` data. Override DATABASE_URL to
+// point at a CI / remote Postgres; the default mirrors test-helpers.ts.
+const E2E_DATABASE_URL =
+  process.env.DATABASE_URL ??
+  'postgresql://postgres:postgres@localhost:5433/house_electricals';
+const E2E_DB_SCHEMA = 'e2e';
 
 const waitForBackend = async (
   baseUrl: string,
@@ -57,10 +73,7 @@ const waitForBackend = async (
   }
 };
 
-const spawnBackend = (
-  dbPath: string,
-  floorPlanDir: string
-): ChildProcess => {
+const spawnBackend = (floorPlanDir: string): ChildProcess => {
   const isWin = process.platform === 'win32';
   // Use pnpm exec so we don't have to know where tsx is hoisted in the
   // workspace's node_modules. cwd is the backend package; tsx loads
@@ -73,7 +86,11 @@ const spawnBackend = (
     cwd: BACKEND_DIR,
     env: {
       ...process.env,
-      DB_PATH: dbPath,
+      DATABASE_URL: E2E_DATABASE_URL,
+      // Scope to the throw-away `e2e` schema and reset it on boot so each
+      // run starts from a clean, fully-migrated slate.
+      DB_SCHEMA: E2E_DB_SCHEMA,
+      DB_RESET: '1',
       FLOOR_PLAN_DIR: floorPlanDir,
       HOST: '127.0.0.1',
       PORT: String(E2E_BACKEND_PORT),
@@ -117,15 +134,16 @@ export default async function globalSetup(): Promise<void> {
   console.log('[e2e globalSetup] spawning isolated backend…');
 
   const tmp = mkdtempSync(join(tmpdir(), 'he-e2e-'));
-  const dbPath = join(tmp, 'db.sqlite');
   const floorPlanDir = join(tmp, 'floor-plans');
   mkdirSync(floorPlanDir, { recursive: true });
 
   console.log(`[e2e globalSetup] tmpdir = ${tmp}`);
-  console.log(`[e2e globalSetup] DB_PATH = ${dbPath}`);
+  console.log(
+    `[e2e globalSetup] DATABASE_URL = ${E2E_DATABASE_URL} (schema "${E2E_DB_SCHEMA}", reset on boot)`
+  );
   console.log(`[e2e globalSetup] FLOOR_PLAN_DIR = ${floorPlanDir}`);
 
-  const child = spawnBackend(dbPath, floorPlanDir);
+  const child = spawnBackend(floorPlanDir);
   if (child.pid === undefined) {
     throw new Error('[e2e globalSetup] backend child process has no pid');
   }

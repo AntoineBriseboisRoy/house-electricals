@@ -62,9 +62,9 @@ export const buildPublicAuthRoutes = (
 ): Hono => {
   const router = new Hono();
 
-  router.get('/auth/setup-status', (c) => {
+  router.get('/auth/setup-status', async (c) => {
     const body: ApiEnvelope<{ needsSetup: boolean }> = {
-      data: { needsSetup: !users.hasAnyUser() },
+      data: { needsSetup: !(await users.hasAnyUser()) },
     };
     return c.json(body, 200);
   });
@@ -80,7 +80,7 @@ export const buildPublicAuthRoutes = (
       return undefined;
     }),
     async (c) => {
-      if (users.hasAnyUser()) {
+      if (await users.hasAnyUser()) {
         const err: ApiError = {
           error: { message: 'Setup is already complete. Sign in instead.' },
         };
@@ -90,7 +90,7 @@ export const buildPublicAuthRoutes = (
       const passwordHash = await hashPassword(password);
       let created;
       try {
-        created = users.create({ username, passwordHash });
+        created = await users.create({ username, passwordHash });
       } catch {
         // Race: another sign-up landed between hasAnyUser() and create().
         const err: ApiError = {
@@ -117,7 +117,7 @@ export const buildPublicAuthRoutes = (
     }),
     async (c) => {
       const { username, password } = c.req.valid('json');
-      const user = users.getByUsername(username);
+      const user = await users.getByUsername(username);
       // Always run a scrypt verify so the wrong-username and
       // wrong-password paths take comparable time. We hash against a
       // throw-away placeholder when the user doesn't exist.
@@ -189,7 +189,7 @@ export const buildProtectedAuthRoutes = (
         const err: ApiError = { error: { message: 'Unauthenticated.' } };
         return c.json(err, 401);
       }
-      const user = users.getByUsername(payload.sub);
+      const user = await users.getByUsername(payload.sub);
       if (user === null) {
         // Token was signed for a username that no longer exists in the
         // DB — treat as unauthed.
@@ -205,7 +205,7 @@ export const buildProtectedAuthRoutes = (
         return c.json(err, 401);
       }
       const newHash = await hashPassword(newPassword);
-      users.updatePasswordHash(user.id, newHash);
+      await users.updatePasswordHash(user.id, newHash);
       return c.body(null, 204);
     }
   );

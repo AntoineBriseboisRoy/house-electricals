@@ -1,30 +1,25 @@
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
-import { openDatabase, SqliteBreakerRepository, SqlitePanelRepository } from './repository.js';
+import { PgBreakerRepository, PgPanelRepository } from './repository.js';
+import { createTestDb } from './test-helpers.js';
 
-describe('SqliteBreakerRepository', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let panelRepo: SqlitePanelRepository;
-  let breakerRepo: SqliteBreakerRepository;
+describe('PgBreakerRepository', () => {
+  let cleanup: () => Promise<void>;
+  let panelRepo: PgPanelRepository;
+  let breakerRepo: PgBreakerRepository;
   let panelId: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'he-brk-'));
-    db = openDatabase(join(dir, 'test.db'));
-    panelRepo = new SqlitePanelRepository(db);
-    breakerRepo = new SqliteBreakerRepository(db);
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    panelRepo = new PgPanelRepository(t.db);
+    breakerRepo = new PgBreakerRepository(t.db);
     const p = await panelRepo.create({ name: 'Main' });
     panelId = p.id;
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   it('listByPanel returns empty initially', async () => {

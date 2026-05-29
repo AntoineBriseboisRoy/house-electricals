@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Ensure the local-dev data dirs exist before `pnpm dev` boots the backend.
-// The backend writes panels.db + floor-plans/*.png under ./data; the
+// Relational data now lives in Postgres, but the backend still writes
+// floor-plans/*.png (and the auto-generated .auth-secret) under ./data; the
 // directory must exist or the first write fails.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';

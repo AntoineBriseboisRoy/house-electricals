@@ -1,48 +1,20 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
-import {
-  openDatabase,
-  SqliteBreakerRepository,
-  SqliteBreakerTestRepository,
-  SqliteComponentRepository,
-  SqliteFloorRepository,
-  SqlitePanelRepository,
-  SqliteRoomRepository,
-  SqliteServiceEntryRepository,
-  SqliteWallRepository,
-} from './repository.js';
-import { buildApp } from './server.js';
+import type { Hono } from 'hono';
+import { buildTestApp, createTestDb } from './test-helpers.js';
 
 describe('panel routes', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let app: ReturnType<typeof buildApp>;
+  let cleanup: () => Promise<void>;
+  let app: Hono;
 
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'he-srv-'));
-    db = openDatabase(join(dir, 'srv.db'));
-    app = buildApp({
-      panelRepository: new SqlitePanelRepository(db),
-      breakerRepository: new SqliteBreakerRepository(db),
-      breakerTestRepository: new SqliteBreakerTestRepository(db),
-      componentRepository: new SqliteComponentRepository(db),
-      floorRepository: new SqliteFloorRepository(db),
-      wallRepository: new SqliteWallRepository(db),
-      roomRepository: new SqliteRoomRepository(db),
-      serviceEntryRepository: new SqliteServiceEntryRepository(db),
-      db,
-      appUserRepository: null,
-      auth: null,
-    });
+  beforeEach(async () => {
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    app = buildTestApp(t.db);
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   it('GET /api/v1/health returns ok envelope', async () => {
@@ -218,27 +190,14 @@ describe('panel routes', () => {
 });
 
 describe('breaker routes', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let app: ReturnType<typeof buildApp>;
+  let cleanup: () => Promise<void>;
+  let app: Hono;
   let panelId: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'he-brkroute-'));
-    db = openDatabase(join(dir, 'srv.db'));
-    app = buildApp({
-      panelRepository: new SqlitePanelRepository(db),
-      breakerRepository: new SqliteBreakerRepository(db),
-      breakerTestRepository: new SqliteBreakerTestRepository(db),
-      componentRepository: new SqliteComponentRepository(db),
-      floorRepository: new SqliteFloorRepository(db),
-      wallRepository: new SqliteWallRepository(db),
-      roomRepository: new SqliteRoomRepository(db),
-      serviceEntryRepository: new SqliteServiceEntryRepository(db),
-      db,
-      appUserRepository: null,
-      auth: null,
-    });
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    app = buildTestApp(t.db);
     const res = await app.request('/api/v1/panels', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -248,9 +207,8 @@ describe('breaker routes', () => {
     panelId = body.data.id;
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   it('GET /api/v1/panels/:id/breakers returns empty array initially', async () => {
@@ -605,31 +563,17 @@ describe('breaker routes', () => {
 });
 
 describe('component routes', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let app: ReturnType<typeof buildApp>;
+  let cleanup: () => Promise<void>;
+  let app: Hono;
 
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'he-cmproute-'));
-    db = openDatabase(join(dir, 'srv.db'));
-    app = buildApp({
-      panelRepository: new SqlitePanelRepository(db),
-      breakerRepository: new SqliteBreakerRepository(db),
-      breakerTestRepository: new SqliteBreakerTestRepository(db),
-      componentRepository: new SqliteComponentRepository(db),
-      floorRepository: new SqliteFloorRepository(db),
-      wallRepository: new SqliteWallRepository(db),
-      roomRepository: new SqliteRoomRepository(db),
-      serviceEntryRepository: new SqliteServiceEntryRepository(db),
-      db,
-      appUserRepository: null,
-      auth: null,
-    });
+  beforeEach(async () => {
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    app = buildTestApp(t.db);
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   const postComponent = async (body: object) =>
@@ -1027,5 +971,38 @@ describe('component routes', () => {
     assert.equal(patched.status, 200);
     const body = (await patched.json()) as { data: { protection: string | null } };
     assert.equal(body.data.protection, 'dual');
+  });
+});
+
+describe('security headers', () => {
+  let cleanup: () => Promise<void>;
+  let app: Hono;
+
+  beforeEach(async () => {
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    app = buildTestApp(t.db);
+  });
+
+  afterEach(async () => {
+    await cleanup();
+  });
+
+  it('sets baseline hardening headers on an API response', async () => {
+    const res = await app.request('/api/v1/health');
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(res.headers.get('x-frame-options'), 'SAMEORIGIN');
+    assert.equal(res.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal(
+      res.headers.get('cross-origin-resource-policy'),
+      'same-origin'
+    );
+    // Strips the framework fingerprint.
+    assert.equal(res.headers.get('x-powered-by'), null);
+  });
+
+  it('does NOT emit a Content-Security-Policy (deferred — must be tuned to the bundle)', async () => {
+    const res = await app.request('/api/v1/health');
+    assert.equal(res.headers.get('content-security-policy'), null);
   });
 });

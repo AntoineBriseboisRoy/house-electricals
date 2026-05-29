@@ -49,6 +49,7 @@ import {
   CardTitle,
   EmptyState,
   ImpactModal,
+  MoveToBuildingButton,
   NoBreakers,
   NoComponents,
   PanelVisualization,
@@ -252,7 +253,7 @@ export const PanelDetailScreen = (): JSX.Element => {
       // was 24 sequential listComponents calls eating 800ms+ on the dev
       // backend). One listComponents() returns every component across
       // every panel; we filter client-side to this panel's breakers.
-      // SQLite at this scale (<10k components) handles a full table-scan
+      // Postgres at this scale (<10k components) handles a full table-scan
       // in <10ms — far cheaper than the N round-trips.
       const [p, b, allComponents, panels] = await Promise.all([
         getPanel(panelId),
@@ -1159,6 +1160,9 @@ export const PanelDetailScreen = (): JSX.Element => {
               </button>
             </p>
           )}
+          <div className="panel-detail__move">
+            <MoveToBuildingButton kind="panel" id={panel.id} name={panel.name} />
+          </div>
           <div className="section--danger">
             <Button variant="danger" block onClick={handleDeletePanel}>
               Delete this panel

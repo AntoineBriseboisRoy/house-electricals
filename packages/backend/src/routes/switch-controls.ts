@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Db } from '../db.js';
 import {
   switchControlInputSchema,
   type ApiEnvelope,
@@ -29,7 +29,7 @@ import {
  * within the switch's gangs count.
  */
 export const buildSwitchControlRoutes = (
-  db: DatabaseSync,
+  db: Db,
   componentRepo: ComponentRepository
 ): Hono => {
   const router = new Hono();
@@ -38,7 +38,7 @@ export const buildSwitchControlRoutes = (
   // SwitchControl rows (NOT ResolvedSwitchControl) — the frontend already
   // has the component data loaded for the floor and only needs the
   // (switchId, gangIndex, controlledId) triples to build its memos.
-  router.get('/switch-controls', (c) => {
+  router.get('/switch-controls', async (c) => {
     const floorId = c.req.query('floorId');
     if (floorId === undefined || floorId.length === 0) {
       const err: ApiError = {
@@ -54,16 +54,15 @@ export const buildSwitchControlRoutes = (
     // A control row is included when EITHER the switch OR the controlled
     // component lives on the floor. Two JOINs on components → either side
     // matches → use OR.
-    const rows = db
-      .prepare(
-        `SELECT sc.switch_id, sc.gang_index, sc.controlled_id
+    const rows = await db.query<Row>(
+      `SELECT sc.switch_id, sc.gang_index, sc.controlled_id
          FROM switch_controls sc
          LEFT JOIN components sw  ON sw.id  = sc.switch_id
          LEFT JOIN components ctl ON ctl.id = sc.controlled_id
-         WHERE sw.floor_id = ? OR ctl.floor_id = ?
-         ORDER BY sc.switch_id ASC, sc.gang_index ASC, sc.controlled_id ASC`
-      )
-      .all(floorId, floorId) as Row[];
+         WHERE sw.floor_id = $1 OR ctl.floor_id = $1
+         ORDER BY sc.switch_id ASC, sc.gang_index ASC, sc.controlled_id ASC`,
+      [floorId]
+    );
     const data: SwitchControl[] = rows.map((r) => ({
       switchId: r.switch_id,
       gangIndex: r.gang_index,
@@ -83,11 +82,10 @@ export const buildSwitchControlRoutes = (
     // Pull links + join controlled component data via the repo (one query per
     // link is fine — N is small, typically 1-8 per switch).
     type LinkRow = { gang_index: number; controlled_id: string };
-    const links = db
-      .prepare(
-        'SELECT gang_index, controlled_id FROM switch_controls WHERE switch_id = ? ORDER BY gang_index ASC, controlled_id ASC'
-      )
-      .all(id) as LinkRow[];
+    const links = await db.query<LinkRow>(
+      'SELECT gang_index, controlled_id FROM switch_controls WHERE switch_id = $1 ORDER BY gang_index ASC, controlled_id ASC',
+      [id]
+    );
     const resolved: ResolvedSwitchControl[] = [];
     for (const l of links) {
       const controlled = await componentRepo.get(l.controlled_id);
@@ -146,11 +144,12 @@ export const buildSwitchControlRoutes = (
         };
         return c.json(err, 400);
       }
-      // Composite PK enforces uniqueness; INSERT OR IGNORE makes the call
-      // idempotent (re-linking the same pair is a no-op).
-      db.prepare(
-        'INSERT OR IGNORE INTO switch_controls (switch_id, gang_index, controlled_id) VALUES (?, ?, ?)'
-      ).run(switchId, gangIndex, controlledId);
+      // Composite PK enforces uniqueness; ON CONFLICT DO NOTHING makes the
+      // call idempotent (re-linking the same pair is a no-op).
+      await db.execute(
+        'INSERT INTO switch_controls (switch_id, gang_index, controlled_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+        [switchId, gangIndex, controlledId]
+      );
 
       // Refactor 2026-05 follow-up — switch+controlled share one circuit.
       // When a new control link is added, sync the controlled component's
@@ -185,12 +184,11 @@ export const buildSwitchControlRoutes = (
       const err: ApiError = { error: { message: 'Invalid gang index.' } };
       return c.json(err, 400);
     }
-    const result = db
-      .prepare(
-        'DELETE FROM switch_controls WHERE switch_id = ? AND gang_index = ? AND controlled_id = ?'
-      )
-      .run(switchId, gangIndex, controlledId);
-    if (result.changes === 0) {
+    const changed = await db.execute(
+      'DELETE FROM switch_controls WHERE switch_id = $1 AND gang_index = $2 AND controlled_id = $3',
+      [switchId, gangIndex, controlledId]
+    );
+    if (changed === 0) {
       const err: ApiError = { error: { message: 'Control link not found.' } };
       return c.json(err, 404);
     }

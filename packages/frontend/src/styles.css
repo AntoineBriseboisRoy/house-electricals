@@ -20,7 +20,12 @@
 html,
 body,
 #root {
+  /* 100vh on a mobile browser is the LARGE viewport (behind the dynamic URL
+     bar), which makes short pages overflow and pushes the fixed bottom-tabs
+     below the visible fold. dvh tracks the *visible* height so there's no
+     spurious scroll. vh stays as the fallback for ancient browsers. */
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
 }
 
@@ -45,6 +50,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .app-shell__content {
@@ -64,6 +70,131 @@ body {
   max-width: 100%;
   padding-left: 0;
   padding-right: 0;
+}
+
+/* 2026-05 — multi-building switcher bar at the top of the chrome. Slim row;
+   the safe-area inset lives here so the content below keeps its normal top
+   padding. */
+.app-shell__topbar {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  max-width: var(--layout-max-w);
+  margin: 0 auto;
+  padding: max(var(--space-2), env(safe-area-inset-top)) var(--space-4)
+    var(--space-1);
+}
+
+.building-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  min-height: var(--touch-target);
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  /* Rounded-square to match the app theme (not a full pill). */
+  border-radius: var(--radius-md);
+  color: var(--color-fg-default);
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-semibold);
+  cursor: pointer;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.building-switcher:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
+}
+
+.building-switcher:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.building-switcher svg {
+  color: var(--color-fg-muted);
+  flex-shrink: 0;
+}
+
+.building-switcher__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Buildings chooser/manager list (BuildingsModal). Each row is a tap-to-
+   switch target with a trailing pen (rename). */
+.buildings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.buildings-list__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-right: var(--space-2);
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.buildings-list__row--current {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-subtle);
+}
+
+.buildings-list__pick {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center; /* vertically center name (+ badge) in the row */
+  gap: 2px;
+  min-height: var(--touch-target);
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--color-fg-default);
+  font-size: var(--text-size-base);
+  font-weight: var(--text-weight-medium);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Hover highlights the WHOLE row (matching the app's list-item hover), not
+   just the name button. The pen/trash buttons keep their own variant hover
+   layered on top. */
+.buildings-list__row:hover {
+  background: var(--color-bg-hover);
+}
+
+.buildings-list__row--current:hover {
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+.buildings-list__pick:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.buildings-list__badge {
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-fg-muted);
+}
+
+.buildings-list__row--current .buildings-list__badge {
+  color: var(--color-accent);
 }
 
 /* fix/mobile-floating-cluster — the account menu trigger lives in the
@@ -1482,54 +1613,11 @@ h2 {
   margin: 0 0 0.75rem 0;
 }
 
-.panel-create,
 .panel-list {
   background: var(--bg-elev);
   border-radius: var(--radius);
   padding: 1rem;
   margin-bottom: 1rem;
-}
-
-.panel-create__form {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.panel-create__form input {
-  flex: 1 1 240px;
-  min-height: 44px;
-  padding: 0 0.875rem;
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid #334155;
-  border-radius: 8px;
-  font-size: 1rem;
-}
-
-.panel-create__form input:focus {
-  /* Cycle-73: normalized to the canonical focus-ring pattern used
-     elsewhere (box-shadow: var(--shadow-focus)). */
-  outline: none;
-  box-shadow: var(--shadow-focus);
-}
-
-.panel-create__form button {
-  min-height: 44px;
-  min-width: 44px;
-  padding: 0 1.25rem;
-  background: var(--accent);
-  color: #0f172a;
-  border: none;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 1rem;
-  cursor: pointer;
-}
-
-.panel-create__form button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .panel-list ul {
@@ -1677,73 +1765,6 @@ h2 {
   margin-bottom: 0.25rem;
 }
 
-.breaker-form__grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.75rem;
-}
-
-.breaker-form__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.9rem;
-}
-
-.breaker-form__field--wide {
-  grid-column: 1 / -1;
-}
-
-.breaker-form__field input,
-.breaker-form__field select {
-  min-height: 44px;
-  padding: 0 0.75rem;
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid #334155;
-  border-radius: 8px;
-  font-size: 1rem;
-}
-
-.breaker-form__field input:focus,
-.breaker-form__field select:focus {
-  /* Cycle-73: normalized to the canonical focus-ring pattern. */
-  outline: none;
-  box-shadow: var(--shadow-focus);
-}
-
-.breaker-form__error {
-  color: var(--danger);
-  font-style: normal;
-  font-size: 0.8rem;
-}
-
-.breaker-form__actions {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: flex-end;
-  margin-top: 0.75rem;
-}
-
-.breaker-form__actions button {
-  min-height: 44px;
-  min-width: 96px;
-  padding: 0 1rem;
-  border: none;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 1rem;
-  cursor: pointer;
-  background: var(--accent);
-  color: #0f172a;
-}
-
-.breaker-form__actions .secondary {
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid #334155;
-}
-
 .breaker-row {
   display: flex;
   flex-wrap: wrap;
@@ -1817,8 +1838,8 @@ h2 {
   min-height: 44px;
   min-width: 64px;
   padding: 0 0.875rem;
-  border-radius: 8px;
-  border: 1px solid #334155;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-subtle);
   background: var(--bg);
   color: var(--fg);
   font-weight: 500;
@@ -1842,33 +1863,6 @@ h2 {
   padding: 0 1rem;
   border-radius: 8px;
   cursor: pointer;
-}
-
-.home-nav {
-  display: flex;
-  gap: 0.5rem;
-  margin: 0 0 1rem 0;
-}
-
-.home-nav__link {
-  flex: 1 1 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 44px;
-  padding: 0 1rem;
-  background: var(--bg-elev);
-  color: var(--fg);
-  text-decoration: none;
-  border-radius: 8px;
-  font-weight: 500;
-  border: 1px solid #334155;
-}
-
-.home-nav__link--active {
-  background: var(--accent);
-  color: #0f172a;
-  border-color: var(--accent);
 }
 
 /* G25 cycle-28 — Compact 2-row component row.
@@ -2111,24 +2105,6 @@ h2 {
   color: var(--color-fg-muted);
 }
 
-.breaker-picker {
-  min-height: 44px;
-  width: 100%;
-  margin-top: 0.4rem;
-  padding: 0 0.75rem;
-  background: var(--bg-elev);
-  color: var(--fg);
-  border: 1px solid #334155;
-  border-radius: 8px;
-  font-size: 0.95rem;
-}
-
-.breaker-picker:focus {
-  /* Cycle-73: normalized to the canonical focus-ring pattern. */
-  outline: none;
-  box-shadow: var(--shadow-focus);
-}
-
 .component-row__assign {
   width: 100%;
 }
@@ -2144,8 +2120,8 @@ h2 {
   padding: 0 0.75rem;
   background: transparent;
   color: var(--muted);
-  border: 1px solid #334155;
-  border-radius: 8px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-size: 0.85rem;
 }
@@ -2154,7 +2130,7 @@ h2 {
   width: 100%;
   margin-top: 0.5rem;
   padding-top: 0.5rem;
-  border-top: 1px dashed #334155;
+  border-top: 1px dashed var(--color-border-subtle);
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
@@ -2176,8 +2152,8 @@ h2 {
   min-height: 44px;
   margin-top: 0.35rem;
   padding: 0.35rem 0.625rem;
-  background: rgba(56, 189, 248, 0.08);
-  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-accent-border);
   border-radius: 8px;
   color: var(--fg);
   text-decoration: none;
@@ -2185,7 +2161,7 @@ h2 {
 }
 
 .component-row__callout:active {
-  background: rgba(56, 189, 248, 0.18);
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
 }
 
 .component-row__callout--unwired {
@@ -2295,10 +2271,10 @@ h2 {
   min-height: 44px;
   margin-top: 0.5rem;
   padding: 0 0.875rem;
-  background: rgba(56, 189, 248, 0.12);
+  background: var(--color-accent-subtle);
   color: var(--accent);
   text-decoration: none;
-  border: 1px solid rgba(56, 189, 248, 0.4);
+  border: 1px solid var(--color-accent-border);
   border-radius: 8px;
   font-weight: 500;
 }
@@ -2321,7 +2297,7 @@ h2 {
 
 .test-breaker--tracked {
   border-color: var(--accent);
-  background: rgba(56, 189, 248, 0.12);
+  background: var(--color-accent-subtle);
   animation: he-pulse 2s var(--motion-ease-in-out) infinite;
 }
 
@@ -2491,6 +2467,7 @@ h2 {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
   width: 100%;
   background: var(--color-bg-canvas);
 }
@@ -3620,6 +3597,15 @@ h2 {
   border-bottom: 1px solid var(--color-border-subtle);
 }
 
+/* Header action slot (e.g. an "Add" button) docked top-right beside the X. */
+.modal__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+
 .modal__title {
   flex: 1 1 auto;
   margin: 0;
@@ -3662,9 +3648,11 @@ h2 {
  * the base classes and these modifiers are unused — so desktop falls
  * back to the centered visuals automatically.
  *
- * The drag-handle is decorative ONLY — Modal.tsx attaches zero pointer
- * handlers (Lockin FATAL #2 alternative). Dismissal still goes through
- * Close button + overlay click + ESC.
+ * The drag-handle is a FUNCTIONAL swipe-to-dismiss affordance (2026-05,
+ * superseding the cycle-73 decorative-only decision): Modal.tsx pointer
+ * handlers translate the sheet with the finger and close past a threshold
+ * (.modal--sheet-dragging suppresses the snap-back transition mid-drag).
+ * Close button + overlay click + ESC still dismiss as before.
  *
  * NO new token NAMES (cycle-11/17/20 rule). NO new token values either —
  * border-radius / colors / spacing all reuse existing tokens. */
@@ -3677,6 +3665,7 @@ h2 {
   width: 100%;
   max-width: none;
   max-height: 85vh;
+  max-height: 85dvh; /* track the visible viewport on mobile */
   border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
@@ -3684,6 +3673,13 @@ h2 {
      don't sit under the OS gesture bar. */
   padding-bottom: env(safe-area-inset-bottom, 0);
   animation: he-modal-slide-up 220ms var(--motion-ease-out);
+  /* Snap-back easing for drag-to-dismiss release; suppressed mid-drag by
+     .modal--sheet-dragging so the sheet follows the finger 1:1. */
+  transition: transform 240ms var(--motion-ease-out);
+}
+
+.modal--sheet-dragging {
+  transition: none;
 }
 
 .modal--sheet .modal__footer {
@@ -3695,13 +3691,31 @@ h2 {
 }
 
 .modal__drag-handle {
+  /* Full-width, comfortably-tall touch zone for swipe-to-dismiss; the
+     visible pill is drawn by ::before so the grab area is bigger than it
+     looks. */
+  width: 100%;
+  height: 24px;
+  margin: var(--space-1) 0 var(--space-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none; /* claim the vertical drag from page scroll */
+  flex-shrink: 0;
+}
+
+.modal__drag-handle::before {
+  content: '';
   width: 40px;
   height: 5px;
   border-radius: 999px;
   background: var(--color-fg-muted);
-  margin: var(--space-2) auto var(--space-3);
   opacity: 0.6;
-  flex-shrink: 0;
+}
+
+.modal--sheet-dragging .modal__drag-handle {
+  cursor: grabbing;
 }
 
 @keyframes he-modal-slide-up {
@@ -3892,12 +3906,12 @@ h2 {
 }
 
 .test-component--tappable .test-component__btn {
-  border-color: rgba(56, 189, 248, 0.4);
+  border-color: var(--color-accent-border);
   cursor: pointer;
 }
 
 .test-component--tappable .test-component__btn:active {
-  background: rgba(56, 189, 248, 0.18);
+  background: var(--color-accent-subtle);
 }
 
 .test-component--off .test-component__btn {
@@ -3907,7 +3921,7 @@ h2 {
 }
 
 .test-component--unassigned .test-component__btn {
-  background: rgba(248, 113, 113, 0.06);
+  background: color-mix(in srgb, var(--color-danger) 6%, transparent);
 }
 
 .test-component--pending .test-component__btn {
@@ -3999,9 +4013,9 @@ h2 {
   min-height: 44px;
   padding: 0 1rem;
   background: var(--accent);
-  color: #0f172a;
+  color: var(--color-fg-on-accent);
   border: 1px solid var(--accent);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-weight: 600;
 }
@@ -4016,10 +4030,53 @@ h2 {
   position: relative;
   width: 100%;
   max-height: 70vh;
-  background: var(--bg);
-  border-radius: 8px;
+  /* Graph-paper grid backing so the drawing surface reads as a canvas
+     instead of a blank void. Theme-aware: the canvas fill + a faded
+     border-subtle gridline, both from tokens (no new token names — the
+     rework reuses existing values per the cycle-11/17/20 rule). */
+  background-color: var(--color-bg-canvas);
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--color-border-subtle) 55%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--color-border-subtle) 55%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 32px 32px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-  border: 1px solid #334155;
+  border: 1px solid var(--color-border-subtle);
+}
+
+/* Vector-only floors lean into the graph-paper feel (no underlay image to
+   compete). Image-backed floors keep the grid only in the letterbox margins
+   around the contained image — subtle, intentional. */
+.floor-plan--vector-only {
+  background-color: var(--color-bg-surface);
+}
+
+/* On-canvas zoom controls — floating bottom-right inside the canvas so
+   zoom/fit is always within thumb reach without hunting the tool palette.
+   Raised-surface chip with a soft blur so it reads as a control overlay,
+   not part of the drawing. Tokens only (cycle-11/17/20 rule). */
+.floor-zoom {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: color-mix(in srgb, var(--color-bg-surface-raised) 90%, transparent);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(4px);
 }
 
 .floor-plan__img {
@@ -4072,6 +4129,19 @@ h2 {
 
 .floor-plan__pin--dragging {
   opacity: 0.3;
+}
+
+/* FloorEdit pointer-mode reposition: a grab cursor advertises that pins are
+ * draggable; while moving (the pin itself follows the cursor — no ghost) it
+ * stays fully opaque, lifts above siblings, and shows the grabbing cursor. */
+.floor-plan__pin:not(.floor-plan__pin--inert) {
+  cursor: grab;
+}
+
+.floor-plan__pin--moving {
+  cursor: grabbing;
+  z-index: 5;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
 }
 
 /* G26 — pins rendered in 'room' tool mode during a translate. Read-only
@@ -4132,17 +4202,6 @@ h2 {
   opacity: 0.85;
 }
 
-.floor-plan__wall-handle {
-  fill: var(--color-accent);
-  stroke: var(--color-fg-on-accent);
-  stroke-width: 16;
-  cursor: grab;
-}
-
-.floor-plan__wall-handle:active {
-  cursor: grabbing;
-}
-
 /* Wall hit-target — invisible thick stroke for easier finger taps. */
 .floor-plan__wall-hit {
   stroke: transparent;
@@ -4174,28 +4233,27 @@ h2 {
 .floor-plan__room-label {
   fill: var(--color-fg-muted);
   font-family: var(--text-family);
-  /* G26 cycle-32: dropped 320 → 200 vbu (~2%), text-transform: uppercase
-     + tracked, weight 600 → 500 so labels feel like room "tags" rather
-     than block typography. Halo stroke trimmed 80 → 60 to match. */
-  font-size: 200px;
-  font-weight: 500;
-  letter-spacing: 28px; /* viewbox-units; ~0.14em rendered */
+  /* User feedback (2026-05): the label read as a chunky outlined sticker —
+     the heavy 60px halo + wide 28px tracking were the offenders. Refined to a
+     delicate room "tag": gentler tracking, weight 600, and a THIN soft halo
+     (60 → 18) so the glyphs aren't ringed in heavy black. font-size 200 → 190.
+     (G26 cycle-32 history: 320 → 200 vbu, uppercase, halo 80 → 60.) */
+  font-size: 190px;
+  font-weight: 600;
+  letter-spacing: 8px; /* viewbox-units; gentle tracking (~0.04em rendered) */
   text-transform: uppercase;
   pointer-events: none;
   user-select: none;
   /* Cycle-83 polish: tone the label down so pins read above it as
      foreground. Audit found "KITCHE" / "LIVING ROOM" labels visibly
-     crossing through pin glyphs on narrow phones. The opacity drop
-     keeps the halo + stroke for crisp readability when pins aren't
-     overlapping, but lets the pins win when they do. */
-  opacity: 0.55;
-  /* G21: outline the label with the canvas background so it stays
-     legible when pins or other layers cross underneath the text.
-     paint-order draws the stroke first, then the fill, giving a
-     clean halo without "double-edge" anti-aliasing artifacts. */
+     crossing through pin glyphs on narrow phones. */
+  opacity: 0.6;
+  /* G21: outline the label with the canvas background so it stays legible
+     when pins or other layers cross underneath the text. paint-order draws
+     the stroke first, then the fill — a clean halo, now thin + soft. */
   paint-order: stroke fill;
   stroke: var(--color-bg-canvas);
-  stroke-width: 60px;
+  stroke-width: 18px;
   stroke-linejoin: round;
 }
 
@@ -4296,15 +4354,88 @@ h2 {
   cursor: grabbing;
 }
 
-.floor-plan__corner-handle {
-  fill: var(--color-accent);
-  stroke: var(--color-fg-on-accent);
-  stroke-width: 16;
+/* === Floor editor resize handles (G15 rework) ===
+ * Delicate, modern, perfectly-round HTML handles for wall endpoints +
+ * room corners. Positioned in CSS %-space on the overlay (NOT inside the
+ * preserveAspectRatio="none" SVG) so they render as TRUE circles
+ * regardless of the canvas's non-uniform aspect stretch — the old SVG
+ * <circle> handles distorted into ellipses on non-square floors.
+ *
+ * Both FloorEditScreen and PanelMapScreen render these HTML handles; the
+ * old SVG-circle handle classes were removed once neither screen used
+ * them. */
+.floor-plan__handle {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  box-sizing: border-box;
+  background: var(--color-bg-surface-raised);
+  border: 2px solid var(--color-accent);
+  border-radius: 50%;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.28),
+    0 0 0 3px color-mix(in srgb, var(--color-accent) 16%, transparent);
   cursor: grab;
+  z-index: 7; /* above the pin overlay, which shares this stacking context */
+  transition:
+    transform var(--motion-duration-fast) var(--motion-ease-out),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-out),
+    background var(--motion-duration-fast) var(--motion-ease-out);
 }
 
-.floor-plan__corner-handle:active {
+/* Invisible hit-target expansion → ≥44px finger target without inflating
+ * the visual dot (mirrors the .floor-plan__pin::before pattern). */
+.floor-plan__handle::before {
+  content: '';
+  position: absolute;
+  inset: -16px;
+  border-radius: 50%;
+}
+
+.floor-plan__handle:hover {
+  transform: translate(-50%, -50%) scale(1.2);
+  box-shadow:
+    0 2px 5px rgba(0, 0, 0, 0.32),
+    0 0 0 4px color-mix(in srgb, var(--color-accent) 26%, transparent);
+}
+
+.floor-plan__handle:active {
   cursor: grabbing;
+  background: var(--color-accent);
+  transform: translate(-50%, -50%) scale(1.06);
+}
+
+.floor-plan__handle:focus-visible {
+  outline: none;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.28),
+    var(--shadow-focus);
+}
+
+/* Resize cursors keyed by which corner the handle drives: tl/br lie on the
+ * NW–SE diagonal, tr/bl on the NE–SW diagonal. */
+.floor-plan__handle--corner[data-corner='tl'],
+.floor-plan__handle--corner[data-corner='br'] {
+  cursor: nwse-resize;
+}
+.floor-plan__handle--corner[data-corner='tr'],
+.floor-plan__handle--corner[data-corner='bl'] {
+  cursor: nesw-resize;
+}
+
+/* The pending first-endpoint dot in wall-draw mode is a passive anchor —
+ * smaller, dashed, non-interactive, so it reads as "you tapped here"
+ * rather than a draggable control. */
+.floor-plan__handle--marker {
+  width: 10px;
+  height: 10px;
+  cursor: default;
+  pointer-events: none;
+  border-style: dashed;
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
 
 /* Wall editor toolbar (G12 cycle-13) */
@@ -4364,7 +4495,7 @@ h2 {
    can't swallow the checkbox click) + the draggable Button. */
 .unplaced-item {
   background: var(--bg);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -4399,8 +4530,8 @@ h2 {
   padding: 0.625rem 0.75rem;
   background: transparent;
   color: inherit;
-  border: 1px solid rgba(56, 189, 248, 0.4);
-  border-radius: 8px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
   font: inherit;
   text-align: left;
   cursor: grab;
@@ -4409,7 +4540,7 @@ h2 {
 
 .unplaced-item__btn:active {
   cursor: grabbing;
-  background: rgba(56, 189, 248, 0.15);
+  background: var(--color-bg-hover);
 }
 
 .map-ghost {
@@ -4476,12 +4607,36 @@ h2 {
  * dotted wire rather than a highlighted band. */
 .floor-plan__control-line {
   stroke: var(--color-accent);
-  stroke-width: 16;
-  stroke-dasharray: 60 40;
+  /* User feedback: the current-flow wire was too bulky. Now a THIN DOTTED
+   * line — 3.5px (non-scaling) with round-capped 2-unit dashes reads as a row
+   * of dots, not a band. */
+  stroke-width: 3.5;
+  stroke-dasharray: 2 18;
   stroke-linecap: round;
-  opacity: 0.55;
+  opacity: 0.85;
   fill: none;
   vector-effect: non-scaling-stroke; /* keep stroke px-ish on zoom */
+  /* The dots march from the switch (x1) toward the controlled pin (x2) so it
+   * reads "like current flowing to the outlet/light". -40 is two full dash
+   * periods (2 + 18 = 20) so the loop is perfectly seamless. The bare
+   * `linear` timing matches the he-link-drag-march carve-out (CLAUDE.md):
+   * a uniform marching rhythm reads as steady current flow. */
+  animation: he-control-line-flow 1s linear infinite;
+}
+
+@keyframes he-control-line-flow {
+  to {
+    stroke-dashoffset: -40;
+  }
+}
+
+/* Respect reduced-motion: a continuously-flowing line is exactly the kind of
+ * persistent motion vestibular-sensitive users want suppressed. The dashed
+ * wire stays visible — it just stops marching. */
+@media (prefers-reduced-motion: reduce) {
+  .floor-plan__control-line {
+    animation: none;
+  }
 }
 
 /* US-004 — in-flight drag line. Slightly thicker dash, brighter, animated
@@ -4549,23 +4704,28 @@ h2 {
   transform: translate(-50%, -50%);
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1);
+  gap: 4px;
   pointer-events: none; /* container is purely positional; children re-enable */
   /* Push handles below the pin by a CSS-pixel amount so they never overlap
-   * the pin glyph regardless of viewbox-coord zoom. */
-  padding-top: 56px;
+   * the pin glyph regardless of viewbox-coord zoom. Tightened from 56px so
+   * the cluster docks snugly under the pin (user: "shouldn't take so much
+   * space") while still clearing the 32px pin glyph. */
+  padding-top: 40px;
   width: max-content;
   z-index: 5;
 }
 
+/* User feedback: the gang-link badge was "too bulky". Slimmed from a 28px
+ * pill with a 2px border to a delicate 18px chip with a hairline border —
+ * still grabbable, far less canvas weight. */
 .gang-link-handle {
   pointer-events: auto;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0 6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
   background: var(--color-bg-surface-raised);
   color: var(--color-fg-default);
-  border: 2px solid var(--color-accent);
+  border: 1px solid var(--color-accent);
   border-radius: var(--radius-pill);
   font: inherit;
   font-size: var(--text-size-xs);

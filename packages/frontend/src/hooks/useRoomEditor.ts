@@ -67,16 +67,17 @@ export type UseRoomEditorResult = {
     onPointerDown: (e: ReactPointerEvent<SVGElement>) => void;
     onPointerMove: (e: ReactPointerEvent<SVGElement>) => void;
   };
-  /** Begin dragging a specific corner of a specific room. */
+  /** Begin dragging a specific corner of a specific room. Accepts any
+   *  Element so HTML overlay handles (not just SVG circles) can drive it. */
   startCornerDrag: (
     roomId: string,
     corner: Corner,
-    e: ReactPointerEvent<SVGElement>
+    e: ReactPointerEvent<Element>
   ) => void;
   /** Begin translating a specific (already selected) room. */
   startTranslateDrag: (
     roomId: string,
-    e: ReactPointerEvent<SVGElement>
+    e: ReactPointerEvent<Element>
   ) => void;
   reset: () => void;
 };
@@ -104,16 +105,6 @@ type Options = {
   screenToViewbox?: (clientX: number, clientY: number, rect: DOMRect) => Point;
 };
 
-const defaultNormalize = (
-  e: ReactPointerEvent<SVGElement>,
-  container: HTMLElement
-): Point => {
-  const rect = container.getBoundingClientRect();
-  const x = ((e.clientX - rect.left) / rect.width) * 10000;
-  const y = ((e.clientY - rect.top) / rect.height) * 10000;
-  return { x, y };
-};
-
 /** Compute the rectangle bounding two corner points (snapped). */
 export const rectFromCorners = (a: Point, b: Point): Rect => {
   const x = Math.min(a.x, b.x);
@@ -131,15 +122,26 @@ export const useRoomEditor = ({
   active,
   screenToViewbox,
 }: Options): UseRoomEditorResult => {
+  // Normalize raw client coords (works for both React synthetic events and
+  // native window PointerEvents) to the 0-10000 viewbox space, going through
+  // the optional viewport transform when one is supplied (G15).
+  const normalizeClient = useCallback(
+    (clientX: number, clientY: number, container: HTMLElement): Point => {
+      const rect = container.getBoundingClientRect();
+      if (screenToViewbox !== undefined) {
+        return screenToViewbox(clientX, clientY, rect);
+      }
+      return {
+        x: ((clientX - rect.left) / rect.width) * 10000,
+        y: ((clientY - rect.top) / rect.height) * 10000,
+      };
+    },
+    [screenToViewbox]
+  );
   const normalize = (
-    e: ReactPointerEvent<SVGElement>,
+    e: ReactPointerEvent<Element>,
     container: HTMLElement
-  ): Point => {
-    if (screenToViewbox !== undefined) {
-      return screenToViewbox(e.clientX, e.clientY, container.getBoundingClientRect());
-    }
-    return defaultNormalize(e, container);
-  };
+  ): Point => normalizeClient(e.clientX, e.clientY, container);
   const [drawing, setDrawing] = useState<DrawingRect | null>(null);
   const [cornerDrag, setCornerDrag] = useState<CornerDrag | null>(null);
   const [translateDrag, setTranslateDrag] = useState<TranslateDrag | null>(null);
@@ -166,7 +168,7 @@ export const useRoomEditor = ({
   }, [active, reset]);
 
   const startCornerDrag = useCallback(
-    (roomId: string, corner: Corner, e: ReactPointerEvent<SVGElement>): void => {
+    (roomId: string, corner: Corner, e: ReactPointerEvent<Element>): void => {
       if (!active) return;
       const container = containerRef.current;
       if (!container) return;
@@ -190,7 +192,7 @@ export const useRoomEditor = ({
    *  responsible for checking that the user pointerdowned on the body of
    *  the room (not a corner handle). */
   const startTranslateDrag = useCallback(
-    (roomId: string, e: ReactPointerEvent<SVGElement>): void => {
+    (roomId: string, e: ReactPointerEvent<Element>): void => {
       if (!active) return;
       const container = containerRef.current;
       if (!container) return;
@@ -230,24 +232,38 @@ export const useRoomEditor = ({
   const handlePointerMove = useCallback(
     (e: ReactPointerEvent<SVGElement>): void => {
       if (!active) return;
+      // Corner + translate drags are tracked at the window level (below) so
+      // they keep updating even when the pointer leaves the SVG or when the
+      // gesture originated from an HTML overlay handle. The SVG handler only
+      // owns the rubber-band draw gesture.
+      if (cornerDrag !== null || translateDrag !== null) return;
+      if (drawing === null) return;
       const container = containerRef.current;
       if (!container) return;
-      const raw = normalize(e, container);
-      const snapped = snapPoint(raw);
-      if (cornerDrag !== null) {
-        setCornerDrag({ ...cornerDrag, current: snapped });
-        return;
-      }
-      if (translateDrag !== null) {
-        setTranslateDrag({ ...translateDrag, current: snapped });
-        return;
-      }
-      if (drawing !== null) {
-        setDrawing({ ...drawing, current: snapped });
-      }
+      const snapped = snapPoint(normalize(e, container));
+      setDrawing({ ...drawing, current: snapped });
     },
     [active, cornerDrag, translateDrag, containerRef, drawing]
   );
+
+  // Window-level pointermove tracks corner + translate drags. Handles may be
+  // HTML overlays (positioned in CSS %-space, immune to the SVG's
+  // preserveAspectRatio="none" distortion) that pointer-capture the gesture,
+  // so the SVG's own onPointerMove never fires for them. Functional setState
+  // avoids stale closures; the effect re-registers only on null↔active edges.
+  const isHandleDragging = cornerDrag !== null || translateDrag !== null;
+  useEffect(() => {
+    if (!isHandleDragging) return;
+    const onMove = (ev: PointerEvent): void => {
+      const container = containerRef.current;
+      if (!container) return;
+      const snapped = snapPoint(normalizeClient(ev.clientX, ev.clientY, container));
+      setCornerDrag((cur) => (cur ? { ...cur, current: snapped } : cur));
+      setTranslateDrag((cur) => (cur ? { ...cur, current: snapped } : cur));
+    };
+    window.addEventListener('pointermove', onMove);
+    return () => window.removeEventListener('pointermove', onMove);
+  }, [isHandleDragging, containerRef, normalizeClient]);
 
   // Window pointerup commits the in-flight gesture.
   useEffect(() => {

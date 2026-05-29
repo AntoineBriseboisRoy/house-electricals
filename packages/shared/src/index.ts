@@ -57,17 +57,23 @@ export type ApiError = {
 };
 
 export interface PanelRepository {
-  list(): Promise<Panel[]>;
+  list(filter?: BuildingScopedFilter): Promise<Panel[]>;
   create(input: {
     name: string;
     orientation?: PanelOrientation;
     slotCount?: number;
     /** G39 cycle-56 — optional parent breaker id at creation time. */
     parentBreakerId?: string | null;
+    /** 2026-05 — owning building; repo defaults to the default building. */
+    buildingId?: string;
   }): Promise<Panel>;
   get(id: string): Promise<Panel | null>;
   update(id: string, patch: PanelUpdate): Promise<Panel | null>;
   delete(id: string): Promise<boolean>;
+  /** 2026-05 — move this panel (and the components wired to its breakers)
+   *  into another building, cleaning up cross-building references. Returns
+   *  the updated panel, or null if it doesn't exist. */
+  moveToBuilding(panelId: string, buildingId: string): Promise<Panel | null>;
   setFloorPlan(panelId: string, plan: FloorPlan): Promise<Panel | null>;
   clearFloorPlan(panelId: string): Promise<Panel | null>;
 }
@@ -88,6 +94,9 @@ export const panelInputSchema = z.object({
   slotCount: z.number().int().min(1).max(200).optional(),
   /** G39 cycle-56 — optional feeder-breaker link at creation. */
   parentBreakerId: z.string().min(1).nullable().optional(),
+  /** 2026-05 — owning building. Optional on the wire (the repo falls back to
+   *  the default building); the frontend always sends the active building. */
+  buildingId: z.string().min(1).optional(),
 });
 
 export const panelPatchSchema = z.object({
@@ -112,6 +121,60 @@ export type PanelInputParsed = z.infer<typeof panelInputSchema>;
 export type PanelPatchParsed = z.infer<typeof panelPatchSchema>;
 
 export const newId = (): string => ulid();
+
+// --- Buildings (top-level: a house / building / property) ---
+//
+// The top of the hierarchy (added 2026-05): every panel, floor, and component
+// belongs to exactly one building via a NOT NULL `building_id` FK. Deleting a
+// building cascades to its entire tree. A deployment holds many buildings; the
+// active one is chosen client-side (BuildingContext) and threaded into every
+// list/create call. Panel + floor names are unique WITHIN a building.
+
+export type Building = {
+  id: string;
+  name: string;
+  createdAt: number;
+};
+
+export type BuildingInput = {
+  name: string;
+};
+
+const buildingNameSchema = z
+  .string()
+  .min(1)
+  .max(120)
+  .refine((s) => s.trim().length > 0, 'name cannot be blank');
+
+export const buildingInputSchema = z.object({
+  name: buildingNameSchema,
+});
+
+export const buildingPatchSchema = z.object({
+  name: buildingNameSchema.optional(),
+});
+
+export const buildingSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  createdAt: z.number().int().nonnegative(),
+});
+
+export type BuildingInputParsed = z.infer<typeof buildingInputSchema>;
+export type BuildingPatchParsed = z.infer<typeof buildingPatchSchema>;
+
+/** Body for the move-to-building endpoints (panels/floors). */
+export const moveToBuildingSchema = z.object({
+  buildingId: z.string().min(1),
+});
+
+export interface BuildingRepository {
+  list(): Promise<Building[]>;
+  create(input: BuildingInput): Promise<Building>;
+  get(id: string): Promise<Building | null>;
+  update(id: string, patch: Partial<BuildingInput>): Promise<Building | null>;
+  delete(id: string): Promise<boolean>;
+}
 
 // --- Breakers ---
 
@@ -228,8 +291,8 @@ export type Component = {
   /** G35 Part 2 (cycle-59) — user-flagged priority device (fridge, freezer,
    *  well pump, sump pump, modem, medical device, etc.). Surfaces a warn-
    *  orange badge in the Impact modal + components list + test mode. Stored
-   *  as 0/1 in SQLite per the bool-as-int convention; mapped to JS bool by
-   *  `rowToComponent`. */
+   *  as a 0/1 SMALLINT (the bool-as-int convention, carried over from the
+   *  SQLite era); mapped to JS bool by `rowToComponent`. */
   critical: boolean;
   breakerId: string | null;
   /** G13 — which floor this component sits on. `null` means unplaced
@@ -257,6 +320,8 @@ export type ComponentInput = {
   notes?: string | null;
   breakerId?: string | null;
   floorId?: string | null;
+  /** 2026-05 — owning building; repo defaults to the default building. */
+  buildingId?: string;
   posX?: number | null;
   posY?: number | null;
   /** G19 — see Component.gangs. Default 1. */
@@ -288,6 +353,13 @@ export type ComponentListFilter = {
   /** G13 — filter to one floor. Exact match. */
   floorId?: string;
   search?: string;
+  /** 2026-05 — scope to one building. Exact match. */
+  buildingId?: string;
+};
+
+/** Filter shared by the top-level collection repos (panels, floors). */
+export type BuildingScopedFilter = {
+  buildingId?: string;
 };
 
 export interface ComponentRepository {
@@ -308,6 +380,25 @@ export const componentTypeSchema = z.enum([
   'other',
 ]);
 
+// --- Floor-plan coordinate space (walls / rooms / component pins) ---
+//
+// The vector editor renders through a FIXED 0-10000 viewBox "window"; the
+// viewport (pan + zoom) slides a much larger logical canvas underneath it,
+// so geometry can legitimately live far outside the initial window — the
+// plan feels effectively unbounded. These generous SYMMETRIC bounds are the
+// single source of truth for that space: they keep coordinates well within
+// 32-bit INTEGER range (Postgres `INTEGER`), keep fit-to-content usable, and
+// are mirrored in THREE places that MUST stay in sync:
+//   1. these zod schemas (API + form validation),
+//   2. the walls/rooms CHECK constraints in backend repository.ts,
+//   3. the snap() clamp in frontend lib/snap.ts.
+// The 10000 normalization SCALE is unchanged — only the clamp widened — so
+// existing data + the `/10000` image-relative math keep their meaning.
+export const COORD_MIN = -100000;
+export const COORD_MAX = 100000;
+/** Max room width/height = the full span of the coordinate range. */
+export const ROOM_DIM_MAX = COORD_MAX - COORD_MIN;
+
 export const componentInputSchema = z.object({
   type: componentTypeSchema,
   name: z.string().min(1).max(120),
@@ -315,8 +406,10 @@ export const componentInputSchema = z.object({
   notes: z.string().max(1000).nullable().optional(),
   breakerId: z.string().min(1).nullable().optional(),
   floorId: z.string().min(1).nullable().optional(),
-  posX: z.number().int().min(0).max(10000).nullable().optional(),
-  posY: z.number().int().min(0).max(10000).nullable().optional(),
+  /** 2026-05 — owning building (repo defaults to the default building). */
+  buildingId: z.string().min(1).optional(),
+  posX: z.number().int().min(COORD_MIN).max(COORD_MAX).nullable().optional(),
+  posY: z.number().int().min(COORD_MIN).max(COORD_MAX).nullable().optional(),
   gangs: z.number().int().min(1).max(8).optional(),
   /** G35 Part 2 (cycle-59) — critical flag. Optional on input; the repo
    *  defaults to false when absent. PATCH accepts true/false to toggle. */
@@ -339,6 +432,8 @@ export const componentsListQuerySchema = z.object({
   breakerId: z.string().min(1).optional(),
   floorId: z.string().min(1).optional(),
   search: z.string().trim().min(1).max(100).optional(),
+  /** 2026-05 — scope the list to one building. */
+  buildingId: z.string().min(1).optional(),
 });
 
 export const componentSchema = z.object({
@@ -416,14 +511,19 @@ export type FloorInput = {
   displayOrder?: number | null;
   /** Cycle-85 — set on create or PATCH to wire the floor's default panel. */
   panelId?: string | null;
+  /** 2026-05 — owning building; repo defaults to the default building. */
+  buildingId?: string;
 };
 
 export interface FloorRepository {
-  list(): Promise<Floor[]>;
+  list(filter?: BuildingScopedFilter): Promise<Floor[]>;
   create(input: FloorInput): Promise<Floor>;
   get(id: string): Promise<Floor | null>;
   update(id: string, patch: Partial<FloorInput>): Promise<Floor | null>;
   delete(id: string): Promise<boolean>;
+  /** 2026-05 — move this floor (and the components placed on it) into another
+   *  building, cleaning up cross-building references. Null if not found. */
+  moveToBuilding(floorId: string, buildingId: string): Promise<Floor | null>;
   setFloorPlan(floorId: string, plan: FloorPlan): Promise<Floor | null>;
   clearFloorPlan(floorId: string): Promise<Floor | null>;
 }
@@ -433,6 +533,8 @@ export const floorInputSchema = z.object({
   displayOrder: z.number().int().nonnegative().nullable().optional(),
   /** Cycle-85 — non-empty string when set, or null to clear. */
   panelId: z.string().min(1).nullable().optional(),
+  /** 2026-05 — owning building (repo defaults to the default building). */
+  buildingId: z.string().min(1).optional(),
 });
 
 export const floorPatchSchema = floorInputSchema.partial();
@@ -489,7 +591,8 @@ export interface WallRepository {
   delete(id: string): Promise<boolean>;
 }
 
-const coord = z.number().int().min(0).max(10000);
+// Endpoints live in the unbounded coordinate space (see COORD_MIN/MAX).
+const coord = z.number().int().min(COORD_MIN).max(COORD_MAX);
 
 export const wallInputSchema = z.object({
   x1: coord,
@@ -525,23 +628,76 @@ export type WallPatchParsed = z.infer<typeof wallPatchSchema>;
 // documented migration path (add `points` blob, backfill 4-point arrays
 // from rectangles, drop x/y/w/h columns).
 
+/** A single polygon vertex in the 0-10000 (now unbounded) coord space. */
+export type RoomVertex = { x: number; y: number };
+
 export type Room = {
   id: string;
   floorId: string;
   name: string;
+  /** Axis-aligned bounding box of `points` — kept in sync server-side.
+   *  Used for label centering + the rectangle X/Y/W/H sidebar editor. */
   x: number;
   y: number;
   w: number;
   h: number;
+  /** Ordered polygon vertices (>= 3). A rectangle room is a 4-point
+   *  axis-aligned polygon; a wall-loop room is an N-point polygon. This is
+   *  the canonical shape — `x/y/w/h` are derived from it. */
+  points: RoomVertex[];
   createdAt: number;
 };
 
+/** Create a room either as a rectangle (x/y/w/h) OR a polygon (points).
+ *  The backend normalizes to BOTH representations (points + bbox). */
 export type RoomInput = {
   name: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+  points?: RoomVertex[];
+};
+
+/** Four corners (clockwise from top-left) of an axis-aligned rectangle. */
+export const rectToPolygon = (
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): RoomVertex[] => [
+  { x, y },
+  { x: x + w, y },
+  { x: x + w, y: y + h },
+  { x, y: y + h },
+];
+
+/** Axis-aligned bounding box of a polygon (>= 1 point). */
+export const polygonBounds = (
+  points: ReadonlyArray<RoomVertex>
+): { x: number; y: number; w: number; h: number } => {
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  return {
+    x: minX,
+    y: minY,
+    w: Math.max(...xs) - minX,
+    h: Math.max(...ys) - minY,
+  };
+};
+
+/** True when `points` is exactly a 4-vertex axis-aligned rectangle — the
+ *  rooms editable via the rectangle X/Y/W/H + corner-resize UI. Wall-loop
+ *  rooms (and freely-reshaped polygons) are edited via per-vertex drag. */
+export const isAxisAlignedRect = (
+  points: ReadonlyArray<RoomVertex>
+): boolean => {
+  if (points.length !== 4) return false;
+  const xs = new Set(points.map((p) => p.x));
+  const ys = new Set(points.map((p) => p.y));
+  return xs.size === 2 && ys.size === 2;
 };
 
 export interface RoomRepository {
@@ -558,19 +714,39 @@ export interface RoomRepository {
 }
 
 // Width/height must be >= 1 so the schema rejects zero-area rectangles
-// (they'd be invisible). The hard upper bound is 10000 (canvas dim).
-const roomCoord = z.number().int().min(0).max(10000);
-const roomDim = z.number().int().min(1).max(10000);
+// (they'd be invisible). Coordinates use the unbounded space (COORD_MIN/MAX);
+// width/height may span the full range.
+const roomCoord = z.number().int().min(COORD_MIN).max(COORD_MAX);
+const roomDim = z.number().int().min(1).max(ROOM_DIM_MAX);
+const roomVertex = z.object({ x: roomCoord, y: roomCoord });
+// A polygon needs >= 3 vertices; cap at 64 to bound payload size (a house
+// room is realistically < 20 corners even for complex layouts).
+const roomPolygon = z.array(roomVertex).min(3).max(64);
 
-export const roomInputSchema = z.object({
+// A room's shape may be supplied as a rectangle (x/y/w/h) OR a polygon
+// (points). The base object keeps every shape field optional so `.partial()`
+// yields a clean PATCH schema; `roomInputSchema` refines that at least one
+// complete shape is present on CREATE.
+const roomShapeObject = z.object({
   name: z.string().min(1).max(120),
-  x: roomCoord,
-  y: roomCoord,
-  w: roomDim,
-  h: roomDim,
+  x: roomCoord.optional(),
+  y: roomCoord.optional(),
+  w: roomDim.optional(),
+  h: roomDim.optional(),
+  points: roomPolygon.optional(),
 });
 
-export const roomPatchSchema = roomInputSchema.partial();
+export const roomInputSchema = roomShapeObject.refine(
+  (v) =>
+    v.points !== undefined ||
+    (v.x !== undefined &&
+      v.y !== undefined &&
+      v.w !== undefined &&
+      v.h !== undefined),
+  { message: 'Provide either polygon points or x/y/w/h.' }
+);
+
+export const roomPatchSchema = roomShapeObject.partial();
 
 export const roomSchema = z.object({
   id: z.string(),
@@ -580,6 +756,7 @@ export const roomSchema = z.object({
   y: roomCoord,
   w: roomDim,
   h: roomDim,
+  points: roomPolygon,
   createdAt: z.number().int().nonnegative(),
 });
 
@@ -599,7 +776,7 @@ export type RoomPatchParsed = z.infer<typeof roomPatchSchema>;
 //   enum waits for real usage to surface stable buckets.
 // - `tested_at` is epoch milliseconds (cycle-1 timestamp pin).
 // - ON DELETE CASCADE on breaker_id at the FK level + belt-and-
-//   suspenders DELETE in SqliteBreakerRepository.delete() + deleteByPanel().
+//   suspenders DELETE in PgBreakerRepository.delete() + deleteByPanel().
 
 export type BreakerTest = {
   id: string;
@@ -695,10 +872,10 @@ export type BreakerTestListQueryParsed = z.infer<typeof breakerTestListQuerySche
 //   room) would require an explicit table rebuild + ADR (same precedent
 //   as cycle-3 component types). Differs from cycle-61 outcome which is
 //   free user text with no enum.
-// - No polymorphic FK — SQLite can't enforce. Cascade is APP-LEVEL in 3
-//   sites (SqliteBreakerRepository.delete + .deleteByPanel +
-//   SqliteComponentRepository.delete), each guarded by tableExists()
-//   PRAGMA check (cycle-61 pattern).
+// - No polymorphic FK — a (parent_type, parent_id) pair can't be expressed
+//   as a foreign key in any engine. Cascade is APP-LEVEL in 3 sites
+//   (PgBreakerRepository.delete + .deleteByPanel +
+//   PgComponentRepository.delete).
 // - URL convention: nested writers (URL-driven polymorphism, NOT body-
 //   driven parent_type) + flat query.
 // - See CLAUDE.md "Service-log entries (G40 Part 1 — cycle-66)".
@@ -808,15 +985,15 @@ export type AppUser = {
 
 export interface AppUserRepository {
   /** True iff the table has >=1 row. Drives the sign-up vs login pivot. */
-  hasAnyUser(): boolean;
+  hasAnyUser(): Promise<boolean>;
   /** The single user, if one exists. */
-  getSingle(): AppUser | null;
+  getSingle(): Promise<AppUser | null>;
   /** Fetch by username — used by the /auth/login route. */
-  getByUsername(username: string): AppUser | null;
+  getByUsername(username: string): Promise<AppUser | null>;
   /** Create the (one and only) user. Throws if a user already exists. */
-  create(input: { username: string; passwordHash: string }): AppUser;
+  create(input: { username: string; passwordHash: string }): Promise<AppUser>;
   /** Replace the stored passwordHash for an existing user. */
-  updatePasswordHash(id: string, passwordHash: string): void;
+  updatePasswordHash(id: string, passwordHash: string): Promise<void>;
 }
 
 export const usernameSchema = z

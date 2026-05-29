@@ -8,7 +8,7 @@ If you just want to try it locally, skip ahead to the [Quick Start](#quick-start
 
 - Docker Engine 20.10+ with Compose v2 (`docker compose version`).
 - 1 GB RAM minimum, 2 GB recommended.
-- ~500 MB disk for the SQLite DB + floor-plan images (grows with your house).
+- ~500 MB disk for the Postgres data + floor-plan images (grows with your house).
 - An external reverse proxy you already operate (Caddy, Nginx, Traefik) **or** a Cloudflare Tunnel. This stack itself serves plain HTTP only.
 
 > **Why no in-stack TLS?** This matches the HousesTracker pattern — the user already runs Caddy / Cloudflare for their other services. The compose stack stays simple (no cert-manager, no ACME), and TLS is a deployment-level concern.
@@ -35,13 +35,14 @@ The app is now reachable at `http://<your-host>:8070` (or whatever `HOST_PORT` y
 
 ## What Gets Deployed
 
-A single container with one Node 22 process inside it.
+Two containers: the **app** (one Node 22 process serving everything) and **Postgres**.
 
-| Container             | Image                                   | Serves                                                                                   |
-|----------------------|----------------------------------------|------------------------------------------------------------------------------------------|
-| `house-electricals`  | distroless Node 22 + Hono + node:sqlite | `/api/v1/*` (REST API) · `/files/floor-plans/*` (uploaded images) · `/*` (Vite-built React PWA with SPA fallback) |
+| Service | Container             | Image                              | Serves                                                                                   |
+|---------|----------------------|------------------------------------|------------------------------------------------------------------------------------------|
+| `app`   | `house-electricals`  | distroless Node 22 + Hono + `pg`   | `/api/v1/*` (REST API) · `/files/floor-plans/*` (uploaded images) · `/*` (Vite-built React PWA with SPA fallback) |
+| `db`    | `house-electricals-db` | `postgres:16-alpine`             | The Postgres database — all relational data. Reachable only on the internal compose network. |
 
-The container runs as **UID 65532** (distroless `nonroot`). The first time you point `DATA_PATH` at a fresh directory on a Linux server, set ownership once:
+The app container runs as **UID 65532** (distroless `nonroot`). The first time you point `DATA_PATH` at a fresh directory on a Linux server, set ownership once:
 
 ```bash
 sudo chown -R 65532:65532 /srv/house-electricals/data
@@ -51,64 +52,83 @@ On Windows Docker Desktop / WSL2 / macOS this isn't necessary — the VFS layer 
 
 ## Configuration (`.env`)
 
-| Variable      | Description                                                  | Default                                              |
-|---------------|--------------------------------------------------------------|------------------------------------------------------|
-| `HOST_PORT`   | Port exposed on the host                                     | `8070`                                               |
-| `DATA_PATH`   | Host path holding `panels.db` + `floor-plans/` + `.auth-secret` | `./data`                                          |
-| `IMAGE`       | (compose.prod.yaml only) Registry path for the unified image | `ghcr.io/antoinebriseboisroy/house-electricals:latest` (the maintainer's published image; override for forks) |
+| Variable            | Description                                                  | Default                                              |
+|---------------------|--------------------------------------------------------------|------------------------------------------------------|
+| `HOST_PORT`         | Port exposed on the host                                     | `8070`                                               |
+| `POSTGRES_USER`     | Postgres role — seeds the `db` container **and** builds the app's `DATABASE_URL` | `postgres`                       |
+| `POSTGRES_PASSWORD` | Postgres password — **set a strong value in production**     | `postgres`                                           |
+| `POSTGRES_DB`       | Database name                                                | `house_electricals`                                  |
+| `DATA_PATH`         | Host path holding `floor-plans/` + `.auth-secret` (relational data lives in the Postgres volume, not here) | `./data` |
+| `IMAGE`             | (compose.prod.yaml only) Registry path for the unified image — **required, no default** | _e.g._ `ghcr.io/<your-github-username>/house-electricals:latest` |
 
-There are no `AUTH_USERNAME` / `AUTH_PASSWORD` env vars. The first time you open the app in a browser, a one-time sign-up form mints the account (scrypt-hashed password stored in `panels.db`). See [README → Login](README.md#login) for the full account lifecycle (sign-up, change password, reset).
+There are no `AUTH_USERNAME` / `AUTH_PASSWORD` env vars. The first time you open the app in a browser, a one-time sign-up form mints the account (scrypt-hashed password stored in the Postgres `app_users` table). See [README → Login](README.md#login) for the full account lifecycle (sign-up, change password, reset).
+
+The `POSTGRES_*` values seed the `db` container on first boot **and** are interpolated into the `DATABASE_URL` the app connects with — they must stay in sync, which is why both compose files derive `DATABASE_URL` from them rather than asking you to set it twice.
 
 For real-server deployments use an absolute `DATA_PATH` (e.g. `/srv/house-electricals/data`), not a repo-relative path.
 
 ## Data Persistence
 
-Everything you care about lives under `DATA_PATH`:
+State lives in **two** places — both must be backed up together:
+
+1. **The Postgres volume** (`he-pgdata`, a named Docker volume) holds all relational data: buildings, panels, breakers, components, floors, walls, rooms, switch controls, service entries, breaker tests, and the single `app_users` login row.
+2. **The `DATA_PATH` bind-mount** holds filesystem state only:
 
 ```
 ${DATA_PATH}/
-├── panels.db          # SQLite database
-├── panels.db-wal      # WAL file (write-ahead log)
-├── panels.db-shm      # shared-memory file
 ├── .auth-secret       # auto-generated HMAC secret for login session cookies (mode 600)
 └── floor-plans/       # uploaded floor-plan images, content-hashed filenames
 ```
 
-The `.auth-secret` file is generated on first boot and reused on every subsequent restart. Back it up alongside `panels.db` — without it, all existing login sessions become invalid (the user signs back in with the same password; no data lost). Deleting it is a soft "log everyone out".
+The `.auth-secret` file is generated on first boot and reused on every subsequent restart. Back it up alongside the Postgres volume — without it, all existing login sessions become invalid (the user signs back in with the same password; no data lost). Deleting it is a soft "log everyone out".
 
-The single user account row lives in `panels.db` (`app_users` table). The account is created via the in-app sign-up screen on first boot. To reset the account (e.g. forgot the password), stop the container, run `sqlite3 panels.db "DELETE FROM app_users"`, restart — the sign-up screen appears again on the next visit.
+The single user account row lives in Postgres (`app_users` table). The account is created via the in-app sign-up screen on first boot. To reset the account (e.g. forgot the password), delete the row and reload — the sign-up screen appears again on the next visit:
 
-The bind-mount means SQLite + images survive container rebuilds, `docker compose down`, and host reboots.
+```bash
+docker compose exec db psql -U postgres -d house_electricals -c "DELETE FROM app_users"
+```
+
+The Postgres volume + the bind-mount both survive container rebuilds, `docker compose down`, and host reboots.
 
 ### Backup
 
-```bash
-docker compose down
-tar czf house-electricals-backup-$(date +%F).tgz "${DATA_PATH:-./data}"
-docker compose up -d
-```
+Postgres is live — dump it with `pg_dump` rather than copying the volume directory (a file-level copy of a running database can be inconsistent). Then archive the floor-plans + auth secret separately:
 
-The `down` ensures SQLite flushes the WAL cleanly before you snapshot.
+```bash
+# 1. Logical dump of the database (safe while running)
+docker compose exec -T db pg_dump -U postgres -d house_electricals \
+  | gzip > house-electricals-db-$(date +%F).sql.gz
+
+# 2. Filesystem state (floor-plan images + auth secret)
+tar czf house-electricals-files-$(date +%F).tgz "${DATA_PATH:-./data}"
+```
 
 ### Restore
 
 ```bash
+# 1. Restore the database (start only the db service first)
+docker compose up -d db
+gunzip -c house-electricals-db-2026-05-28.sql.gz \
+  | docker compose exec -T db psql -U postgres -d house_electricals
+
+# 2. Restore filesystem state
 docker compose down
 rm -rf "${DATA_PATH:-./data}"
-tar xzf house-electricals-backup-2026-05-26.tgz
+tar xzf house-electricals-files-2026-05-28.tgz
 docker compose up -d
 ```
 
 ## Common Operations
 
 ```bash
-# View logs (all / single service)
+# View logs (all / single service — services are `app` and `db`)
 docker compose logs -f
-docker compose logs -f backend
+docker compose logs -f app
+docker compose logs -f db
 
 # Restart everything (or one service)
 docker compose restart
-docker compose restart backend
+docker compose restart app
 
 # Stop
 docker compose down
@@ -117,8 +137,9 @@ docker compose down
 git pull
 docker compose up -d --build
 
-# Tail SQLite directly (read-only)
-docker compose exec backend /nodejs/bin/node -e 'const d = new (require("node:sqlite").DatabaseSync)("/data/panels.db",{readOnly:true}); console.log(d.prepare("SELECT COUNT(*) FROM panels").get());'
+# Open a psql shell against the database
+docker compose exec db psql -U postgres -d house_electricals
+# e.g. SELECT COUNT(*) FROM panels;
 
 # Health check
 curl -s http://localhost:${HOST_PORT:-8070}/api/v1/health
@@ -167,7 +188,7 @@ server {
 
 For "push to main → images build → server pulls and redeploys", see **[docs/CI-CD-SETUP.md](docs/CI-CD-SETUP.md)**. The pipeline shipped in this repo:
 
-- [`.github/workflows/release.yml`](.github/workflows/release.yml) — GitHub Actions builds the unified backend + frontend image on every push to main and publishes it to **GitHub Container Registry (GHCR)** under the repo owner's namespace. The maintainer publishes at `ghcr.io/antoinebriseboisroy/house-electricals`; forks publish at `ghcr.io/<your-fork-owner>/house-electricals` automatically (the workflow uses `${{ github.repository_owner }}`). Tagged `latest` (moves with main), the full commit SHA (pinned rollback target), and the git tag if you push a `vX.Y.Z` release tag.
+- [`.github/workflows/release.yml`](.github/workflows/release.yml) — GitHub Actions builds the unified backend + frontend image on every push to main and publishes it to **GitHub Container Registry (GHCR)** under the repo owner's namespace. Each fork publishes at `ghcr.io/<your-fork-owner>/house-electricals` automatically (the workflow uses `${{ github.repository_owner }}`). Tagged `latest` (moves with main), the full commit SHA (pinned rollback target), and the git tag if you push a `vX.Y.Z` release tag.
 - A restricted-SSH `deployer` user on your server runs [`scripts/deploy.sh`](scripts/deploy.sh), which `docker compose pull`s the new images and `up -d`s them.
 - The server uses `compose.prod.yaml` (renamed to `compose.yaml` on the host) — no source code on the server, only `compose.yaml`, `.env`, and `deploy.sh`.
 
@@ -175,16 +196,16 @@ The build-from-source path described above ("Quick Start") is still fully suppor
 
 ## Troubleshooting
 
-**Containers won't start.** `docker compose logs backend` — most often the backend can't read `/data` because of UID 65532 ownership on a fresh Linux directory. Run `sudo chown -R 65532:65532 ${DATA_PATH}` and `docker compose restart backend`.
+**Containers won't start.** `docker compose logs app` — most often the app can't read `/data` because of UID 65532 ownership on a fresh Linux directory. Run `sudo chown -R 65532:65532 ${DATA_PATH}` and `docker compose restart app`. If the app logs show connection errors to the database, check `docker compose logs db` and confirm the `db` service is healthy (`docker compose ps`) — the app waits for `db` via `depends_on: condition: service_healthy`.
 
-**Can't reach the app.** `curl -s http://localhost:${HOST_PORT:-8070}/api/v1/health` should return `{"data":{"ok":true}}`. If you get connection-refused, check `docker compose ps` for the `web` container's status. If the curl works from the host but the phone can't reach it, verify firewall rules and that the reverse proxy is forwarding to the right port.
+**Can't reach the app.** `curl -s http://localhost:${HOST_PORT:-8070}/api/v1/health` should return `{"data":{"ok":true}}`. If you get connection-refused, check `docker compose ps` for the `app` container's status. If the curl works from the host but the phone can't reach it, verify firewall rules and that the reverse proxy is forwarding to the right port.
 
-**Healthcheck fails.** The backend healthcheck pings `http://127.0.0.1:3000/api/v1/health` from inside the container. If the backend hangs on startup, check for SQLite lock issues — `docker compose down` then `docker compose up -d` usually clears stale `panels.db-shm` / `panels.db-wal`.
+**Healthcheck fails.** The app healthcheck pings `http://127.0.0.1:3000/api/v1/health` from inside the container. If the app hangs on startup, it's almost always waiting on the database — check `docker compose logs db` for a Postgres that failed to come up (e.g. a corrupt `he-pgdata` volume or a `POSTGRES_PASSWORD` change that doesn't match the already-initialized volume).
 
-**Floor-plan images 404.** The `web` container mounts `${DATA_PATH}/floor-plans:/srv/files/floor-plans:ro`. If that subdirectory doesn't exist on the host yet, the mount silently maps an empty directory. Create it: `mkdir -p ${DATA_PATH:-./data}/floor-plans` then `docker compose restart web`.
+**Floor-plan images 404.** Floor-plan images are served by the app itself from `${DATA_PATH}/floor-plans` (mounted at `/data/floor-plans`). If that subdirectory doesn't exist on the host yet, the mount silently maps an empty directory. Create it: `mkdir -p ${DATA_PATH:-./data}/floor-plans` then `docker compose restart app`.
 
 **`docker compose pull` fails on the server** (compose.prod.yaml mode). If your fork publishes images to a private GHCR namespace, the deployer user needs to be logged in: `sudo -u deployer docker login ghcr.io -u <github-username>` and paste a [GitHub Personal Access Token](https://github.com/settings/tokens) with the `read:packages` scope as the password. Public GHCR images don't need login. See [docs/CI-CD-SETUP.md](docs/CI-CD-SETUP.md) for the full registry setup.
 
 **PWA doesn't offer "Add to Home Screen" on the phone.** PWA install requires a secure context: either `http://localhost:8070` from the host browser (localhost is always a secure context), **or** an HTTPS URL via your reverse proxy. Plain `http://192.168.x.y:8070` won't trigger the install prompt — that's a browser policy, not House Electricals's choice.
 
-**SQLite corruption after a host crash.** The WAL mode is normally crash-safe but if you see a corrupt database error, restore from your last backup (see "Backup" above). Going forward, use `docker compose down` before host shutdowns to ensure clean WAL checkpoints.
+**Database corruption after a host crash.** Postgres is crash-safe by design (write-ahead logging + fsync), so a clean recovery on restart is the normal case. If Postgres refuses to start with a corrupt-data error, restore from your last `pg_dump` backup (see "Backup" above). Use `docker compose down` (not `kill`) before planned host shutdowns so Postgres checkpoints and shuts down cleanly.

@@ -1,49 +1,21 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Hono } from 'hono';
 import type { Component, Floor, Panel, ResolvedComponent } from '@he/shared';
-import {
-  openDatabase,
-  SqliteBreakerRepository,
-  SqliteBreakerTestRepository,
-  SqliteComponentRepository,
-  SqliteFloorRepository,
-  SqlitePanelRepository,
-  SqliteRoomRepository,
-  SqliteServiceEntryRepository,
-  SqliteWallRepository,
-} from './repository.js';
-import { buildApp } from './server.js';
+import { buildTestApp, createTestDb } from './test-helpers.js';
 
 describe('floor routes (G13)', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let app: ReturnType<typeof buildApp>;
+  let cleanup: () => Promise<void>;
+  let app: Hono;
 
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'he-floors-'));
-    db = openDatabase(join(dir, 'floors.db'));
-    app = buildApp({
-      panelRepository: new SqlitePanelRepository(db),
-      breakerRepository: new SqliteBreakerRepository(db),
-      breakerTestRepository: new SqliteBreakerTestRepository(db),
-      componentRepository: new SqliteComponentRepository(db),
-      floorRepository: new SqliteFloorRepository(db),
-      wallRepository: new SqliteWallRepository(db),
-      roomRepository: new SqliteRoomRepository(db),
-      serviceEntryRepository: new SqliteServiceEntryRepository(db),
-      db,
-      appUserRepository: null,
-      auth: null,
-    });
+  beforeEach(async () => {
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    app = buildTestApp(t.db);
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   it('GET /api/v1/floors returns empty list initially', async () => {
@@ -382,164 +354,16 @@ describe('floor routes (G13)', () => {
   });
 });
 
-describe('G13 backfill migration (US-003)', () => {
-  let dir: string;
-
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'he-migr-'));
-  });
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it('seeds a pre-G13 state via raw SQL, then reopens to trigger backfill', () => {
-    const dbPath = join(dir, 'migr.db');
-    const db1 = openDatabase(dbPath);
-
-    // Build a panel + breaker + 2 components via the public API
-    // (the SqlitePanelRepository writes panel rows we can later mutate).
-    const panelRepo = new SqlitePanelRepository(db1);
-    const breakerRepo = new SqliteBreakerRepository(db1);
-    const componentRepo = new SqliteComponentRepository(db1);
-    let p: { id: string } | null = null;
-    let breakerId = '';
-    return Promise.resolve()
-      .then(() => panelRepo.create({ name: 'Basement panel' }))
-      .then((panel) => {
-        p = panel;
-        return breakerRepo.create(panel.id, {
-          slot: '1',
-          amperage: 20,
-          poles: 'single',
-          label: 'Lights',
-        });
-      })
-      .then((b) => {
-        breakerId = b.id;
-        return componentRepo.create({
-          type: 'outlet',
-          name: 'A',
-          breakerId,
-        });
-      })
-      .then(() =>
-        componentRepo.create({
-          type: 'outlet',
-          name: 'B',
-          breakerId,
-        })
-      )
-      .then(() => {
-        // Simulate pre-migration state:
-        //   - floors table empty
-        //   - components.floor_id NULL
-        //   - panel has legacy floor_plan_filename + dimensions
-        db1.prepare('DELETE FROM floors').run();
-        db1.prepare('UPDATE components SET floor_id = NULL').run();
-        db1
-          .prepare(
-            'UPDATE panels SET floor_plan_filename = ?, image_width = ?, image_height = ? WHERE id = ?'
-          )
-          .run('legacy-file.png', 800, 600, p!.id);
-
-        db1.close();
-
-        // Reopen — backfill runs because floors is empty AND panel has plan.
-        const db2 = openDatabase(dbPath);
-        try {
-          type FloorRow = {
-            id: string;
-            name: string;
-            floor_plan_filename: string | null;
-            floor_plan_width: number | null;
-            floor_plan_height: number | null;
-          };
-          const floors = db2
-            .prepare(
-              'SELECT id, name, floor_plan_filename, floor_plan_width, floor_plan_height FROM floors'
-            )
-            .all() as FloorRow[];
-          assert.equal(floors.length, 1, 'exactly one floor created by backfill');
-          assert.equal(
-            floors[0]?.name,
-            'Basement panel',
-            'floor name inherited from panel name (NOT "Main floor")'
-          );
-          assert.equal(floors[0]?.floor_plan_filename, 'legacy-file.png');
-          assert.equal(floors[0]?.floor_plan_width, 800);
-          assert.equal(floors[0]?.floor_plan_height, 600);
-
-          type CompRow = { name: string; floor_id: string | null };
-          const comps = db2
-            .prepare('SELECT name, floor_id FROM components ORDER BY name')
-            .all() as CompRow[];
-          assert.equal(comps.length, 2);
-          assert.equal(comps[0]?.floor_id, floors[0]?.id, 'A linked');
-          assert.equal(comps[1]?.floor_id, floors[0]?.id, 'B linked');
-        } finally {
-          db2.close();
-        }
-      });
-  });
-
-  it('is idempotent — running twice does not duplicate floors', () => {
-    const dbPath = join(dir, 'idem.db');
-    const db1 = openDatabase(dbPath);
-
-    const panelRepo = new SqlitePanelRepository(db1);
-    return panelRepo
-      .create({ name: 'P' })
-      .then((p) => {
-        db1
-          .prepare(
-            'UPDATE panels SET floor_plan_filename = ?, image_width = ?, image_height = ? WHERE id = ?'
-          )
-          .run('plan.png', 100, 100, p.id);
-        db1.close();
-
-        // First reopen — backfill runs
-        const db2 = openDatabase(dbPath);
-        const count1 = (
-          db2.prepare('SELECT COUNT(*) AS n FROM floors').get() as { n: number }
-        ).n;
-        db2.close();
-        assert.equal(count1, 1);
-
-        // Second reopen — gate says "floors non-empty" → skip
-        const db3 = openDatabase(dbPath);
-        const count2 = (
-          db3.prepare('SELECT COUNT(*) AS n FROM floors').get() as { n: number }
-        ).n;
-        db3.close();
-        assert.equal(count2, 1, 'idempotent — still exactly 1 floor');
-      });
-  });
-});
-
 // Cycle-85 — floors.panel_id link tests.
 describe('cycle-85: floors.panel_id link', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let app: ReturnType<typeof buildApp>;
+  let cleanup: () => Promise<void>;
+  let app: Hono;
   let panelId: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'he-floors-panel-'));
-    db = openDatabase(join(dir, 'floors.db'));
-    app = buildApp({
-      panelRepository: new SqlitePanelRepository(db),
-      breakerRepository: new SqliteBreakerRepository(db),
-      breakerTestRepository: new SqliteBreakerTestRepository(db),
-      componentRepository: new SqliteComponentRepository(db),
-      floorRepository: new SqliteFloorRepository(db),
-      wallRepository: new SqliteWallRepository(db),
-      roomRepository: new SqliteRoomRepository(db),
-      serviceEntryRepository: new SqliteServiceEntryRepository(db),
-      db,
-      appUserRepository: null,
-      auth: null,
-    });
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    app = buildTestApp(t.db);
     const r = await app.request('/api/v1/panels', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -548,9 +372,8 @@ describe('cycle-85: floors.panel_id link', () => {
     panelId = ((await r.json()) as { data: Panel }).data.id;
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   it('Floor row defaults panelId to null', async () => {

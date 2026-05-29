@@ -4,7 +4,7 @@
  * has rendered content to screenshot.
  *
  * Hard rules:
- * - Public REST API only. NO direct SQLite writes.
+ * - Public REST API only. NO direct DB writes.
  * - Returned ids are persisted in `e2e/.state.json` for spec reuse.
  * - All POST bodies match the zod schemas exported from @he/shared.
  *

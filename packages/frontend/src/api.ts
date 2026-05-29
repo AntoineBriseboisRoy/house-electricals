@@ -3,6 +3,8 @@ import type {
   Breaker,
   BreakerInput,
   BreakerTest,
+  Building,
+  BuildingInput,
   Component,
   ComponentInput,
   ComponentType,
@@ -48,6 +50,30 @@ let unauthorizedHandler: (() => void) | null = null;
 
 export const setUnauthorizedHandler = (cb: (() => void) | null): void => {
   unauthorizedHandler = cb;
+};
+
+/**
+ * 2026-05 — active building. BuildingContext sets this whenever the selected
+ * building changes (before any data fetch). list calls for panels/floors/
+ * components auto-append `?buildingId`; their create calls auto-inject
+ * `buildingId` into the body. This scopes the whole app to one building
+ * WITHOUT threading the id through every screen's fetch call.
+ */
+let activeBuildingId: string | null = null;
+
+export const setActiveBuildingId = (id: string | null): void => {
+  activeBuildingId = id;
+};
+
+export const getActiveBuildingId = (): string | null => activeBuildingId;
+
+/** Inject the active building into a create body unless one is already set. */
+const withActiveBuilding = <T extends object>(
+  body: T
+): T & { buildingId?: string } => {
+  const current = (body as { buildingId?: string }).buildingId;
+  if (current !== undefined || activeBuildingId === null) return body;
+  return { ...body, buildingId: activeBuildingId };
 };
 
 const unwrap = async <T,>(res: Response): Promise<T> => {
@@ -182,8 +208,56 @@ export const submitChangePassword = async (
   throw new ApiHttpError(res.status, detail);
 };
 
+// --- Buildings (2026-05) — top-level owner; NOT building-scoped itself ---
+
+export const listBuildings = async (): Promise<Building[]> => {
+  const res = await fetch('/api/v1/buildings');
+  return unwrap<Building[]>(res);
+};
+
+export const createBuilding = async (input: BuildingInput): Promise<Building> => {
+  const res = await fetch('/api/v1/buildings', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return unwrap<Building>(res);
+};
+
+export const updateBuilding = async (
+  id: string,
+  patch: { name?: string }
+): Promise<Building> => {
+  const res = await fetch(`/api/v1/buildings/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  return unwrap<Building>(res);
+};
+
+export const deleteBuilding = async (id: string): Promise<void> => {
+  const res = await fetch(`/api/v1/buildings/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok && res.status !== 204) {
+    // Surface 409 (e.g. "can't delete your only building") with its message.
+    let detail = '';
+    try {
+      detail =
+        ((await res.json()) as { error?: { message?: string } }).error?.message ?? '';
+    } catch {
+      detail = await res.text().catch(() => '');
+    }
+    throw new ApiHttpError(res.status, detail);
+  }
+};
+
 export const listPanels = async (): Promise<Panel[]> => {
-  const res = await fetch('/api/v1/panels');
+  const qs = activeBuildingId
+    ? `?buildingId=${encodeURIComponent(activeBuildingId)}`
+    : '';
+  const res = await fetch(`/api/v1/panels${qs}`);
   return unwrap<Panel[]>(res);
 };
 
@@ -194,13 +268,27 @@ export const createPanel = async (
   const res = await fetch('/api/v1/panels', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name, ...extra }),
+    body: JSON.stringify(withActiveBuilding({ name, ...extra })),
   });
   return unwrap<Panel>(res);
 };
 
 export const getPanel = async (id: string): Promise<Panel> => {
   const res = await fetch(`/api/v1/panels/${encodeURIComponent(id)}`);
+  return unwrap<Panel>(res);
+};
+
+/** 2026-05 — move a panel (and the components wired to its breakers) to
+ *  another building. The backend cleans up cross-building references. */
+export const movePanelToBuilding = async (
+  panelId: string,
+  buildingId: string
+): Promise<Panel> => {
+  const res = await fetch(`/api/v1/panels/${encodeURIComponent(panelId)}/move`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ buildingId }),
+  });
   return unwrap<Panel>(res);
 };
 
@@ -245,7 +333,10 @@ export const getPanelsFedByBreaker = async (
 // --- Floors (G13) ---
 
 export const listFloors = async (): Promise<Floor[]> => {
-  const res = await fetch('/api/v1/floors');
+  const qs = activeBuildingId
+    ? `?buildingId=${encodeURIComponent(activeBuildingId)}`
+    : '';
+  const res = await fetch(`/api/v1/floors${qs}`);
   return unwrap<Floor[]>(res);
 };
 
@@ -253,13 +344,27 @@ export const createFloor = async (input: FloorInput): Promise<Floor> => {
   const res = await fetch('/api/v1/floors', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(input),
+    body: JSON.stringify(withActiveBuilding(input)),
   });
   return unwrap<Floor>(res);
 };
 
 export const getFloor = async (id: string): Promise<Floor> => {
   const res = await fetch(`/api/v1/floors/${encodeURIComponent(id)}`);
+  return unwrap<Floor>(res);
+};
+
+/** 2026-05 — move a floor (and the components placed on it) to another
+ *  building. Walls/rooms follow; cross-building refs cleaned up server-side. */
+export const moveFloorToBuilding = async (
+  floorId: string,
+  buildingId: string
+): Promise<Floor> => {
+  const res = await fetch(`/api/v1/floors/${encodeURIComponent(floorId)}/move`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ buildingId }),
+  });
   return unwrap<Floor>(res);
 };
 
@@ -357,6 +462,7 @@ export const listComponents = async (filter?: {
   if (filter?.breakerId) params.set('breakerId', filter.breakerId);
   if (filter?.floorId) params.set('floorId', filter.floorId);
   if (filter?.search) params.set('search', filter.search);
+  if (activeBuildingId) params.set('buildingId', activeBuildingId);
   const qs = params.toString();
   const res = await fetch(`/api/v1/components${qs ? `?${qs}` : ''}`);
   return unwrap<ResolvedComponent[]>(res);
@@ -378,7 +484,7 @@ export const createComponent = async (input: ComponentInput): Promise<Component>
   const res = await fetch('/api/v1/components', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(input),
+    body: JSON.stringify(withActiveBuilding(input)),
   });
   return unwrap<Component>(res);
 };

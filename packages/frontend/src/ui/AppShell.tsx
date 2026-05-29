@@ -6,6 +6,7 @@ import {
   Map as MapIcon,
 } from 'lucide-react';
 import { BottomTabs, type Tab } from './BottomTabs.js';
+import { BuildingSwitcher } from './BuildingSwitcher.js';
 import { UserMenu } from './UserMenu.js';
 import { VersionPill } from './VersionPill.js';
 
@@ -98,6 +99,12 @@ export const AppShell = ({
 }: AppShellProps): JSX.Element => {
   return (
     <div className="app-shell">
+      {/* 2026-05 — multi-building switcher pinned at the top of the chrome,
+          above every screen, so the active building is always visible +
+          switchable. */}
+      <div className="app-shell__topbar">
+        <BuildingSwitcher />
+      </div>
       <div
         className={
           fullBleed

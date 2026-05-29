@@ -8,28 +8,13 @@
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Hono } from 'hono';
 import type { Breaker, Component, Panel, ServiceEntry } from '@he/shared';
-import {
-  openDatabase,
-  SqliteBreakerRepository,
-  SqliteBreakerTestRepository,
-  SqliteComponentRepository,
-  SqliteFloorRepository,
-  SqlitePanelRepository,
-  SqliteRoomRepository,
-  SqliteServiceEntryRepository,
-  SqliteWallRepository,
-} from './repository.js';
-import { buildApp } from './server.js';
+import { buildTestApp, createTestDb } from './test-helpers.js';
 
 describe('service_entries (G40 Part 1)', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let app: ReturnType<typeof buildApp>;
+  let cleanup: () => Promise<void>;
+  let app: Hono;
   let panel: Panel;
   let breaker: Breaker;
   let component: Component;
@@ -110,29 +95,16 @@ describe('service_entries (G40 Part 1)', () => {
     );
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'he-svc-'));
-    db = openDatabase(join(dir, 'svc.db'));
-    app = buildApp({
-      panelRepository: new SqlitePanelRepository(db),
-      breakerRepository: new SqliteBreakerRepository(db),
-      breakerTestRepository: new SqliteBreakerTestRepository(db),
-      componentRepository: new SqliteComponentRepository(db),
-      floorRepository: new SqliteFloorRepository(db),
-      wallRepository: new SqliteWallRepository(db),
-      roomRepository: new SqliteRoomRepository(db),
-      serviceEntryRepository: new SqliteServiceEntryRepository(db),
-      db,
-      appUserRepository: null,
-      auth: null,
-    });
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    app = buildTestApp(t.db);
     panel = await createPanel('Main');
     breaker = await createBreaker(panel.id, '1');
     component = await createComponent('Kitchen outlet');
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   it('POST /breakers/:id/service-entries creates with parent_type=breaker', async () => {

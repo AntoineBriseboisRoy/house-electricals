@@ -1,45 +1,21 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Hono } from 'hono';
 import type { Floor, Room } from '@he/shared';
-import {
-  openDatabase,
-  SqliteBreakerRepository,
-  SqliteBreakerTestRepository,
-  SqliteComponentRepository,
-  SqliteFloorRepository,
-  SqlitePanelRepository,
-  SqliteRoomRepository,
-  SqliteServiceEntryRepository,
-  SqliteWallRepository,
-} from './repository.js';
-import { buildApp } from './server.js';
+import type { Db } from './db.js';
+import { buildTestApp, createTestDb } from './test-helpers.js';
 
 describe('room routes (G12)', () => {
-  let dir: string;
-  let db: DatabaseSync;
-  let app: ReturnType<typeof buildApp>;
+  let cleanup: () => Promise<void>;
+  let db: Db;
+  let app: Hono;
   let floorId: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'he-rooms-'));
-    db = openDatabase(join(dir, 'r.db'));
-    app = buildApp({
-      panelRepository: new SqlitePanelRepository(db),
-      breakerRepository: new SqliteBreakerRepository(db),
-      breakerTestRepository: new SqliteBreakerTestRepository(db),
-      componentRepository: new SqliteComponentRepository(db),
-      floorRepository: new SqliteFloorRepository(db),
-      wallRepository: new SqliteWallRepository(db),
-      roomRepository: new SqliteRoomRepository(db),
-      serviceEntryRepository: new SqliteServiceEntryRepository(db),
-      db,
-      appUserRepository: null,
-      auth: null,
-    });
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    db = t.db;
+    app = buildTestApp(t.db);
     const r = await app.request('/api/v1/floors', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -48,9 +24,8 @@ describe('room routes (G12)', () => {
     floorId = ((await r.json()) as { data: { id: string } }).data.id;
   });
 
-  afterEach(() => {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanup();
   });
 
   it('GET empty list initially', async () => {
@@ -79,6 +54,99 @@ describe('room routes (G12)', () => {
       { x: body.data.x, y: body.data.y, w: body.data.w, h: body.data.h },
       { x: 1000, y: 1000, w: 4000, h: 3000 }
     );
+    // A rectangle room is stored as a 4-point axis-aligned polygon.
+    assert.deepEqual(body.data.points, [
+      { x: 1000, y: 1000 },
+      { x: 5000, y: 1000 },
+      { x: 5000, y: 4000 },
+      { x: 1000, y: 4000 },
+    ]);
+  });
+
+  it('POST creates a polygon (wall-loop) room and derives its bbox', async () => {
+    // An L-shaped 6-vertex polygon (e.g. closed from a wall loop).
+    const points = [
+      { x: 1000, y: 1000 },
+      { x: 5000, y: 1000 },
+      { x: 5000, y: 3000 },
+      { x: 3000, y: 3000 },
+      { x: 3000, y: 5000 },
+      { x: 1000, y: 5000 },
+    ];
+    const res = await app.request(`/api/v1/floors/${floorId}/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'L-room', points }),
+    });
+    assert.equal(res.status, 201);
+    const body = (await res.json()) as { data: Room };
+    assert.deepEqual(body.data.points, points);
+    // bbox = min/max of the polygon.
+    assert.deepEqual(
+      { x: body.data.x, y: body.data.y, w: body.data.w, h: body.data.h },
+      { x: 1000, y: 1000, w: 4000, h: 4000 }
+    );
+  });
+
+  it('POST rejects a polygon with < 3 points', async () => {
+    const res = await app.request(`/api/v1/floors/${floorId}/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Degenerate', points: [{ x: 0, y: 0 }, { x: 100, y: 0 }] }),
+    });
+    assert.equal(res.status, 400);
+  });
+
+  it('PATCH points reshapes the polygon and recomputes the bbox', async () => {
+    const create = await app.request(`/api/v1/floors/${floorId}/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Reshape', x: 0, y: 0, w: 2000, h: 2000 }),
+    });
+    const id = ((await create.json()) as { data: Room }).data.id;
+    const nextPoints = [
+      { x: 0, y: 0 },
+      { x: 6000, y: 0 },
+      { x: 6000, y: 2000 },
+      { x: 0, y: 2000 },
+    ];
+    const res = await app.request(`/api/v1/rooms/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ points: nextPoints }),
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { data: Room };
+    assert.deepEqual(body.data.points, nextPoints);
+    assert.deepEqual(
+      { x: body.data.x, y: body.data.y, w: body.data.w, h: body.data.h },
+      { x: 0, y: 0, w: 6000, h: 2000 }
+    );
+  });
+
+  it('PATCH name-only leaves the polygon untouched', async () => {
+    const points = [
+      { x: 0, y: 0 },
+      { x: 3000, y: 0 },
+      { x: 3000, y: 1000 },
+      { x: 1500, y: 2500 },
+      { x: 0, y: 1000 },
+    ];
+    const create = await app.request(`/api/v1/floors/${floorId}/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Pentagon', points }),
+    });
+    const id = ((await create.json()) as { data: Room }).data.id;
+    const res = await app.request(`/api/v1/rooms/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Pentagon renamed' }),
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { data: Room };
+    assert.equal(body.data.name, 'Pentagon renamed');
+    assert.deepEqual(body.data.points, points);
   });
 
   it('POST on missing floor returns 404', async () => {
@@ -109,12 +177,27 @@ describe('room routes (G12)', () => {
   });
 
   it('POST rejects out-of-range coords', async () => {
+    // x beyond the widened COORD_MAX (100000); width beyond ROOM_DIM_MAX
+    // (200000) would also reject. The legacy 0..10000 cap is gone.
     const res = await app.request(`/api/v1/floors/${floorId}/rooms`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'A', x: 0, y: 0, w: 10001, h: 100 }),
+      body: JSON.stringify({ name: 'A', x: 100001, y: 0, w: 100, h: 100 }),
     });
     assert.equal(res.status, 400);
+  });
+
+  it('POST accepts coords beyond the legacy 0–10000 window', async () => {
+    const res = await app.request(`/api/v1/floors/${floorId}/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Far room', x: -2000, y: 12000, w: 30000, h: 400 }),
+    });
+    assert.equal(res.status, 201);
+    const body = (await res.json()) as { data: { x: number; y: number; w: number } };
+    assert.equal(body.data.x, -2000);
+    assert.equal(body.data.y, 12000);
+    assert.equal(body.data.w, 30000);
   });
 
   it('PATCH partial updates only supplied fields, preserves floor_id', async () => {
@@ -174,11 +257,11 @@ describe('room routes (G12)', () => {
     const del = await app.request(`/api/v1/floors/${floor.id}`, { method: 'DELETE' });
     assert.equal(del.status, 204);
 
-    type CountRow = { n: number };
-    const remaining = (
-      db.prepare('SELECT COUNT(*) AS n FROM rooms WHERE floor_id = ?').get(floor.id) as CountRow
-    ).n;
-    assert.equal(remaining, 0, 'rooms cascaded with floor');
+    const row = await db.queryOne<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM rooms WHERE floor_id = $1',
+      [floor.id]
+    );
+    assert.equal(Number(row?.n), 0, 'rooms cascaded with floor');
   });
 
   it('G14 parity: pin PATCH on a vector-only floor (no image) works identically to image floor', async () => {
