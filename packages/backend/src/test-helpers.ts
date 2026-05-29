@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { sign } from 'hono/jwt';
 import { newId } from '@he/shared';
 import type { AppUserRepository } from '@he/shared';
@@ -18,6 +20,14 @@ import {
   PgWallRepository,
 } from './repository.js';
 import { buildApp } from './server.js';
+
+// Backend route tests build the app via `buildTestApp`, and
+// `buildFloorPlanRoutes` mkdir's FLOOR_PLAN_DIR eagerly at construction.
+// Its default ('/data/floor-plans') is unwritable on CI Linux runners
+// (EACCES). Point it at a writable temp dir on import — before any
+// buildApp() runs — unless the environment already set it. Keeps the
+// unit-test suite self-contained instead of depending on ambient env.
+process.env.FLOOR_PLAN_DIR ??= join(tmpdir(), 'he-backend-test-floor-plans');
 
 /**
  * Auth config used across the backend auth-specific tests. Pinned so

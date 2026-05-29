@@ -89,6 +89,9 @@ jobs:
       - name: Backend tests (against the Postgres service)
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5433/house_electricals
+          # buildFloorPlanRoutes mkdir's this at app construction; the
+          # default (/data/floor-plans) is unwritable on the runner.
+          FLOOR_PLAN_DIR: ${{ runner.temp }}/floor-plans
         run: pnpm --filter @he/backend test
 
   build-and-push:
