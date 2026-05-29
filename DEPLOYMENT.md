@@ -40,7 +40,7 @@ Two containers: the **app** (one Node 22 process serving everything) and **Postg
 | Service | Container             | Image                              | Serves                                                                                   |
 |---------|----------------------|------------------------------------|------------------------------------------------------------------------------------------|
 | `app`   | `house-electricals`  | distroless Node 22 + Hono + `pg`   | `/api/v1/*` (REST API) · `/files/floor-plans/*` (uploaded images) · `/*` (Vite-built React PWA with SPA fallback) |
-| `db`    | `house-electricals-db` | `postgres:17-alpine`             | The Postgres database — all relational data. Reachable only on the internal compose network. |
+| `db`    | `house-electricals-db` | `postgres:18-alpine`             | The Postgres database — all relational data. Reachable only on the internal compose network. |
 
 The app container runs as **UID 65532** (distroless `nonroot`). The first time you point `DATA_PATH` at a fresh directory on a Linux server, set ownership once:
 

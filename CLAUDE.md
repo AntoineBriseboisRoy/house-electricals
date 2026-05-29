@@ -2851,7 +2851,7 @@ stays single-image. The cycle-33 ADR is superseded by this.
 - One canonical deploy path: `docker compose up -d` from the repo root.
 - **Two services**: `app` (the unified `house-electricals` image —
   distroless Node 22 + Hono + `pg`, distroless nonroot UID 65532) and
-  `db` (`postgres:17-alpine`, container `house-electricals-db`, on the
+  `db` (`postgres:18-alpine`, container `house-electricals-db`, on the
   internal compose network only). `app` serves `/api/v1/*`,
   `/files/floor-plans/*`, and `/*` (SPA) on a single internal port (3000),
   mapped to `${HOST_PORT:-8070}` on the host, and connects to `db` via the
