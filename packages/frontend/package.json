@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:demo": "vite --config vite.demo.config.ts",
     "build": "tsc -p tsconfig.json --noEmit && pnpm run lint:illustrations && pnpm run lint:motion && vite build",
+    "build:demo": "vite build --config vite.demo.config.ts",
     "preview": "vite preview",
+    "preview:demo": "vite preview --config vite.demo.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint:illustrations": "node scripts/check-illustration-hex.mjs",
     "lint:motion": "node scripts/check-motion-literals.mjs",
@@ -29,7 +32,11 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.0",
+    "@electric-sql/pglite": "^0.2.17",
+    "@he/backend": "workspace:*",
     "@playwright/test": "^1.60.0",
+    "buffer": "^6.0.3",
+    "path-browserify": "^1.0.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^6.0.2",

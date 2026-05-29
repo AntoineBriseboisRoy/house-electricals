@@ -6,6 +6,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["dev"],
       "port": 5173
+    },
+    {
+      "name": "demo",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@he/frontend", "preview:demo", "--", "--port", "4182", "--host", "127.0.0.1"],
+      "port": 4182
     }
   ]
 }

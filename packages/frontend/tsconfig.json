@@ -11,5 +11,7 @@
     "useDefineForClassFields": true,
     "types": ["vite/client"]
   },
-  "include": ["src/**/*", "vite.config.ts"]
+  "include": ["src/**/*", "vite.config.ts"],
+  "comment-exclude": "src/demo/** runs the real backend in the browser and is built esbuild-only (vite.demo.config.ts). It's excluded from the product typecheck so a plain `pnpm build` stays byte-identical and never pulls Node-typed backend source into the frontend program.",
+  "exclude": ["src/demo/**"]
 }

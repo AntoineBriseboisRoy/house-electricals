@@ -1,0 +1,64 @@
+name: Deploy demo to GitHub Pages
+
+# Builds the self-contained browser demo (real backend runs in-browser via
+# PGlite — see packages/frontend/src/demo/*) and publishes it to GitHub Pages.
+# Enable once: repo Settings → Pages → "Build and deployment" → Source =
+# "GitHub Actions". Optional: set repo Variable GOATCOUNTER_CODE to your
+# GoatCounter site code to count visitors.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; cancel in-progress runs on new pushes.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # @he/frontend imports @he/shared from its built dist, so build it first.
+      - run: pnpm --filter @he/shared build
+
+      - name: Build demo
+        run: pnpm --filter @he/frontend build:demo
+        env:
+          # https://<user>.github.io/<repo>/ — base path = the repo name.
+          DEMO_BASE: /${{ github.event.repository.name }}/
+          # Optional analytics; no snippet is injected when unset.
+          GOATCOUNTER_CODE: ${{ vars.GOATCOUNTER_CODE }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
