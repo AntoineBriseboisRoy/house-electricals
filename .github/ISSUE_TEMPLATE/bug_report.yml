@@ -1,0 +1,60 @@
+name: Bug report
+description: Report something that isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug!
+
+        ⚠️ **Do not report security vulnerabilities here.** Use the
+        [Security Policy](https://github.com/AntoineBriseboisRoy/house-electricals/security/policy)
+        instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including what you expected.
+      placeholder: When I flip a breaker in test mode, …
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to '...'
+        2. Tap '...'
+        3. See error
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / image tag or commit SHA
+      placeholder: "v0.1.0 or ghcr sha-abc1234"
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How are you running it?
+      options:
+        - Local dev (pnpm dev)
+        - Docker Compose (build from source)
+        - Docker Compose (GHCR image)
+        - Behind a reverse proxy / Cloudflare Tunnel
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser / device & OS
+      placeholder: "iOS 18 Safari (PWA) / Chrome 130 desktop"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or console output
+      description: Backend container logs or browser console errors. Redact any secrets.
+      render: shell

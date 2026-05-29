@@ -31,9 +31,9 @@ env:
   REGISTRY: ghcr.io
   IMAGE_BASENAME: house-electricals
 
+# Least privilege at the workflow level; the publish job widens its own scope.
 permissions:
   contents: read
-  packages: write
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────
@@ -95,6 +95,10 @@ jobs:
     runs-on: ubuntu-latest
     # Never publish an image from a red build.
     needs: test
+    # Only this job pushes to GHCR, so only this job gets write scope.
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

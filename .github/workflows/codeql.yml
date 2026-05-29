@@ -1,0 +1,50 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CodeQL — static analysis security scanning for JavaScript/TypeScript.
+# Results appear under the repo's Security → Code scanning alerts tab.
+# Docs: https://docs.github.com/code-security/code-scanning
+# ─────────────────────────────────────────────────────────────────────────────
+name: CodeQL
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    # Weekly full scan (Mondays 07:00 UTC) catches newly-published query rules
+    # even when the code hasn't changed.
+    - cron: "0 7 * * 1"
+
+# Least privilege: CodeQL only needs to read code and write its findings.
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 'javascript-typescript' covers both .js and .ts in one pass.
+        language: ["javascript-typescript"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # 'security-and-quality' is the broader pack; drop to
+          # 'security-extended' if quality findings are too noisy.
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/AntoineBriseboisRoy/house-electricals/security/policy
+    about: Please report security issues privately — never in a public issue.
+  - name: Question / discussion
+    url: https://github.com/AntoineBriseboisRoy/house-electricals/discussions
+    about: Ask questions and discuss ideas here (enable Discussions if not already on).
