@@ -26,8 +26,10 @@ test.describe('version pill — real build versioning', () => {
     // eslint-disable-next-line no-console
     console.log(`[version-pill ${info.project.name}] "${text}"`);
 
-    // Must be "v<semver> · <7-hex-sha>" — proving the SHA is stamped, not frozen.
-    expect(text).toMatch(/^v\d+\.\d+\.\d+\s+·\s+[0-9a-f]{7}$/);
+    // Must be "v<version> · <7-hex-sha>" — proving the SHA is stamped, not
+    // frozen. Version is tag-driven (e.g. "v0.3" or "v0.3.1"), so accept any
+    // dotted version, not strictly 3-part semver.
+    expect(text).toMatch(/^v\d+(\.\d+)+\s+·\s+[0-9a-f]{7}$/);
     expect(await pill.getAttribute('data-sha')).toMatch(/^[0-9a-f]{7}$/);
 
     await page.screenshot({

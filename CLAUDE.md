@@ -65,8 +65,12 @@ The bottom-left `VersionPill` used to show only `v{package.json version}`
    (CI/Docker inject them as build-args, since the alpine image has no git and
    `.dockerignore` excludes `.git`), with a local `git` fallback for
    `pnpm dev`/`build`:
-   - `__APP_VERSION__` — semver from `packages/frontend/package.json` (human
-     release marker; `.0` is NO LONGER stripped — shows full `0.2.0`).
+   - `__APP_VERSION__` — TAG-DRIVEN: the nearest git tag (parsed from
+     `__GIT_DESCRIBE__` — ahead-suffix `-<N>-g<sha>` + `-dirty` stripped,
+     leading `v` dropped), so `git tag v0.3 && push` makes the pill read
+     `v0.3`. Falls back to `packages/frontend/package.json` ONLY when the repo
+     has no reachable tag. (Previously the static package.json field, which
+     froze the pill at `v0.2`.)
    - `__GIT_DESCRIBE__` — `git describe --tags --always --dirty` (precise,
      auto-incrementing id: `v0.3.0`, `v0.3.0-4-gABCDEF`, or bare SHA).
    - `__GIT_SHA__` — full commit SHA (short form shown in UI).

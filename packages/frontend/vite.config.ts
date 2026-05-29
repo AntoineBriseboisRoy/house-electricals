@@ -37,7 +37,6 @@ const git = (args: string): string => {
   }
 };
 
-const APP_VERSION = pkg.version;
 const GIT_SHA = (
   process.env.GIT_SHA ||
   process.env.VITE_GIT_SHA ||
@@ -49,6 +48,20 @@ const GIT_DESCRIBE = (
   GIT_SHA.slice(0, 7)
 ).trim();
 const BUILD_TIME = (process.env.BUILD_TIME || new Date().toISOString()).trim();
+
+// The displayed version is TAG-DRIVEN: the nearest release tag wins, so
+// `git tag v0.3 && push` makes the pill read "v0.3" (not the static
+// package.json field). Strip git-describe's "-<N>-g<sha>" ahead-suffix +
+// "-dirty" to recover the bare tag (e.g. "v0.3-1-g02ef0ca" → "v0.3"); fall
+// back to package.json only when the repo has NO reachable tag. `v` prefix
+// is dropped since the pill renders its own "v".
+const TAG_FROM_DESCRIBE = GIT_DESCRIBE.replace(/-dirty$/, '').replace(
+  /-\d+-g[0-9a-f]+$/,
+  ''
+);
+const APP_VERSION = (
+  /^v?\d+(\.\d+)+/.test(TAG_FROM_DESCRIBE) ? TAG_FROM_DESCRIBE : pkg.version
+).replace(/^v/, '');
 
 export default defineConfig({
   plugins: [
