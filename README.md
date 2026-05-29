@@ -60,9 +60,9 @@ services:
     volumes:
       - ./data:/data        # floor-plan uploads + .auth-secret
     environment:
+      # The only var the app can't default for you — the image already sets
+      # HOST=0.0.0.0, PORT=3000, FLOOR_PLAN_DIR, PUBLIC_DIR.
       DATABASE_URL: postgresql://postgres:postgres@db:5432/house_electricals
-      HOST: 0.0.0.0
-      PORT: 3000
 
 volumes:
   he-pgdata:
