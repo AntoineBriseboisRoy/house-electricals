@@ -3545,37 +3545,32 @@ h2 {
 }
 
 @media (max-width: 959px) {
+  /* G28 cycle-34 + 2026-05: pack the tools into an even 3-column grid so no
+     tool is orphaned on its own row. (The prior flex-wrap relied on a
+     :last-child full-width rule meant for a since-removed Reset-zoom button;
+     once that button moved to the floating on-canvas controls the rule
+     pushed "Switch" — the new last child — onto its own line.) On touch the
+     kbd badges + the section divider are hidden, and each tool button fills
+     its grid cell for equal, tappable widths. */
   .tool-palette {
-    flex-direction: row;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
     gap: var(--space-1);
   }
-  /* G28 cycle-34: each tool button shrinks to content, button label loses
-     the kbd-shortcut badge (no keyboard on a phone anyway), and the
-     full-width dividers stop forcing wrap rows. Result: 4-5 tools per row
-     at 390px instead of 2 + lonely-tool-on-its-own-row. */
   .tool-palette > li {
-    flex: 0 1 auto;
+    display: flex;
   }
   .tool-palette > li .kbd-badge {
     display: none;
   }
-  .tool-palette > li .button {
-    padding: 0 var(--space-3);
+  .tool-palette > li .btn {
+    width: 100%;
+    padding-inline: var(--space-2);
   }
+  /* display:none removes the divider from the grid flow entirely, so the 6
+     tools pack cleanly into two rows of three. */
   .tool-palette__divider {
     display: none;
-  }
-  /* Cycle-83 polish: the last item in the palette is an unlabeled
-     IconButton (Reset zoom) — without a divider in between, it
-     squatted next to "Switch" looking like an orphan. Force it
-     onto its own row, right-aligned, so it reads as a viewport
-     control rather than another tool. */
-  .tool-palette > li:last-child {
-    flex: 0 0 100%;
-    display: flex;
-    justify-content: flex-end;
-    margin-top: var(--space-1);
   }
 }
 
