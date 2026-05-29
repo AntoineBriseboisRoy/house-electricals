@@ -3557,9 +3557,7 @@ h2 {
     grid-template-columns: repeat(3, 1fr);
     gap: var(--space-1);
   }
-  .tool-palette > li {
-    display: flex;
-  }
+  .tool-palette > li > .kbd-badge,
   .tool-palette > li .kbd-badge {
     display: none;
   }
@@ -3568,8 +3566,9 @@ h2 {
     padding-inline: var(--space-2);
   }
   /* display:none removes the divider from the grid flow entirely, so the 6
-     tools pack cleanly into two rows of three. */
-  .tool-palette__divider {
+     tools pack cleanly into two rows of three. Selector is `> li.tool-...`
+     (specificity 0,2,1) so it can't be out-specificity'd by `> li` rules. */
+  .tool-palette > li.tool-palette__divider {
     display: none;
   }
 }
