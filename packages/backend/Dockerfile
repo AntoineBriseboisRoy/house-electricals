@@ -21,7 +21,7 @@
 # ============================================================================
 
 # ── Stage 1: frontend bundle ────────────────────────────────────────────────
-FROM node:22-alpine AS frontend-builder
+FROM node:26-alpine AS frontend-builder
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -53,7 +53,7 @@ RUN pnpm --filter @he/shared build \
  && pnpm --filter @he/frontend build
 
 # ── Stage 2: backend bundle ─────────────────────────────────────────────────
-FROM node:22-alpine AS backend-builder
+FROM node:26-alpine AS backend-builder
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
