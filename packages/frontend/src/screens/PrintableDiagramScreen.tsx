@@ -7,6 +7,7 @@ import type {
   ResolvedComponent,
 } from '@he/shared';
 import { getPanel, listBreakers, listComponents } from '../api.js';
+import { formatDate } from '../lib/datetime.js';
 import { ComponentTypeIcon, componentTypeLabel } from '../components/ComponentTypeIcon.js';
 
 /** G37 Part 2 cycle-69 — print-styled protection chip. Monochrome
@@ -249,8 +250,7 @@ export const PrintableDiagramScreen = (): JSX.Element => {
     }
   }
 
-  const now = new Date();
-  const printedOn = now.toLocaleDateString(undefined, {
+  const printedOn = formatDate(Date.now(), {
     year: 'numeric',
     month: 'long',
     day: 'numeric',

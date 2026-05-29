@@ -1006,3 +1006,35 @@ describe('security headers', () => {
     assert.equal(res.headers.get('content-security-policy'), null);
   });
 });
+
+describe('config route (TZ)', () => {
+  let cleanup: () => Promise<void>;
+  let app: Hono;
+  const originalTz = process.env.TZ;
+
+  beforeEach(async () => {
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    app = buildTestApp(t.db);
+  });
+
+  afterEach(async () => {
+    if (originalTz === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTz;
+    await cleanup();
+  });
+
+  it('reports the configured TZ', async () => {
+    process.env.TZ = 'America/Toronto';
+    const res = await app.request('/api/v1/config');
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { data: { tz: 'America/Toronto' } });
+  });
+
+  it('reports tz: null when TZ is empty/unset', async () => {
+    process.env.TZ = '';
+    const res = await app.request('/api/v1/config');
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { data: { tz: null } });
+  });
+});

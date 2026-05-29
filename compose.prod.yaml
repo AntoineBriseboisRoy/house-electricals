@@ -29,6 +29,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-house_electricals}
+      # App-wide timezone (IANA name, e.g. America/Toronto). Empty = UTC.
+      TZ: ${TZ:-}
     volumes:
       # All relational data lives in Postgres — back up this volume.
       # NOTE: mount the parent dir, not /var/lib/postgresql/data — Postgres 18+
@@ -63,6 +65,10 @@ services:
       PUBLIC_DIR: /app/public
       PORT: 3000
       HOST: 0.0.0.0
+      # App-wide display timezone (IANA name, e.g. America/Toronto). The Node
+      # process uses it for date math; the SPA reads it from /api/v1/config so
+      # every screen shows dates in this zone. Empty = each device's local time.
+      TZ: ${TZ:-}
       # Auth: no AUTH_USERNAME / AUTH_PASSWORD here. First-time setup
       # is a sign-up screen the first time you open the app — the
       # backend stores the (one) user row in the `app_users` table.

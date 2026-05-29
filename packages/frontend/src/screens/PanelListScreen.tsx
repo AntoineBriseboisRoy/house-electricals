@@ -11,6 +11,7 @@ import {
   listPanels,
 } from '../api.js';
 import { suffixDuplicate } from '../lib/duplicateName.js';
+import { startOfMonthEpoch } from '../lib/datetime.js';
 import { useModal } from '../hooks/useModal.js';
 import {
   Button,
@@ -146,10 +147,7 @@ export const PanelListScreen = (): JSX.Element => {
    *  on month boundary without manual refresh. A breaker is "untested
    *  this month" when its latest breaker_test is null OR testedAt is
    *  strictly less than this value. */
-  const monthStart = useMemo(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-  }, []);
+  const monthStart = useMemo(() => startOfMonthEpoch(), []);
 
   /** G37 Part 2 cycle-69 — subset of protectedBreakers whose latest
    *  test is null OR before monthStart. Hidden card when length === 0

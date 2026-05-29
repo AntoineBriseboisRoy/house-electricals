@@ -31,6 +31,7 @@ import { buildWallRoutes } from './routes/walls.js';
 import { buildSwitchControlRoutes } from './routes/switch-controls.js';
 import { devStaticRoutes } from './routes/dev-static.js';
 import { healthRoutes } from './routes/health.js';
+import { configRoutes } from './routes/config.js';
 import { spaRoutes } from './routes/static-spa.js';
 import {
   buildProtectedAuthRoutes,
@@ -93,6 +94,9 @@ export const buildApp = (deps: AppDeps): Hono => {
   // Health stays open so reverse-proxy / monitoring probes work without
   // credentials.
   app.route('/api/v1', healthRoutes);
+  // Runtime config (the configured display timezone) is non-sensitive and
+  // needed by the SPA on every screen — keep it public.
+  app.route('/api/v1', configRoutes);
 
   // ── AUTH (opt-in) ────────────────────────────────────────────────────
   // Production always passes a real `deps.auth` + `deps.appUserRepository`;

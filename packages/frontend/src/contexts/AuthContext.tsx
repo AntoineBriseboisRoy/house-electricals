@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  fetchAppConfig,
   fetchAuthMe,
   fetchSetupStatus,
   setUnauthorizedHandler,
@@ -16,6 +17,7 @@ import {
   submitSignup,
   type AuthUser,
 } from '../api.js';
+import { setAppTimeZone } from '../lib/datetime.js';
 
 /**
  * feat/auth-gate (sign-up flow) — single-user auth state.
@@ -73,6 +75,12 @@ export const AuthProvider = ({
     let cancelled = false;
     (async () => {
       try {
+        // Pull the operator's display timezone first so every dated screen
+        // renders in the configured zone. Best-effort — fetchAppConfig never
+        // throws (falls back to device-local on any error).
+        const { tz } = await fetchAppConfig();
+        if (cancelled) return;
+        setAppTimeZone(tz);
         const { needsSetup } = await fetchSetupStatus();
         if (cancelled) return;
         if (needsSetup) {

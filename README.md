@@ -88,6 +88,7 @@ Set under `environment:` in `compose.yaml` or in a sibling `.env` file.
 | Variable | Default | Notes |
 |---|---|---|
 | `HOST_PORT` | `8070` | Host port the container binds to. Change the left side of `ports:` to match. |
+| `TZ` | _(device-local)_ | App-wide display timezone as an IANA name, e.g. `America/Toronto`. Drives every date the UI shows (audit log, service log, "last verified", printed diagram) on **any** device. Leave unset to use each device's own local time. |
 | `POSTGRES_USER` | `postgres` | Postgres role. Seeds the `db` container **and** builds the app's `DATABASE_URL` — keep them in sync. |
 | `POSTGRES_PASSWORD` | `postgres` | Postgres password. **Set a strong value in production.** |
 | `POSTGRES_DB` | `house_electricals` | Database name. |

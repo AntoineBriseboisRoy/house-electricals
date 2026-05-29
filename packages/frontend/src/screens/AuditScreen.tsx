@@ -25,6 +25,12 @@ import {
 import { useFilterPopover } from '../hooks/useFilterPopover.js';
 import { useFilterState } from '../hooks/useFilterState.js';
 import { formatRelative } from '../lib/relativeTime.js';
+import {
+  dateInputValue,
+  epochFromDateInputEnd,
+  epochFromDateInputStart,
+  formatDateTime,
+} from '../lib/datetime.js';
 
 /**
  * G36 Part 2 (cycle-63) — house-level audit log for breaker tests.
@@ -73,45 +79,16 @@ const SORT_OPTIONS: readonly SortOption<SortBy>[] = [
   { sortBy: 'outcome', sortOrder: 'desc', label: 'Outcome (Z→A)' },
 ];
 
-/** Native date-input value is `yyyy-mm-dd` local time. We convert at submit
- *  to epoch ms. To round-trip back to the input we extract yyyy-mm-dd from
- *  the stored epoch ms. Both sides use the LOCAL date — server stores raw
- *  epoch ms, so a "since 2024-01-01" filter means "rows on or after the
- *  user's local midnight on 2024-01-01". */
-const dateInputFromEpoch = (epochMs: number | null): string => {
-  if (epochMs === null) return '';
-  const d = new Date(epochMs);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
-
-const epochFromSinceInput = (value: string): number | null => {
-  if (!value) return null;
-  const t = new Date(value).getTime();
-  return Number.isFinite(t) ? t : null;
-};
-
-/** For `until`, the user picks a day inclusive — bump to end-of-day so
- *  "until 2024-01-31" includes events recorded at 23:59 on that day. */
-const epochFromUntilInput = (value: string): number | null => {
-  if (!value) return null;
-  const d = new Date(value);
-  if (!Number.isFinite(d.getTime())) return null;
-  d.setHours(23, 59, 59, 999);
-  return d.getTime();
-};
-
-const absoluteDate = (epochMs: number): string => {
-  return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(new Date(epochMs));
-};
+/** Native date-input value is `yyyy-mm-dd`. We convert at submit to epoch ms
+ *  and round-trip back to the input — both sides interpret the day in the
+ *  app's configured timezone (the `TZ` env var; device-local when unset). So a
+ *  "since 2024-01-01" filter means "rows on or after midnight 2024-01-01 in the
+ *  app zone". See lib/datetime.ts. */
+const dateInputFromEpoch = dateInputValue;
+const epochFromSinceInput = epochFromDateInputStart;
+/** `until` is inclusive — end-of-day so "until 2024-01-31" includes 23:59. */
+const epochFromUntilInput = epochFromDateInputEnd;
+const absoluteDate = (epochMs: number): string => formatDateTime(epochMs);
 
 const sortTests = (
   list: readonly BreakerTest[],

@@ -50,6 +50,16 @@ export type ApiEnvelope<T> = {
   data: T;
 };
 
+/**
+ * Public runtime config exposed to the SPA (GET /api/v1/config). `tz` is the
+ * operator-configured IANA timezone (the `TZ` env var) that the whole app
+ * displays dates in; `null` means none was set, so the frontend falls back to
+ * each device's local timezone.
+ */
+export type AppConfig = {
+  tz: string | null;
+};
+
 export type ApiError = {
   error: {
     message: string;

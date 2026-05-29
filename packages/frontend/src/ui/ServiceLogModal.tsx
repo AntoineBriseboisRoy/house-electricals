@@ -1,4 +1,4 @@
-import { useState, useMemo, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Trash2 } from 'lucide-react';
 import type { ServiceEntry, ServiceEntryParentType } from '@he/shared';
 import { Button } from './Button.js';
@@ -6,6 +6,11 @@ import { IconButton } from './IconButton.js';
 import { Modal } from './Modal.js';
 import { Textarea } from './Textarea.js';
 import { formatRelative } from '../lib/relativeTime.js';
+import {
+  dateInputValue,
+  epochFromDateInputStart,
+  formatDate,
+} from '../lib/datetime.js';
 
 export type ServiceLogModalProps = {
   open: boolean;
@@ -47,19 +52,8 @@ export const ServiceLogModal = ({
   onClose,
 }: ServiceLogModalProps): JSX.Element | null => {
   const [note, setNote] = useState('');
-  const [dateStr, setDateStr] = useState(() => isoDateInputValue(Date.now()));
+  const [dateStr, setDateStr] = useState(() => dateInputValue(Date.now()));
   const [submitting, setSubmitting] = useState(false);
-
-  // Display-friendly absolute date formatter — short, locale-aware.
-  const dateFmt = useMemo(
-    () =>
-      new Intl.DateTimeFormat(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      }),
-    []
-  );
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
@@ -67,15 +61,15 @@ export const ServiceLogModal = ({
     if (trimmed.length === 0 || submitting) return;
     setSubmitting(true);
     try {
-      // Anchor occurredAt to the picked date's local midnight so backdating
-      // lands on the user's chosen day in their timezone. Future cycles may
-      // expose a time picker — for v1 day-granularity is enough.
-      const occurredAt = epochFromDateInput(dateStr);
+      // Anchor occurredAt to the picked date's midnight in the app timezone so
+      // backdating lands on the user's chosen day. Future cycles may expose a
+      // time picker — for v1 day-granularity is enough.
+      const occurredAt = epochFromDateInputStart(dateStr) ?? Date.now();
       await onAddEntry({ note: trimmed, occurredAt });
       // Reset for next entry. Keep the date as "today" so the next add
       // doesn't carry the previous backdate forward (likely a footgun).
       setNote('');
-      setDateStr(isoDateInputValue(Date.now()));
+      setDateStr(dateInputValue(Date.now()));
     } finally {
       setSubmitting(false);
     }
@@ -118,7 +112,7 @@ export const ServiceLogModal = ({
             >
               <div className="service-log-modal__item-head">
                 <span className="service-log-modal__item-date">
-                  {dateFmt.format(new Date(e.occurredAt))}
+                  {formatDate(e.occurredAt)}
                 </span>
                 <span className="service-log-modal__item-relative muted">
                   · {formatRelative(e.occurredAt)}
@@ -154,7 +148,7 @@ export const ServiceLogModal = ({
             type="date"
             value={dateStr}
             onChange={(e) => setDateStr(e.target.value)}
-            max={isoDateInputValue(Date.now())}
+            max={dateInputValue(Date.now())}
             className="service-log-modal__date-input"
             data-testid="service-log-modal-date"
             aria-label="Date of service event"
@@ -191,26 +185,4 @@ export const ServiceLogModal = ({
       </form>
     </Modal>
   );
-};
-
-/** ISO-day string ("YYYY-MM-DD") for <input type="date"> from an epoch ms. */
-const isoDateInputValue = (epochMs: number): string => {
-  const d = new Date(epochMs);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-};
-
-/** Parse an "YYYY-MM-DD" date input back to epoch ms anchored at local
- *  midnight so backdating lands on the user's chosen day in their TZ.
- *  Falls back to Date.now() when the string can't be parsed. */
-const epochFromDateInput = (s: string): number => {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (match === null) return Date.now();
-  const [, ystr, mstr, dstr] = match;
-  const y = Number.parseInt(ystr!, 10);
-  const m = Number.parseInt(mstr!, 10) - 1;
-  const d = Number.parseInt(dstr!, 10);
-  return new Date(y, m, d, 0, 0, 0, 0).getTime();
 };

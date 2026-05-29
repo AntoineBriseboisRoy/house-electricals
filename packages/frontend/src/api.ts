@@ -1,5 +1,6 @@
 import type {
   ApiEnvelope,
+  AppConfig,
   Attachment,
   AttachmentParentType,
   Breaker,
@@ -99,6 +100,24 @@ const unwrap = async <T,>(res: Response): Promise<T> => {
   }
   const body = (await res.json()) as ApiEnvelope<T>;
   return body.data;
+};
+
+// ── Public runtime config ──────────────────────────────────────────────
+
+/**
+ * Fetch the operator's runtime config (currently just the display timezone).
+ * Public + best-effort: any failure resolves to `{ tz: null }` so a config
+ * outage never blocks boot — the app just falls back to device-local time.
+ */
+export const fetchAppConfig = async (): Promise<AppConfig> => {
+  try {
+    const res = await fetch('/api/v1/config');
+    if (!res.ok) return { tz: null };
+    const body = (await res.json()) as ApiEnvelope<AppConfig>;
+    return body.data;
+  } catch {
+    return { tz: null };
+  }
 };
 
 // ── feat/auth-gate — auth endpoints used by AuthContext ────────────────

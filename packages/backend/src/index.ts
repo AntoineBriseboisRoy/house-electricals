@@ -122,6 +122,10 @@ const main = async (): Promise<void> => {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
+  const tz = process.env.TZ?.trim();
+  console.log(
+    `[backend] timezone: ${tz && tz.length > 0 ? tz : '(unset — clients use device-local time)'}`
+  );
   console.log(`[backend] listening on http://${HOST}:${PORT}`);
 };
 
