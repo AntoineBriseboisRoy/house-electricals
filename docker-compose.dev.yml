@@ -24,7 +24,9 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - he-pgdata-dev:/var/lib/postgresql/data
+      # Mount the parent dir, not /var/lib/postgresql/data — Postgres 18+ stores
+      # its cluster in a version-specific subdir and refuses to start otherwise.
+      - he-pgdata-dev:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d house_electricals"]
       interval: 5s

@@ -21,7 +21,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-house_electricals}
     volumes:
       # All application data now lives in Postgres — back up this volume.
-      - he-pgdata:/var/lib/postgresql/data
+      # NOTE: mount the parent dir, not /var/lib/postgresql/data — Postgres 18+
+      # stores its cluster in a version-specific subdir and refuses to start if
+      # a volume is mounted at the old .../data path.
+      - he-pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-house_electricals}"]
       interval: 10s

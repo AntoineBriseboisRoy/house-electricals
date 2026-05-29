@@ -27,48 +27,28 @@
 
 You need a host with [Docker Engine](https://docs.docker.com/engine/install/) 24+ and Compose v2.
 
-Create `compose.yaml` — two containers: the app (one Node process serving the
-API + SPA + uploaded images) and Postgres (all relational data):
+Two containers run: the app (one Node process serving the API + SPA + uploaded
+images) and Postgres (all relational data). Grab the compose file and an
+environment template:
 
-```yaml
-services:
-  db:
-    image: postgres:18-alpine
-    container_name: house-electricals-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres        # set a strong value in production
-      POSTGRES_DB: house_electricals
-    volumes:
-      - he-pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d house_electricals"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+```bash
+mkdir -p house-electricals && cd house-electricals
 
-  app:
-    image: ghcr.io/antoinebriseboisroy/house-electricals:latest
-    container_name: house-electricals
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    ports:
-      - 8070:3000
-    volumes:
-      - ./data:/data        # floor-plan uploads + .auth-secret
-    environment:
-      # The only var the app can't default for you — the image already sets
-      # HOST=0.0.0.0, PORT=3000, FLOOR_PLAN_DIR, PUBLIC_DIR.
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/house_electricals
-
-volumes:
-  he-pgdata:
+# compose.prod.yaml pulls the pre-built image; save it as compose.yaml
+curl -fsSL https://raw.githubusercontent.com/AntoineBriseboisRoy/house-electricals/master/compose.prod.yaml -o compose.yaml
+curl -fsSL https://raw.githubusercontent.com/AntoineBriseboisRoy/house-electricals/master/.env.example     -o .env
 ```
 
-On Linux, prepare the data directory so the non-root container can write to it:
+All configuration lives in `.env` (compose interpolates it automatically, so the
+app and database credentials can never drift apart). Open it and set at least:
+
+- **`IMAGE`** — required, no default. Your fork's image, e.g. `ghcr.io/<your-github-username>/house-electricals:latest`.
+- **`POSTGRES_PASSWORD`** — use a strong value.
+- **`DATA_PATH`** — host directory for floor-plan uploads + `.auth-secret` (an absolute path in production, e.g. `/srv/house-electricals/data`).
+
+Everything else (`HOST_PORT`, `POSTGRES_USER`, `POSTGRES_DB`) has a sensible default.
+
+On Linux, prepare the data directory so the non-root container (UID 65532) can write to it — point this at your `DATA_PATH`:
 
 ```bash
 mkdir -p data
@@ -82,6 +62,10 @@ Start it:
 ```bash
 docker compose up -d
 ```
+
+> The committed compose files mount the Postgres volume at `/var/lib/postgresql`
+> (Postgres 18+ stores its cluster in a version-specific subdirectory and refuses
+> to start if the volume is mounted at the older `.../data` path).
 
 Open **http://your-host:8070/**. The very first visit shows a **sign-up screen** — pick a username and password (8+ characters). After that, every visit goes to the login screen. On your phone, use *Add to Home Screen* to install the PWA.
 
