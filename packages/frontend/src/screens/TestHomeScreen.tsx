@@ -10,7 +10,6 @@ import {
 import { formatRelative } from '../lib/relativeTime.js';
 import {
   Button,
-  Card,
   EmptyState,
   NoPanels,
   ScreenHeader,
@@ -140,17 +139,17 @@ export const TestHomeScreen = (): JSX.Element => {
         </ul>
       )}
 
-      <Card>
-        <Link
-          href="/test/audit"
-          className="test-home__audit-link"
-          data-testid="test-home-audit-link"
-        >
-          <ClipboardList size={18} strokeWidth={2.25} aria-hidden="true" />
-          <span>View audit log</span>
-          <span className="muted">— every verified test, every panel</span>
-        </Link>
-      </Card>
+      <Link
+        href="/test/audit"
+        className="test-home__audit-link"
+        data-testid="test-home-audit-link"
+      >
+        <ClipboardList size={16} strokeWidth={2.25} aria-hidden="true" />
+        <span className="test-home__audit-link-label">View audit log</span>
+        <span className="test-home__audit-link-hint">
+          every verified test, every panel
+        </span>
+      </Link>
     </>
   );
 };

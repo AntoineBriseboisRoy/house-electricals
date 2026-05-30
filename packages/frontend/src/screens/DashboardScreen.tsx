@@ -368,7 +368,7 @@ export const DashboardScreen = (): JSX.Element => {
                 flagged critical
               </p>
               <Link
-                href="/library"
+                href="/library?critical=1"
                 className="dashboard-card__link"
                 data-testid="dashboard-card-critical-link"
               >
