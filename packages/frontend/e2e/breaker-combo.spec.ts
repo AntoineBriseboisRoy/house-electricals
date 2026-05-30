@@ -67,7 +67,7 @@ test.describe('breaker combo picker', () => {
 
   test('inline "+ New breaker" creates a breaker and auto-selects it', async ({
     page,
-  }) => {
+  }, testInfo) => {
     const panelId = seededPanelId();
     const label = `E2E Combo ${Date.now()}`;
 
@@ -77,9 +77,11 @@ test.describe('breaker combo picker', () => {
     const mini = page.getByTestId('breaker-combo-mini');
     await expect(mini).toBeVisible();
 
-    // Slot is pre-filled with the next free slot; override to a high number
-    // unlikely to collide with the seed, then fill the label.
-    await page.getByTestId('breaker-combo-mini-slot').fill('41');
+    // The seed panel has 24 slots with 1–7 occupied (slot 3 is double-pole, so
+    // 3+4 are taken). Pick a free slot in the high range, distinct per parallel
+    // worker so concurrent project runs don't collide on the same slot.
+    const slot = String(24 - testInfo.parallelIndex);
+    await page.getByTestId('breaker-combo-mini-slot').fill(slot);
     await page.getByTestId('breaker-combo-mini-label').fill(label);
     await page.getByTestId('breaker-combo-mini-create').click();
 
