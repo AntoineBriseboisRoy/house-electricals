@@ -33,6 +33,7 @@ import { useOptimisticPatch } from '../hooks/useOptimisticPatch.js';
 import { useToastSink } from '../hooks/useToastSink.js';
 import { computeCascadeOff } from '../lib/subpanelRecursion.js';
 import {
+  Badge,
   Button,
   EmptyState,
   NoBreakers,
@@ -669,12 +670,12 @@ export const TestPanelScreen = (): JSX.Element => {
                       </span>
                     </span>
                     <span className="test-component__state">
-                      {isPending && <span className="badge badge--count">Saving…</span>}
+                      {isPending && <Badge tone="count">Saving…</Badge>}
                       {!isPending && isUnassigned && (
-                        <span className="badge badge--warn">Unassigned</span>
+                        <Badge tone="warn">Unassigned</Badge>
                       )}
                       {!isPending && !isUnassigned && isOff && (
-                        <span className="badge badge--warn">Currently off</span>
+                        <Badge tone="warn">Currently off</Badge>
                       )}
                       {!isPending && !isUnassigned && cascadeVia !== null && (
                         <span

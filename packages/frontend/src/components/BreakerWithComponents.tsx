@@ -4,7 +4,7 @@ import type { BreakerLoad } from '../lib/load.js';
 import { BreakerRow } from './BreakerRow.js';
 import { ComponentTypeIcon, componentTypeLabel } from './ComponentTypeIcon.js';
 import { listComponents } from '../api.js';
-import { Button, Spinner, toast } from '../ui/index.js';
+import { Badge, Button, Spinner, toast } from '../ui/index.js';
 
 type Props = {
   breaker: Breaker;
@@ -98,9 +98,9 @@ export const BreakerWithComponents = ({
       {!isEditing && (
         <li className="breaker-row breaker-row--expandable">
           {componentCount > 0 ? (
-            <span className="badge badge--count breaker-row__count">
+            <Badge tone="count" className="breaker-row__count">
               {componentCount} component{componentCount === 1 ? '' : 's'}
-            </span>
+            </Badge>
           ) : (
             <span className="muted breaker-row__count">No components</span>
           )}

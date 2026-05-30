@@ -45,6 +45,7 @@ import { ComponentForm } from '../components/ComponentForm.js';
 import { PhotosModal } from '../components/PhotosModal.js';
 import { ProtectionBadge } from '../components/ProtectionBadge.js';
 import {
+  Badge,
   Button,
   Card,
   CardTitle,
@@ -1019,7 +1020,7 @@ export const ComponentsScreen = (): JSX.Element => {
                           <ProtectionBadge kind={c.protection} />
                         )}
                         {c.breakerId === null && (
-                          <span className="badge badge--warn">Unassigned</span>
+                          <Badge tone="warn">Unassigned</Badge>
                         )}
                       </div>
                       <div className="component-row__meta">
