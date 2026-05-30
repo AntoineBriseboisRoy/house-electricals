@@ -54,6 +54,10 @@ export type PanelVisualizationProps = {
    *  breaker has known load (watts > 0), a compact "Z%" chip renders in the
    *  slot, colored amber > 80% / red > 100%. */
   loadByBreakerId?: ReadonlyMap<string, BreakerLoad>;
+  /** 2026-05 — breaker ids that are OFF (directly or via an upstream feeder).
+   *  Those slots render de-energized (desaturated + red edge) so an off
+   *  circuit reads at a glance on the panel diagram. */
+  offBreakerIds?: ReadonlySet<string>;
 };
 
 type SlotCell =
@@ -254,6 +258,7 @@ export const PanelVisualization = ({
   subpanelsByFeederBreakerId,
   highlightedBreakerId,
   loadByBreakerId,
+  offBreakerIds,
 }: PanelVisualizationProps): JSX.Element => {
   const cells = useMemo(() => buildSlots(panel, breakers), [panel, breakers]);
   const narrow = useNarrowViewport();
@@ -348,11 +353,13 @@ export const PanelVisualization = ({
                     data-testid="slot-cell"
                     data-breaker-id={b.id}
                     data-tandem-half={half}
+                    data-off={offBreakerIds?.has(b.id) ? 'true' : undefined}
                     className={
                       'panel-viz__slot panel-viz__slot--breaker panel-viz__slot--tandem-half' +
                       (highlightedBreakerId === b.id
                         ? ' panel-viz__slot--active'
-                        : '')
+                        : '') +
+                      (offBreakerIds?.has(b.id) ? ' panel-viz__slot--off' : '')
                     }
                     onClick={() => onSlotClick?.(cell.n, b)}
                     aria-label={`Slot ${cell.n}${half}: ${b.label}, ${b.amperage} amp tandem (half ${half})`}
@@ -390,7 +397,8 @@ export const PanelVisualization = ({
           'panel-viz__slot panel-viz__slot--breaker' +
           (cell.span === 2 ? ' panel-viz__slot--double' : '') +
           (isTandem ? ' panel-viz__slot--tandem' : '') +
-          (highlightedBreakerId === b.id ? ' panel-viz__slot--active' : '');
+          (highlightedBreakerId === b.id ? ' panel-viz__slot--active' : '') +
+          (offBreakerIds?.has(b.id) ? ' panel-viz__slot--off' : '');
         const sub = subpanelsByFeederBreakerId?.get(b.id) ?? null;
         return (
           <button
@@ -399,6 +407,7 @@ export const PanelVisualization = ({
             id={`slot-cell-${b.id}`}
             data-testid="slot-cell"
             data-breaker-id={b.id}
+            data-off={offBreakerIds?.has(b.id) ? 'true' : undefined}
             className={cls}
             style={spanStyle}
             onClick={() => onSlotClick?.(cell.n, b)}

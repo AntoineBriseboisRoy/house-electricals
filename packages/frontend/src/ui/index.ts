@@ -52,7 +52,6 @@ export {
   type PickerModalProps,
   type PickerOption,
 } from './PickerModal.js';
-export { ImpactModal, type ImpactModalProps } from './ImpactModal.js';
 export {
   ServiceLogModal,
   type ServiceLogModalProps,

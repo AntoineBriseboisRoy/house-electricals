@@ -2,9 +2,8 @@ import { useState } from 'react';
 import type { Breaker, BreakerInput, BreakerTest, Component, Panel } from '@he/shared';
 import type { BreakerLoad } from '../lib/load.js';
 import { BreakerRow } from './BreakerRow.js';
-import { ComponentTypeIcon, componentTypeLabel } from './ComponentTypeIcon.js';
 import { listComponents } from '../api.js';
-import { Badge, Button, Spinner, toast } from '../ui/index.js';
+import { toast } from '../ui/index.js';
 
 type Props = {
   breaker: Breaker;
@@ -21,20 +20,27 @@ type Props = {
   allPanels?: Panel[];
   currentSubpanelId?: string | null;
   onChangeFeedsSubpanel?: (subpanelId: string | null) => void | Promise<void>;
-  /** G35 Part 1 (cycle-58) — open the Impact modal for this breaker. */
-  onShowImpact?: () => void;
+  /** 2026-05 — toggle the breaker's persistent on/off state. Pass-through. */
+  onToggleState?: (nextIsOn: boolean) => void | Promise<void>;
+  stateToggling?: boolean;
   /** 2026-05 — per-circuit load summary for this breaker. Pass-through. */
   load?: BreakerLoad | null;
   /** G36 cycle-61 — most-recent BreakerTest for this breaker. Pass-through. */
   lastTest?: BreakerTest | null;
-  /** G40 Part 1 cycle-66 — service-log entry count + open-modal callback.
-   *  Pass-through to BreakerRow. */
+  /** G40 Part 1 cycle-66 — service-log entry count + open-modal callback. */
   serviceLogCount?: number;
   onShowServiceLog?: () => void;
   /** 2026-05 — open the PhotosModal for this breaker. Pass-through. */
   onShowPhotos?: () => void;
 };
 
+/**
+ * Owns the lazy-loaded list of components wired to a breaker and threads it
+ * into BreakerRow's in-card "components" footer (design-1 rework, 2026-05).
+ * The components used to render as a SEPARATE row below the breaker, which
+ * read as disconnected — especially when the breaker was off. They now live
+ * inside the same card.
+ */
 export const BreakerWithComponents = ({
   breaker,
   isEditing,
@@ -48,7 +54,8 @@ export const BreakerWithComponents = ({
   allPanels,
   currentSubpanelId,
   onChangeFeedsSubpanel,
-  onShowImpact,
+  onToggleState,
+  stateToggling,
   load,
   lastTest,
   serviceLogCount,
@@ -59,83 +66,50 @@ export const BreakerWithComponents = ({
   const [components, setComponents] = useState<Component[] | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const toggleExpand = async (): Promise<void> => {
+  const toggleExpand = (): void => {
     const next = !expanded;
     setExpanded(next);
     if (next && components === null) {
       setLoading(true);
-      try {
-        setComponents(await listComponents({ breakerId: breaker.id }));
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Failed to load components.');
-      } finally {
-        setLoading(false);
-      }
+      void (async () => {
+        try {
+          setComponents(await listComponents({ breakerId: breaker.id }));
+        } catch (e) {
+          toast.error(
+            e instanceof Error ? e.message : 'Failed to load components.'
+          );
+        } finally {
+          setLoading(false);
+        }
+      })();
     }
   };
 
   return (
-    <>
-      <BreakerRow
-        breaker={breaker}
-        isEditing={isEditing}
-        onStartEdit={onStartEdit}
-        onCancelEdit={onCancelEdit}
-        onSave={onSave}
-        onDelete={onDelete}
-        slotCount={slotCount}
-        siblings={siblings}
-        allPanels={allPanels}
-        currentSubpanelId={currentSubpanelId}
-        onChangeFeedsSubpanel={onChangeFeedsSubpanel}
-        onShowImpact={onShowImpact}
-        load={load}
-        lastTest={lastTest}
-        serviceLogCount={serviceLogCount}
-        onShowServiceLog={onShowServiceLog}
-        onShowPhotos={onShowPhotos}
-      />
-      {!isEditing && (
-        <li className="breaker-row breaker-row--expandable">
-          {componentCount > 0 ? (
-            <Badge tone="count" className="breaker-row__count">
-              {componentCount} component{componentCount === 1 ? '' : 's'}
-            </Badge>
-          ) : (
-            <span className="muted breaker-row__count">No components</span>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              void toggleExpand();
-            }}
-            aria-expanded={expanded}
-            aria-label={`Toggle components on breaker ${breaker.slot}`}
-            disabled={componentCount === 0}
-          >
-            {expanded ? 'Hide' : 'Show'}
-          </Button>
-          {expanded && (
-            <div className="breaker-row__expanded">
-              {loading && <Spinner label="Loading breakers" />}
-              {!loading && components !== null && components.length === 0 && (
-                <p className="muted">No components on this breaker.</p>
-              )}
-              {!loading &&
-                components !== null &&
-                components.map((c) => (
-                  <div key={c.id} className="breaker-row__expanded-item">
-                    <ComponentTypeIcon type={c.type} size={20} />
-                    <span>{c.name}</span>
-                    {c.room && <span className="muted">· {c.room}</span>}
-                    <span className="muted">· {componentTypeLabel(c.type)}</span>
-                  </div>
-                ))}
-            </div>
-          )}
-        </li>
-      )}
-    </>
+    <BreakerRow
+      breaker={breaker}
+      isEditing={isEditing}
+      onStartEdit={onStartEdit}
+      onCancelEdit={onCancelEdit}
+      onSave={onSave}
+      onDelete={onDelete}
+      slotCount={slotCount}
+      siblings={siblings}
+      allPanels={allPanels}
+      currentSubpanelId={currentSubpanelId}
+      onChangeFeedsSubpanel={onChangeFeedsSubpanel}
+      onToggleState={onToggleState}
+      stateToggling={stateToggling}
+      load={load}
+      lastTest={lastTest}
+      serviceLogCount={serviceLogCount}
+      onShowServiceLog={onShowServiceLog}
+      onShowPhotos={onShowPhotos}
+      componentCount={componentCount}
+      componentsExpanded={expanded}
+      componentsLoading={loading}
+      components={components}
+      onToggleComponents={toggleExpand}
+    />
   );
 };

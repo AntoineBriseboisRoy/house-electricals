@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'wouter';
-import { ClipboardList, Search } from 'lucide-react';
-import type { BreakerTest } from '@he/shared';
+import { ClipboardList, Power, PowerOff, Search } from 'lucide-react';
+import type { BreakerStateEvent, BreakerTest } from '@he/shared';
 import {
   listBreakerTests,
+  listBreakerStateEvents,
   listAllBreakersGrouped,
   type PanelWithBreakers,
 } from '../api.js';
@@ -173,6 +174,8 @@ export const AuditScreen = (): JSX.Element => {
   const cameFromTestTab = location.startsWith('/test/');
   const [tests, setTests] = useState<BreakerTest[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
+  /** 2026-05 — breaker on/off state-change events (the dedicated audit). */
+  const [stateEvents, setStateEvents] = useState<BreakerStateEvent[]>([]);
   const [breakerGroups, setBreakerGroups] = useState<PanelWithBreakers[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState('');
@@ -206,12 +209,20 @@ export const AuditScreen = (): JSX.Element => {
       if (until !== null) filter.until = until;
       if (outcome !== null && outcome.length > 0) filter.outcome = outcome;
       if (breakerId !== null) filter.breakerId = breakerId;
-      const [result, groups] = await Promise.all([
+      // The on/off audit shares the breaker + date filters (no outcome — state
+      // events have none). Panel attribution rides along via the breaker label.
+      const stateFilter: Parameters<typeof listBreakerStateEvents>[0] = {};
+      if (since !== null) stateFilter.since = since;
+      if (until !== null) stateFilter.until = until;
+      if (breakerId !== null) stateFilter.breakerId = breakerId;
+      const [result, stateResult, groups] = await Promise.all([
         listBreakerTests(filter),
+        listBreakerStateEvents(stateFilter),
         listAllBreakersGrouped(),
       ]);
       setTests(result.data);
       setTotalCount(result.totalCount);
+      setStateEvents(stateResult.data);
       setBreakerGroups(groups);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load audit log.');
@@ -276,6 +287,16 @@ export const AuditScreen = (): JSX.Element => {
     [filteredTests, sortBy, sortOrder]
   );
 
+  // On/off events come pre-sorted (occurred_at DESC) from the server. Apply the
+  // same free-text search over their note for consistency with the test list.
+  const visibleStateEvents = useMemo(() => {
+    if (search.length === 0) return stateEvents;
+    const lower = search.toLowerCase();
+    return stateEvents.filter(
+      (ev) => ev.note !== null && ev.note.toLowerCase().includes(lower)
+    );
+  }, [stateEvents, search]);
+
   const activeFilterCount =
     (since !== null ? 1 : 0) +
     (until !== null ? 1 : 0) +
@@ -292,7 +313,7 @@ export const AuditScreen = (): JSX.Element => {
     <>
       <ScreenHeader
         title="Audit log"
-        subtitle="Every recorded breaker test"
+        subtitle="Breaker tests + on/off changes"
         back={cameFromTestTab ? '/test' : undefined}
       />
 
@@ -558,6 +579,100 @@ export const AuditScreen = (): JSX.Element => {
                       className="audit-row__link"
                       aria-label={`Open ${formatBreakerLabel(b)} on its panel`}
                       data-testid="audit-row-link"
+                    >
+                      {row}
+                    </Link>
+                  ) : (
+                    <div className="audit-row__link audit-row__link--disabled">
+                      {row}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      {/* 2026-05 — breaker on/off state-change log (the dedicated audit table).
+          Shares the breaker + date filters; the breaker label carries panel
+          attribution. Deep-links to the panel slot like the test rows. */}
+      <section aria-labelledby="audit-state-heading" className="section">
+        <h2 id="audit-state-heading" className="section-title">
+          On/off changes
+        </h2>
+        {loading ? (
+          <Skeleton variant="row" count={3} aria-label="Loading on/off log" />
+        ) : visibleStateEvents.length === 0 ? (
+          <EmptyState
+            icon={<Power size={32} strokeWidth={1.5} />}
+            title={
+              hasAnyFilter
+                ? 'No on/off changes match your filters'
+                : 'No on/off changes yet'
+            }
+            description={
+              hasAnyFilter
+                ? 'Try clearing the filters to see the full log.'
+                : 'Turning a breaker on or off records an entry here.'
+            }
+          />
+        ) : (
+          <ul className="audit-list" data-testid="audit-state-list">
+            {visibleStateEvents.map((ev) => {
+              const b = breakerLookup.get(ev.breakerId);
+              const href =
+                b !== undefined
+                  ? `/panels/${b.panelId}#breaker-${b.id}`
+                  : null;
+              const row = (
+                <>
+                  <div className="audit-row__primary">
+                    <span className="audit-row__date">
+                      {absoluteDate(ev.occurredAt)}
+                    </span>
+                    <span className="audit-row__relative muted">
+                      ({formatRelative(ev.occurredAt)})
+                    </span>
+                  </div>
+                  <div className="audit-row__breaker">{formatBreakerLabel(b)}</div>
+                  <div className="audit-row__meta">
+                    <span
+                      className={
+                        'badge audit-row__outcome audit-row__outcome--' +
+                        (ev.isOn ? 'success' : 'warn')
+                      }
+                      data-testid="audit-state-row-action"
+                      data-is-on={ev.isOn ? 'true' : 'false'}
+                    >
+                      {ev.isOn ? (
+                        <Power size={11} strokeWidth={2.5} aria-hidden="true" />
+                      ) : (
+                        <PowerOff size={11} strokeWidth={2.5} aria-hidden="true" />
+                      )}
+                      {ev.isOn ? 'Turned on' : 'Turned off'}
+                    </span>
+                    {ev.note !== null && ev.note.length > 0 && (
+                      <span className="audit-row__notes" title={ev.note}>
+                        {ev.note}
+                      </span>
+                    )}
+                  </div>
+                </>
+              );
+              return (
+                <li
+                  key={ev.id}
+                  className="audit-row"
+                  data-testid="audit-state-row"
+                  data-breaker-id={ev.breakerId}
+                  data-panel-id={ev.panelId}
+                >
+                  {href !== null ? (
+                    <Link
+                      href={href}
+                      className="audit-row__link"
+                      aria-label={`Open ${formatBreakerLabel(b)} on its panel`}
                     >
                       {row}
                     </Link>

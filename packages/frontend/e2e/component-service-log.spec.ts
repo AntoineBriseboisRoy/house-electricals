@@ -77,6 +77,14 @@ test.describe('G40 Part 2 service-log on ComponentRow @cycle-67', () => {
 
     await page.goto('/components');
 
+    // 2026-05 — the service-log badge now lives in the row's expandable
+    // detail. Expand the target row first so the badge is visible.
+    await page
+      .locator(
+        `[data-testid="component-row-expand"][data-target-component-id="${targetComponentId}"]`
+      )
+      .click();
+
     const badge = page.locator(
       `[data-testid="component-row-service-log"][data-target-component-id="${targetComponentId}"]`
     );

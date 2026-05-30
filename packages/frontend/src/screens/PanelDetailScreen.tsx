@@ -19,7 +19,6 @@ import {
   type Panel,
   type ResolvedComponent,
   type ServiceEntry,
-  type SwitchControl,
 } from '@he/shared';
 import { ComponentTypeIcon } from '../components/ComponentTypeIcon.js';
 import { ProtectionBadge } from '../components/ProtectionBadge.js';
@@ -37,7 +36,7 @@ import {
   listFloors,
   listPanels,
   listServiceEntries,
-  listSwitchControlsByBuilding,
+  setBreakerState,
   updateBreaker,
   updatePanel,
 } from '../api.js';
@@ -51,7 +50,6 @@ import {
   CardHeader,
   CardTitle,
   EmptyState,
-  ImpactModal,
   MoveToBuildingButton,
   NoBreakers,
   NoComponents,
@@ -63,9 +61,12 @@ import {
 } from '../ui/index.js';
 import { useModal } from '../hooks/useModal.js';
 import { useUndoableDelete } from '../hooks/useUndoableDelete.js';
-import { useBuilding } from '../contexts/BuildingContext.js';
-import { computeImpact, computeSwitchControlLoss } from '../lib/impact.js';
 import { computeBreakerLoad, type BreakerLoad } from '../lib/load.js';
+import {
+  computeOffState,
+  isBreakerOff,
+  type OffState,
+} from '../lib/breakerOff.js';
 
 type ViewMode = 'viz' | 'list';
 const VIEW_KEY = 'he.panel-view';
@@ -88,27 +89,20 @@ export const PanelDetailScreen = (): JSX.Element => {
   /** G39 cycle-56 — every panel in the house. Used to:
    *   - Build the `subpanelsByFeederBreakerId` map for PanelVisualization.
    *   - Populate the "Feeds subpanel" picker in BreakerForm.
-   *   - Render the "Fed by" card on this screen.
-   *   - G35 Part 1 (cycle-58) — feed computeImpact's cascade walker. */
+   *   - Render the "Fed by" card on this screen. */
   const [allPanels, setAllPanels] = useState<Panel[]>([]);
-  /** G35 Part 1 (cycle-58) — every component in the house (unfiltered).
-   *  Needed to find cascade-off components on subpanels, which live
-   *  outside this panel's `panelComponents` filter. */
-  const [allComponents, setAllComponents] = useState<ResolvedComponent[]>([]);
-  /** G35 Part 1 (cycle-58) — every breaker on every panel, keyed by panel
-   *  id. Threaded into computeImpact for the cascade walker. */
+  /** 2026-05 — every breaker on every panel, keyed by panel id. Feeds the
+   *  off-state cascade walker so a feeder marked off de-energizes the whole
+   *  subpanel chain on the viz + components list. */
   const [breakersByPanel, setBreakersByPanel] = useState<
     ReadonlyMap<string, readonly Breaker[]>
   >(new Map());
-  /** G35 Part 1 (cycle-58) — floors for the Impact modal's name lookup. */
+  /** Floors for the "open on map" cross-link name lookup. */
   const [floors, setFloors] = useState<Floor[]>([]);
-  /** 2026-05 — every switch_control triple in the building. Threaded into
-   *  computeSwitchControlLoss for the Impact modal's "switches that lose
-   *  control" section. */
-  const [switchControls, setSwitchControls] = useState<SwitchControl[]>([]);
-  /** G35 Part 1 (cycle-58) — when non-null, render the Impact modal for
-   *  the matching breaker. */
-  const [impactBreakerId, setImpactBreakerId] = useState<string | null>(null);
+  /** 2026-05 — breaker ids with an in-flight on/off toggle (busy indicator). */
+  const [togglingStateIds, setTogglingStateIds] = useState<ReadonlySet<string>>(
+    new Set()
+  );
   /** G39 cycle-56 — parent breaker info resolved LAZILY only when this
    *  panel is a subpanel. Fetched after the main panel load to avoid
    *  blocking initial render (and the Add-a-breaker toggle). Null when
@@ -145,7 +139,6 @@ export const PanelDetailScreen = (): JSX.Element => {
   const [view, setView] = useState<ViewMode>(readView);
   const { confirm, prompt, pick, modalNode } = useModal();
   const { deleteWithUndo } = useUndoableDelete();
-  const { currentBuilding } = useBuilding();
 
   const switchView = (next: ViewMode): void => {
     setView(next);
@@ -267,25 +260,15 @@ export const PanelDetailScreen = (): JSX.Element => {
       // every panel; we filter client-side to this panel's breakers.
       // Postgres at this scale (<10k components) handles a full table-scan
       // in <10ms — far cheaper than the N round-trips.
-      const [p, b, allComponents, panels, scs] = await Promise.all([
+      const [p, b, allComponents, panels] = await Promise.all([
         getPanel(panelId),
         listBreakers(panelId),
         listComponents(),
         listPanels(),
-        // 2026-05 — switch_controls for the active building, for the Impact
-        // modal's "switches that lose control" section. Building-scoped (not
-        // per-floor) because a breaker's switches can sit on any floor.
-        listSwitchControlsByBuilding(),
       ]);
       setPanel(p);
       setBreakers(b);
       setAllPanels(panels);
-      setSwitchControls(scs);
-      // G35 Part 1 (cycle-58) — cache the full component set so the
-      // Impact modal can resolve direct + cascade hits without another
-      // round-trip on click. listComponents was already on this critical
-      // path; we just keep the unfiltered result around.
-      setAllComponents(allComponents);
 
       const breakerIdSet = new Set(b.map((br) => br.id));
       const onThisPanel = allComponents.filter(
@@ -309,12 +292,10 @@ export const PanelDetailScreen = (): JSX.Element => {
     void refresh();
   }, [refresh]);
 
-  /** G35 Part 1 (cycle-58) — lazy-load the impact data (full house
-   *  breaker tree + floors) AFTER the critical-path refresh resolves.
-   *  Kept off the critical path so the initial render isn't slowed by
-   *  the N+1 round-trips inside listAllBreakersGrouped. If the user
-   *  clicks Impact before this resolves, the modal still renders —
-   *  cascade hits will populate once these arrive. */
+  /** Lazy-load the full house breaker tree + floors AFTER the critical-path
+   *  refresh resolves. The breaker tree powers the off-state cascade walker;
+   *  floors power the "open on map" cross-link name lookup. Kept off the
+   *  initial render path. */
   useEffect(() => {
     if (!panelId) return;
     let cancelled = false;
@@ -330,7 +311,8 @@ export const PanelDetailScreen = (): JSX.Element => {
         );
         setFloors(fl);
       } catch {
-        // best-effort — Impact modal degrades to direct-only if this fails
+        // best-effort — off-cascade degrades to this panel only; the "open on
+        // map" link falls back to /map.
       }
     })();
     return () => {
@@ -434,21 +416,21 @@ export const PanelDetailScreen = (): JSX.Element => {
     };
   }, [panel, allPanels]);
 
-  // G23 — Hash-consumer: when the URL has #breaker-<id>, pulse-highlight the
-  // controlling breaker. Prefers the panel-viz slot cell (slot-cell-<id>) when
-  // in viz mode; falls back to the list-view row (breaker-<id>).
+  // G23 — Hash-consumer: when the URL has #breaker-<id>, scroll to + pulse-
+  // highlight the controlling breaker. In viz mode the panel-viz slot cell
+  // (slot-cell-<id>) gets pulsed; in list mode the row (breaker-<id>) does.
   //
-  // If the user is in 'list' mode when a deep-link arrives, we temporarily flip
-  // to 'viz' IN MEMORY ONLY (setView, NOT switchView) so the slot cell exists
-  // in the DOM to be pulsed — the cycle-18-pinned localStorage preference is
-  // NOT mutated, so the user's saved choice survives the next visit.
-  // Exception: a breaker with slotPosition=null is not in the grid; for that
-  // case we keep list view + pulse the row instead.
+  // 2026-05 — we highlight in WHATEVER view the user is currently in and do
+  // NOT force-switch to viz. The old behavior flipped list → viz on a deep
+  // link / component click, which (a) surprised the user and (b) TRAPPED
+  // them: this effect listed `view` as a dependency, so re-selecting "List"
+  // re-ran it while the hash was still present and bounced them straight back
+  // to viz. Dropping the force + the `view` dep fixes both — clicking a
+  // component now just pulses the breaker where it already is.
   //
-  // Triggers: (a) breakers finish loading, (b) view changes, (c) hashchange —
-  // (c) is load-bearing: arriving via a hash-only navigation from the same
-  // panel path otherwise wouldn't fire this useEffect (no React state change).
-  // Tracked via a `hashTick` counter bumped on each `hashchange`.
+  // Triggers: (a) breakers finish loading, (b) hashchange — (b) is load-
+  // bearing: a hash-only navigation from the same panel path otherwise
+  // wouldn't fire this effect (no React state change). Tracked via `hashTick`.
   const [hashTick, setHashTick] = useState(0);
   useEffect(() => {
     const onHashChange = (): void => setHashTick((n) => n + 1);
@@ -464,18 +446,11 @@ export const PanelDetailScreen = (): JSX.Element => {
     const breaker = breakers.find((b) => b.id === breakerId);
     if (breaker === undefined) return;
 
-    const inGrid = breaker.slotPosition !== null;
-    // If viz can render this breaker but we're currently in list, flip in-memory.
-    if (inGrid && view !== 'viz') {
-      setView('viz');
-    } else if (!inGrid && view !== 'list') {
-      // Breaker has no slot position → can't be highlighted in viz; fall back to list.
-      setView('list');
-    }
-
-    // Defer to next frame so the new view's DOM is mounted before we query for it.
+    // Defer to next frame so the current view's DOM is settled before we query.
+    // The slot cell only exists in viz mode; in list mode it's null and we
+    // fall back to the row — so this never forces a view change.
     const raf = window.requestAnimationFrame(() => {
-      const slotEl = inGrid ? document.getElementById(`slot-cell-${breakerId}`) : null;
+      const slotEl = document.getElementById(`slot-cell-${breakerId}`);
       const rowEl = document.getElementById(`breaker-${breakerId}`);
       const target = slotEl ?? rowEl;
       if (target === null) return;
@@ -484,7 +459,7 @@ export const PanelDetailScreen = (): JSX.Element => {
       window.setTimeout(() => target.removeAttribute('data-highlight'), 1500);
     });
     return () => window.cancelAnimationFrame(raf);
-  }, [loading, breakers, view, hashTick]);
+  }, [loading, breakers, hashTick]);
 
   const handleCreate = async (input: BreakerInput): Promise<void> => {
     try {
@@ -590,6 +565,22 @@ export const PanelDetailScreen = (): JSX.Element => {
     }
     return map;
   }, [breakers, panelComponents]);
+
+  /** 2026-05 — off-state for the whole house, used to de-energize this panel's
+   *  viz slots + components-on-panel rows when a breaker (or its upstream
+   *  feeder) is off. Merge this panel's LIVE breakers into the lazily-loaded
+   *  house tree so an optimistic toggle reflects immediately (the house tree
+   *  lags behind the optimistic flip on `breakers`). */
+  const offState: OffState = useMemo(() => {
+    const merged = new Map(breakersByPanel);
+    if (panelId) merged.set(panelId, breakers);
+    return computeOffState(allPanels, merged);
+  }, [breakersByPanel, allPanels, breakers, panelId]);
+  const offBreakerIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const b of breakers) if (isBreakerOff(offState, b.id)) s.add(b.id);
+    return s;
+  }, [offState, breakers]);
 
   /** G39 cycle-56 — Map from this panel's feeder breaker id → the subpanel
    *  it feeds. Used by PanelVisualization to render a "→ Subpanel" chip on
@@ -769,49 +760,36 @@ export const PanelDetailScreen = (): JSX.Element => {
     window.location.hash = next;
   };
 
-  /** G35 Part 1 (cycle-58) — compute Impact items lazily when the modal
-   *  is open. Pure read-only — no mutation of the off-state. */
-  const impactItems = useMemo(() => {
-    if (impactBreakerId === null) return [];
-    return computeImpact(
-      impactBreakerId,
-      allComponents,
-      allPanels,
-      breakersByPanel
-    );
-  }, [impactBreakerId, allComponents, allPanels, breakersByPanel]);
-
-  /** 2026-05 — switches that lose power (direct or cascade-off) and so can
-   *  no longer toggle the lights/outlets they control. Those controlled
-   *  components KEEP power from their own circuit, so they're NOT in
-   *  impactItems — this is the complementary "loses control" view. */
-  const switchLosses = useMemo(() => {
-    if (impactBreakerId === null) return [];
-    return computeSwitchControlLoss(
-      impactBreakerId,
-      allComponents,
-      allPanels,
-      breakersByPanel,
-      switchControls
-    );
-  }, [impactBreakerId, allComponents, allPanels, breakersByPanel, switchControls]);
-
-  /** G35 Part 1 (cycle-58) — floor lookup by id for the Impact modal. */
-  const floorById = useMemo(() => {
-    const map = new Map<string, Floor>();
-    for (const f of floors) map.set(f.id, f);
-    return map;
-  }, [floors]);
-
-  /** G35 Part 1 (cycle-58) — display label for the modal title. Reuses
-   *  the cycle-42 G34 tandem-half convention ("Slot 6a" / "Slot 6"). */
-  const impactBreakerLabel = useMemo(() => {
-    if (impactBreakerId === null) return '';
-    const b = breakers.find((br) => br.id === impactBreakerId);
-    if (!b) return 'breaker';
-    const half = b.poles === 'tandem' && b.tandemHalf !== null ? b.tandemHalf : '';
-    return `Slot ${b.slot}${half}`;
-  }, [impactBreakerId, breakers]);
+  /** 2026-05 — toggle a breaker's persistent on/off state. Optimistic: the
+   *  row + viz + off propagation update immediately; on failure we roll the
+   *  state back and toast. The server also writes a breaker_state_events
+   *  audit row scoped to the breaker + panel. */
+  const handleToggleState = useCallback(
+    async (breakerId: string, nextIsOn: boolean): Promise<void> => {
+      setTogglingStateIds((cur) => new Set(cur).add(breakerId));
+      setBreakers((cur) =>
+        cur.map((b) => (b.id === breakerId ? { ...b, isOn: nextIsOn } : b))
+      );
+      try {
+        await setBreakerState(breakerId, nextIsOn);
+      } catch (e) {
+        // Roll back the optimistic flip.
+        setBreakers((cur) =>
+          cur.map((b) => (b.id === breakerId ? { ...b, isOn: !nextIsOn } : b))
+        );
+        toast.error(
+          e instanceof Error ? e.message : 'Failed to update breaker state.'
+        );
+      } finally {
+        setTogglingStateIds((cur) => {
+          const n = new Set(cur);
+          n.delete(breakerId);
+          return n;
+        });
+      }
+    },
+    []
+  );
 
   /** G40 Part 1 cycle-66 — display label + entries for the ServiceLogModal.
    *  Uses the cycle-42 tandem convention ("Slot 6a: Kitchen lights") so
@@ -875,9 +853,6 @@ export const PanelDetailScreen = (): JSX.Element => {
         title={panel?.name ?? (loading ? 'Loading…' : 'Panel')}
         back="/"
         breadcrumbs={[
-          ...(currentBuilding !== null
-            ? [{ label: currentBuilding.name }]
-            : []),
           { label: 'Panels', href: '/' },
           { label: panel?.name ?? (loading ? 'Loading…' : 'Panel') },
         ]}
@@ -977,8 +952,17 @@ export const PanelDetailScreen = (): JSX.Element => {
           <ul className="components-on-panel" data-testid="components-on-panel">
             {breakerGroups
               .filter((g) => g.components.length > 0)
-              .map(({ breaker: b, components }) => (
-                <li key={b.id} className="components-on-panel__group">
+              .map(({ breaker: b, components }) => {
+                const groupOff = offBreakerIds.has(b.id);
+                return (
+                <li
+                  key={b.id}
+                  className={
+                    'components-on-panel__group' +
+                    (groupOff ? ' components-on-panel__group--off' : '')
+                  }
+                  data-off={groupOff ? 'true' : undefined}
+                >
                   <button
                     type="button"
                     className="components-on-panel__group-header"
@@ -994,6 +978,14 @@ export const PanelDetailScreen = (): JSX.Element => {
                     <span className="components-on-panel__amp">
                       {b.amperage}A
                     </span>
+                    {groupOff && (
+                      <span
+                        className="components-on-panel__off-badge"
+                        data-testid="components-on-panel-off"
+                      >
+                        Off
+                      </span>
+                    )}
                   </button>
                   <ul className="components-on-panel__items">
                     {components.map((c) => (
@@ -1005,6 +997,7 @@ export const PanelDetailScreen = (): JSX.Element => {
                           data-testid="components-on-panel-item"
                           data-component-id={c.id}
                           data-breaker-id={b.id}
+                          data-off={groupOff ? 'true' : undefined}
                         >
                           <span className="components-on-panel__icon" aria-hidden="true">
                             <ComponentTypeIcon type={c.type} />
@@ -1023,7 +1016,8 @@ export const PanelDetailScreen = (): JSX.Element => {
                     ))}
                   </ul>
                 </li>
-              ))}
+                );
+              })}
           </ul>
         )}
       </section>
@@ -1068,6 +1062,7 @@ export const PanelDetailScreen = (): JSX.Element => {
             onSlotClick={handleSlotClick}
             subpanelsByFeederBreakerId={subpanelsByFeederBreakerId}
             loadByBreakerId={loadByBreakerId}
+            offBreakerIds={offBreakerIds}
           />
         ) : (
           <ul className="breaker-list">
@@ -1088,7 +1083,8 @@ export const PanelDetailScreen = (): JSX.Element => {
                 onChangeFeedsSubpanel={(subId) =>
                   handleChangeFeedsSubpanel(b.id, subId)
                 }
-                onShowImpact={() => setImpactBreakerId(b.id)}
+                onToggleState={(nextIsOn) => handleToggleState(b.id, nextIsOn)}
+                stateToggling={togglingStateIds.has(b.id)}
                 load={loadByBreakerId.get(b.id) ?? null}
                 lastTest={
                   lastTestByBreakerId.has(b.id)
@@ -1225,16 +1221,6 @@ export const PanelDetailScreen = (): JSX.Element => {
         </section>
       )}
       {modalNode}
-      {impactBreakerId !== null && (
-        <ImpactModal
-          open
-          breakerLabel={impactBreakerLabel}
-          items={impactItems}
-          switchLosses={switchLosses}
-          floorById={floorById}
-          onClose={() => setImpactBreakerId(null)}
-        />
-      )}
       {serviceLogBreakerId !== null && (
         <ServiceLogModal
           open

@@ -16,6 +16,11 @@ import {
   type BreakerTestListFilter,
   type BreakerTestListResult,
   type BreakerTestRepository,
+  type BreakerStateEvent,
+  type BreakerStateEventInput,
+  type BreakerStateEventListFilter,
+  type BreakerStateEventListResult,
+  type BreakerStateEventRepository,
   type Building,
   type BuildingInput,
   type BuildingRepository,
@@ -74,6 +79,8 @@ type BreakerRow = {
   tandem_half: 'a' | 'b' | null;
   /** G37 cycle-68: 'gfci' | 'afci' | 'dual' | null. */
   protection: ProtectionKind | null;
+  /** 2026-05: persistent on/off state, stored 0/1. */
+  is_on: 0 | 1;
   created_at: number;
 };
 
@@ -183,9 +190,15 @@ export const initSchema = async (db: Db): Promise<void> => {
       tandem_half TEXT CHECK (tandem_half IN ('a','b') OR tandem_half IS NULL),
       protection TEXT
         CHECK (protection IN ('gfci','afci','dual') OR protection IS NULL),
+      is_on SMALLINT NOT NULL DEFAULT 1 CHECK (is_on IN (0,1)),
       created_at BIGINT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_breakers_panel_id ON breakers(panel_id);
+    -- 2026-05 — persistent breaker on/off state. Idempotent ADD for DBs
+    -- created before the column existed (CREATE TABLE above covers fresh DBs).
+    -- Default 1 (ON) so every existing breaker starts energized.
+    ALTER TABLE breakers ADD COLUMN IF NOT EXISTS is_on SMALLINT NOT NULL DEFAULT 1
+      CHECK (is_on IN (0,1));
 
     -- G39 cycle-56 — close the circular FK now that breakers exists. The
     -- conrelid='panels'::regclass guard makes this idempotent AND
@@ -355,6 +368,28 @@ export const initSchema = async (db: Db): Promise<void> => {
       ON breaker_tests(breaker_id, tested_at DESC);
     CREATE INDEX IF NOT EXISTS idx_breaker_tests_tested_at
       ON breaker_tests(tested_at DESC);
+
+    -- Breaker on/off state-change audit (2026-05). A DEDICATED event log for
+    -- persistent breaker energization toggles (breakers.is_on), distinct from
+    -- breaker_tests (verification events). Scoped to BOTH breaker and panel so
+    -- the audit filters per-breaker AND per-panel. is_on = the state AFTER the
+    -- action. ON DELETE CASCADE through breaker AND panel (panel_id is
+    -- denormalized — a breaker never changes panels — for panel-scoped reads).
+    CREATE TABLE IF NOT EXISTS breaker_state_events (
+      id TEXT PRIMARY KEY,
+      breaker_id TEXT NOT NULL REFERENCES breakers(id) ON DELETE CASCADE,
+      panel_id TEXT NOT NULL REFERENCES panels(id) ON DELETE CASCADE,
+      is_on SMALLINT NOT NULL CHECK (is_on IN (0,1)),
+      occurred_at BIGINT NOT NULL,
+      note TEXT,
+      created_at BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_breaker_state_events_breaker
+      ON breaker_state_events(breaker_id, occurred_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_breaker_state_events_panel
+      ON breaker_state_events(panel_id, occurred_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_breaker_state_events_occurred_at
+      ON breaker_state_events(occurred_at DESC);
 
     CREATE TABLE IF NOT EXISTS service_entries (
       id TEXT PRIMARY KEY,
@@ -768,7 +803,7 @@ export class PgBreakerRepository implements BreakerRepository {
     // explicit `tandem_half ASC NULLS FIRST` restores SQLite's default
     // NULLS-FIRST ordering (Postgres defaults to NULLS LAST for ASC).
     const rows = await this.db.query<BreakerRow>(
-      `SELECT id, panel_id, slot, slot_position, amperage, poles, label, tandem_half, protection, created_at
+      `SELECT id, panel_id, slot, slot_position, amperage, poles, label, tandem_half, protection, is_on, created_at
        FROM breakers
        WHERE panel_id = $1
        ORDER BY (slot_position IS NULL), slot_position ASC, tandem_half ASC NULLS FIRST, slot ASC`,
@@ -792,11 +827,13 @@ export class PgBreakerRepository implements BreakerRepository {
       label: input.label,
       tandemHalf,
       protection: input.protection ?? null,
+      // 2026-05 — new breakers are energized by default.
+      isOn: true,
       createdAt: Date.now(),
     };
     await this.db.execute(
-      `INSERT INTO breakers (id, panel_id, slot, slot_position, amperage, poles, label, tandem_half, protection, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      `INSERT INTO breakers (id, panel_id, slot, slot_position, amperage, poles, label, tandem_half, protection, is_on, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         breaker.id,
         breaker.panelId,
@@ -807,6 +844,7 @@ export class PgBreakerRepository implements BreakerRepository {
         breaker.label,
         breaker.tandemHalf,
         breaker.protection,
+        breaker.isOn ? 1 : 0,
         breaker.createdAt,
       ]
     );
@@ -815,7 +853,7 @@ export class PgBreakerRepository implements BreakerRepository {
 
   async get(id: string): Promise<Breaker | null> {
     const row = await this.db.queryOne<BreakerRow>(
-      `SELECT id, panel_id, slot, slot_position, amperage, poles, label, tandem_half, protection, created_at
+      `SELECT id, panel_id, slot, slot_position, amperage, poles, label, tandem_half, protection, is_on, created_at
        FROM breakers WHERE id = $1`,
       [id]
     );
@@ -867,6 +905,15 @@ export class PgBreakerRepository implements BreakerRepository {
     );
 
     return merged;
+  }
+
+  async setState(id: string, isOn: boolean): Promise<Breaker | null> {
+    const n = await this.db.execute(
+      'UPDATE breakers SET is_on = $1 WHERE id = $2',
+      [isOn ? 1 : 0, id]
+    );
+    if (n === 0) return null;
+    return this.get(id);
   }
 
   async delete(id: string): Promise<boolean> {
@@ -1193,6 +1240,7 @@ const rowToBreaker = (row: BreakerRow): Breaker => ({
   label: row.label,
   tandemHalf: row.tandem_half,
   protection: row.protection,
+  isOn: row.is_on === 1,
   createdAt: row.created_at,
 });
 
@@ -1742,6 +1790,123 @@ export class PgBreakerTestRepository implements BreakerTestRepository {
         [id]
       );
       out.set(id, row ? rowToBreakerTest(row) : null);
+    }
+    return out;
+  }
+}
+
+// === Breaker state events (2026-05 — on/off audit) ===
+
+type BreakerStateEventRow = {
+  id: string;
+  breaker_id: string;
+  panel_id: string;
+  is_on: 0 | 1;
+  occurred_at: number;
+  note: string | null;
+  created_at: number;
+};
+
+const rowToBreakerStateEvent = (row: BreakerStateEventRow): BreakerStateEvent => ({
+  id: row.id,
+  breakerId: row.breaker_id,
+  panelId: row.panel_id,
+  isOn: row.is_on === 1,
+  occurredAt: row.occurred_at,
+  note: row.note,
+  createdAt: row.created_at,
+});
+
+const BREAKER_STATE_EVENT_COLS =
+  'id, breaker_id, panel_id, is_on, occurred_at, note, created_at';
+
+export class PgBreakerStateEventRepository
+  implements BreakerStateEventRepository
+{
+  constructor(private readonly db: Db) {}
+
+  async list(
+    filter?: BreakerStateEventListFilter
+  ): Promise<BreakerStateEventListResult> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    const ph = (v: unknown): string => {
+      params.push(v);
+      return `$${params.length}`;
+    };
+    if (filter?.breakerId !== undefined) {
+      where.push(`breaker_id = ${ph(filter.breakerId)}`);
+    }
+    if (filter?.panelId !== undefined) {
+      where.push(`panel_id = ${ph(filter.panelId)}`);
+    }
+    if (filter?.since !== undefined) {
+      where.push(`occurred_at >= ${ph(filter.since)}`);
+    }
+    if (filter?.until !== undefined) {
+      where.push(`occurred_at <= ${ph(filter.until)}`);
+    }
+    const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+
+    const countParams = [...params];
+    const totalRow = await this.db.queryOne<{ count: number }>(
+      `SELECT COUNT(*)::int AS count FROM breaker_state_events ${whereClause}`,
+      countParams
+    );
+    const totalCount = totalRow?.count ?? 0;
+
+    let sql = `SELECT ${BREAKER_STATE_EVENT_COLS} FROM breaker_state_events
+      ${whereClause}
+      ORDER BY occurred_at DESC, id DESC`;
+    if (filter?.limit !== undefined) {
+      sql += ` LIMIT ${ph(filter.limit)}`;
+    }
+    const rows = await this.db.query<BreakerStateEventRow>(sql, params);
+    return { data: rows.map(rowToBreakerStateEvent), totalCount };
+  }
+
+  async create(input: BreakerStateEventInput): Promise<BreakerStateEvent> {
+    const now = Date.now();
+    const event: BreakerStateEvent = {
+      id: newId(),
+      breakerId: input.breakerId,
+      panelId: input.panelId,
+      isOn: input.isOn,
+      occurredAt: input.occurredAt ?? now,
+      note: input.note ?? null,
+      createdAt: now,
+    };
+    await this.db.execute(
+      `INSERT INTO breaker_state_events (${BREAKER_STATE_EVENT_COLS})
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        event.id,
+        event.breakerId,
+        event.panelId,
+        event.isOn ? 1 : 0,
+        event.occurredAt,
+        event.note,
+        event.createdAt,
+      ]
+    );
+    return event;
+  }
+
+  async latestByBreaker(
+    breakerIds: readonly string[]
+  ): Promise<Map<string, BreakerStateEvent | null>> {
+    const out = new Map<string, BreakerStateEvent | null>();
+    for (const id of breakerIds) out.set(id, null);
+    if (breakerIds.length === 0) return out;
+    for (const id of breakerIds) {
+      const row = await this.db.queryOne<BreakerStateEventRow>(
+        `SELECT ${BREAKER_STATE_EVENT_COLS} FROM breaker_state_events
+         WHERE breaker_id = $1
+         ORDER BY occurred_at DESC, id DESC
+         LIMIT 1`,
+        [id]
+      );
+      out.set(id, row ? rowToBreakerStateEvent(row) : null);
     }
     return out;
   }

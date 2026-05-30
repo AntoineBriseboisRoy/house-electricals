@@ -36,6 +36,7 @@ const brk = (over: Partial<Breaker> = {}): Breaker => ({
   label: '',
   tandemHalf: null,
   protection: null,
+  isOn: true,
   createdAt: 0,
   ...over,
 });

@@ -5,6 +5,7 @@ import {
   PgAttachmentRepository,
   PgBreakerRepository,
   PgBreakerTestRepository,
+  PgBreakerStateEventRepository,
   PgBuildingRepository,
   PgComponentRepository,
   PgFloorRepository,
@@ -84,6 +85,7 @@ const main = async (): Promise<void> => {
   const panelRepository = new PgPanelRepository(db);
   const breakerRepository = new PgBreakerRepository(db);
   const breakerTestRepository = new PgBreakerTestRepository(db);
+  const breakerStateEventRepository = new PgBreakerStateEventRepository(db);
   const componentRepository = new PgComponentRepository(db);
   const floorRepository = new PgFloorRepository(db);
   const wallRepository = new PgWallRepository(db);
@@ -96,6 +98,7 @@ const main = async (): Promise<void> => {
     panelRepository,
     breakerRepository,
     breakerTestRepository,
+    breakerStateEventRepository,
     componentRepository,
     floorRepository,
     wallRepository,

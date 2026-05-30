@@ -1818,109 +1818,279 @@ h2 {
   margin-bottom: 0.25rem;
 }
 
+/* ===== Breaker list card (design-1 rework, 2026-05) =====
+   ONE card per breaker: a header (identity left, actions docked top-right),
+   a body (label + off badge, verified/log hints, a load BAR), and an in-card
+   components footer disclosure. Replaces the old flex-wrap row + the detached
+   "N components" row that read as disconnected (especially when off). */
 .breaker-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 0.75rem;
-  padding: 0.625rem 0.75rem;
-  background: var(--bg);
-  border-radius: 8px;
-  min-height: 44px;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
 .breaker-row--editing {
-  flex-direction: column;
-  align-items: stretch;
+  padding: 0.75rem;
 }
 
-.breaker-row__slot {
+/* ── Header ── */
+.breaker-row__header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-2);
+}
+.breaker-row__id {
+  min-width: 0;
+}
+.breaker-row__slot-line {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 0.25rem 0.4rem;
-  font-weight: 600;
-  min-width: 80px;
+  gap: 0.4rem;
 }
-
+.breaker-row__slot-label {
+  font-weight: var(--text-weight-bold);
+  font-size: 1rem;
+}
 .breaker-row__pos {
-  color: var(--muted);
-  font-weight: 400;
+  color: var(--color-fg-subtle);
+  font-weight: var(--text-weight-medium);
   font-size: 0.8rem;
 }
+.breaker-row__amp {
+  color: var(--color-fg-muted);
+  font-size: 0.78rem;
+  margin-top: 1px;
+}
 
-/* G36 cycle-61 — "Last verified: X ago" hint below the slot label.
-   Muted by default; warn-orange + leading AlertCircle dot when verification
-   is stale (never tested OR >12 months ago). */
+/* Actions cluster — docked top-right (the user's ask). */
+.breaker-row__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+/* Text buttons (toggle, Edit) keep a comfortable tap size; icon buttons
+   (camera, trash) stay square via the .icon-btn primitive. */
+.breaker-row__actions button:not(.icon-btn) {
+  min-height: 38px;
+  min-width: 56px;
+  padding: 0 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-input);
+  color: var(--color-fg-default);
+  font-weight: 500;
+  cursor: pointer;
+}
+.breaker-row__actions .icon-btn {
+  flex: 0 0 auto;
+}
+
+/* On/Off state toggle — scoped under .breaker-row__actions so it OUT-SPECIFIES
+   the generic `.breaker-row__actions button:not(.icon-btn)` rule above
+   (which otherwise paints it the neutral input bg). ON = calm sage pill;
+   OFF = danger-red pill. */
+.breaker-row__actions .breaker-row__state-toggle[data-breaker-on='true'] {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+.breaker-row__actions .breaker-row__state-toggle[data-breaker-on='false'] {
+  background: var(--color-danger-subtle);
+  color: var(--danger);
+  border-color: var(--color-danger-border);
+}
+
+/* ── Body ── */
+.breaker-row__body {
+  padding: 0 var(--space-3) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.breaker-row__name-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.breaker-row__label {
+  font-size: 0.92rem;
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-default);
+}
+.breaker-row__off-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.66rem;
+  font-weight: var(--text-weight-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--danger);
+  border: 1px solid var(--color-danger-border);
+}
+
+.breaker-row__hints {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+}
+/* G36 cycle-61 — "Last verified" hint. Muted; warn-amber + AlertCircle dot
+   when stale (never / >12 months). */
 .breaker-row__verified {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  flex-basis: 100%;
-  font-weight: 400;
-  font-size: 0.78rem;
-  color: var(--color-fg-muted, var(--muted));
+  font-size: 0.76rem;
+  color: var(--color-fg-muted);
 }
-
 .breaker-row__verified--warn {
-  color: var(--color-warning, #d97706);
+  color: var(--color-warning);
 }
-
 .breaker-row__verified-dot {
   flex: 0 0 auto;
 }
 
-.breaker-row__meta {
+/* 2026-05 — per-circuit load as a BAR (track + fill), colored amber > 80%
+   (warn) / red > 100% (over) via data-load-status. */
+.breaker-row__load {
   display: flex;
   flex-direction: column;
-  flex: 1 1 140px;
+  gap: 3px;
 }
-
-.breaker-row__label {
-  color: var(--muted);
-  font-size: 0.85rem;
+.breaker-row__load-track {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-input);
+  overflow: hidden;
 }
-
-/* 2026-05 — per-circuit load line on a breaker row. Muted by default;
-   amber > 80% (warn), red > 100% (over) via data-load-status. */
-.breaker-row__load {
-  margin-top: var(--space-1);
+.breaker-row__load-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  transition: width var(--motion-duration-base) var(--motion-ease-out);
+}
+.breaker-row__load-fill[data-load-status='warn'] {
+  background: var(--color-warning);
+}
+.breaker-row__load-fill[data-load-status='over'] {
+  background: var(--color-danger);
+}
+.breaker-row__load-text {
   font-size: var(--text-size-xs);
-  font-weight: var(--text-weight-medium);
   color: var(--color-fg-muted);
 }
 
-.breaker-row__load[data-load-status='warn'] {
-  color: var(--color-warning);
+/* ── Footer: components disclosure (inside the same card) ── */
+.breaker-row__footer {
+  border-top: 1px solid var(--color-border-subtle);
 }
-
-.breaker-row__load[data-load-status='over'] {
-  color: var(--color-danger);
-}
-
-.breaker-row__actions {
+.breaker-row__comp-toggle {
+  width: 100%;
   display: flex;
+  align-items: center;
   gap: 0.5rem;
-  margin-left: auto;
-}
-
-.breaker-row__actions button {
   min-height: 44px;
-  min-width: 64px;
-  padding: 0 0.875rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border-subtle);
-  background: var(--bg);
-  color: var(--fg);
-  font-weight: 500;
+  padding: 0.5rem var(--space-3);
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
+.breaker-row__comp-toggle:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+.breaker-row__comp-toggle:disabled {
+  cursor: default;
+}
+.breaker-row__comp-count {
+  font-weight: var(--text-weight-semibold);
+  font-size: 0.84rem;
+}
+.breaker-row__comp-hint {
+  font-size: 0.72rem;
+  color: var(--color-fg-subtle);
+}
+.breaker-row__comp-chev {
+  margin-left: auto;
+  color: var(--color-fg-subtle);
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out);
+}
+.breaker-row__comp-toggle[aria-expanded='true'] .breaker-row__comp-chev {
+  transform: rotate(180deg);
+}
+.breaker-row__comp-list {
+  padding: 2px var(--space-3) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.breaker-row__comp-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  padding: 5px 0;
+}
+.breaker-row__comp-icon {
+  color: var(--color-accent);
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+.breaker-row__comp-name {
+  font-weight: var(--text-weight-medium);
+}
+.breaker-row__comp-room {
+  margin-left: auto;
+  font-size: 0.74rem;
+  color: var(--color-fg-subtle);
+}
+.breaker-row__comp-empty {
+  font-size: 0.8rem;
+  padding: 4px 0;
+}
 
-.breaker-row__actions .danger,
 .panel-danger button.danger {
   background: var(--color-danger-subtle);
   color: var(--danger);
   border-color: var(--color-danger-border);
+}
+
+/* ── Off (de-energized) treatment: danger-tinted card, muted labels, red
+   footer divider, red component icons + load fill. ── */
+.breaker-row--off {
+  border-color: var(--color-danger-border);
+  background:
+    linear-gradient(0deg, var(--color-danger-subtle), var(--color-danger-subtle)),
+    var(--color-bg-surface);
+}
+.breaker-row--off .breaker-row__slot-label,
+.breaker-row--off .breaker-row__label {
+  color: var(--color-fg-muted);
+}
+.breaker-row--off .breaker-row__footer,
+.breaker-row--off .breaker-row__header {
+  border-color: var(--color-danger-border);
+}
+.breaker-row--off .breaker-row__comp-icon {
+  color: var(--color-danger);
+}
+.breaker-row--off .breaker-row__load-fill {
+  background: var(--color-danger);
+  opacity: 0.6;
 }
 
 .panel-danger {
@@ -1940,98 +2110,188 @@ h2 {
    Row 2 (secondary): breaker chip + map icon + Edit/Delete buttons.
    Previously 5-7 vertical blocks per row created mobile chaos.
    G42(f) cycle-50: a Checkbox precedes the icon (--space-3 gap is shared). */
+/* ===== Component (Library) card — compact + expandable (2026-05) =====
+   Collapsed = a dense one-liner (checkbox + icon + name + Type·Room·slot +
+   quick actions + expand chevron). Click the body or the chevron to reveal
+   the DETAIL (full breaker chip, protection, service log, notes). Mirrors
+   the breaker design-1 card language. */
 .component-row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
+  overflow: hidden;
 }
-
-/* G42(f) cycle-50 — visual lift when a row is in the multi-select set. */
+.component-row--off {
+  border-color: var(--color-danger-border);
+  background:
+    linear-gradient(0deg, var(--color-danger-subtle), var(--color-danger-subtle)),
+    var(--color-bg-surface);
+}
 .component-row--selected {
-  background: var(--color-accent-subtle);
   border-color: var(--color-accent-border);
+  box-shadow: inset 0 0 0 1px var(--color-accent-border);
 }
-
-/* G42(f) cycle-50 — tighter checkbox inside the row (no need for the
-   default 44px hit area-padding to dominate the row layout; the parent
-   row is already large + clickable via its inner controls). */
-.component-row__select {
-  flex: 0 0 auto;
-  margin: calc(-1 * var(--space-2)) 0;
-}
-
 .component-row--editing {
   /* Edit mode shows the full ComponentForm — let it breathe. */
   padding: var(--space-4);
 }
 
-.component-row__primary {
+/* ── Collapsed header row ── */
+.component-row__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+.component-row__select {
+  flex: 0 0 auto;
+  margin: calc(-1 * var(--space-2)) 0;
+}
+.component-row__main {
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  min-width: 0;
+  cursor: pointer;
+  padding: var(--space-1) 0;
 }
-
 .component-row__icon {
   flex: 0 0 auto;
   color: var(--color-accent);
   display: flex;
   align-items: center;
 }
-
+.component-row--off .component-row__icon {
+  color: var(--color-danger);
+}
 .component-row__identity {
   flex: 1 1 0;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
-
 .component-row__name-line {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
 }
-
 .component-row__name {
   font-weight: var(--text-weight-semibold);
   color: var(--color-fg-default);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
-
+.component-row--off .component-row__name {
+  color: var(--color-fg-muted);
+}
 .component-row__meta {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 5px;
   flex-wrap: wrap;
   color: var(--color-fg-muted);
   font-size: var(--text-size-sm);
 }
+.component-row__meta-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--color-accent);
+}
+.component-row--off .component-row__meta-slot {
+  color: var(--color-danger);
+}
 
-.component-row__secondary {
+/* ── Quick action cluster (top-right) ── */
+.component-row__quick {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.component-row__quick .icon-btn {
+  width: 36px;
+  height: 36px;
+}
+.component-row__expand {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  color: var(--color-fg-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.component-row__expand:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-fg-default);
+}
+.component-row__expand-chev {
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out);
+}
+.component-row--expanded .component-row__expand-chev {
+  transform: rotate(180deg);
+}
+
+/* ── Expanded detail (hidden until expanded; always in the DOM) ── */
+.component-row__detail {
+  display: none;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-3);
+  border-top: 1px solid var(--color-border-subtle);
+}
+.component-row--off .component-row__detail {
+  border-color: var(--color-danger-border);
+}
+.component-row--expanded .component-row__detail {
+  display: flex;
+}
+.component-row__detail-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
+}
+.component-row__notes {
+  margin: 0;
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-muted);
+  line-height: var(--text-leading-normal);
+}
+.component-row__detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
 }
 
 .component-row__breaker-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 6px 11px;
   background: var(--color-accent-subtle);
   border: 1px solid var(--color-accent-border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   font-size: var(--text-size-sm);
   font-weight: var(--text-weight-medium);
   color: var(--color-accent);
   text-decoration: none;
-  transition:
-    background var(--motion-duration-fast) var(--motion-ease-out);
+}
+.component-row--off .component-row__breaker-chip {
+  background: var(--color-danger-subtle);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
 }
 .component-row__breaker-chip:hover {
   background: color-mix(in srgb, var(--color-accent-subtle) 60%, var(--color-accent-hover));
@@ -2039,10 +2299,18 @@ h2 {
 .component-row__breaker-chip-label {
   color: var(--color-fg-default);
   font-weight: var(--text-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.component-row--off .component-row__breaker-chip-label {
+  color: var(--color-fg-muted);
 }
 .component-row__breaker-chip-amp {
   color: var(--color-fg-muted);
   font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  padding-left: 4px;
 }
 .component-row__breaker-chip--unwired {
   background: transparent;
@@ -2060,29 +2328,45 @@ h2 {
   border-radius: var(--radius-md);
   color: var(--color-fg-muted);
   background: transparent;
-  border: 1px solid var(--color-border-subtle);
-  transition:
-    background var(--motion-duration-fast) var(--motion-ease-out),
-    color var(--motion-duration-fast) var(--motion-ease-out);
+  border: 1px solid transparent;
 }
 .component-row__map-link:hover {
   background: var(--color-bg-hover);
   color: var(--color-fg-default);
+  border-color: var(--color-border-subtle);
 }
 
-.component-row__actions {
+/* ── Group-by sections + the Group pill popover options ── */
+.component-group {
+  margin-bottom: var(--space-4);
+}
+.component-group:last-child {
+  margin-bottom: 0;
+}
+.component-group__head {
   display: flex;
-  /* Refactor 2026-05 follow-up — vertically center the cluster so the
-     `btn--sm` Edit button (36px) sits centered against the `icon-btn`
-     Trash (44px). Without this they baseline-stretch and read as
-     mis-aligned on the row. */
   align-items: center;
   gap: var(--space-2);
-  margin-left: auto;
-  /* Cycle-84 polish (P1 #6) — small inline-end nudge so the Edit + Trash
-     IconButton cluster doesn't hug the row card's right edge on mobile. */
-  padding-inline-end: var(--space-1);
+  margin: 0 2px var(--space-2);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: var(--text-weight-bold);
+  color: var(--color-fg-subtle);
 }
+.component-group__count {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-pill);
+  padding: 1px 8px;
+  color: var(--color-fg-subtle);
+}
+.component-group__rule {
+  flex: 1;
+  height: 1px;
+  background: var(--color-border-subtle);
+}
+
 
 .badge {
   font-size: 0.7rem;
@@ -2203,42 +2487,6 @@ h2 {
   width: 100%;
 }
 
-.breaker-row__count {
-  margin-left: 0.5rem;
-}
-
-.breaker-row__expand {
-  margin-left: auto;
-  min-height: 44px;
-  min-width: 44px;
-  padding: 0 0.75rem;
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.breaker-row__expanded {
-  width: 100%;
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px dashed var(--color-border-subtle);
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.breaker-row__expanded-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.5rem;
-  background: var(--bg-elev);
-  border-radius: 6px;
-}
-
 .component-row__callout {
   display: flex;
   align-items: center;
@@ -2296,6 +2544,21 @@ h2 {
 }
 .panel-viz__slot--active.panel-viz__slot--breaker {
   background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+/* 2026-05 — a slot whose breaker is OFF (direct or cascade) reads de-energized:
+   danger-tinted fill + red border + dimmed content. The On/Off toggle lives in
+   the breaker list; this is the at-a-glance state on the panel diagram. */
+.panel-viz__slot--off.panel-viz__slot--breaker {
+  background: var(--color-danger-subtle);
+  border-color: var(--color-danger-border);
+}
+.panel-viz__slot--off .panel-viz__slot-label,
+.panel-viz__slot--off .panel-viz__slot-amp {
+  color: var(--color-fg-muted);
+}
+.panel-viz__slot--off .panel-viz__slot-n {
+  color: var(--color-danger);
 }
 
 /* Refactor 2026-05 — `.panel-viz--mini` is a constrained scrolling wrapper
@@ -2636,6 +2899,25 @@ h2 {
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
   overflow: hidden;
+}
+/* 2026-05 — an off circuit's group reads de-energized (red edge + the "Off"
+   badge in the header). */
+.components-on-panel__group--off {
+  border-color: var(--color-danger-border);
+}
+.components-on-panel__off-badge {
+  margin-left: auto;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.68rem;
+  font-weight: var(--text-weight-semibold);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-fg-on-accent);
+  background: var(--color-danger);
+}
+.components-on-panel__group--off .components-on-panel__item {
+  color: var(--color-fg-muted);
 }
 .components-on-panel__group-header {
   display: flex;
@@ -4738,6 +5020,16 @@ h2 {
   transform: none;
 }
 
+/* 2026-05 — a pin whose circuit is OFF (breaker marked off, directly or via an
+   upstream feeder) renders reddish (danger) instead of the sage accent, so a
+   de-energized component reads at a glance on the floor map. */
+.floor-plan__pin--off {
+  background: color-mix(in srgb, var(--color-danger) 90%, transparent);
+}
+.floor-plan__pin--off.floor-plan__pin--selected {
+  background: var(--color-danger);
+}
+
 .floor-plan,
 .floor-plan__pin {
   touch-action: none;
@@ -5848,164 +6140,6 @@ h2 {
   color: var(--color-fg-muted);
 }
 
-/* G35 Part 1 (cycle-58) — Impact modal styling.
- *
- * Grouped by floor → room. Items render with a type icon + name; cascade
- * items get a small muted "via <Subpanel>" badge.
- */
-.impact-modal__subtitle {
-  margin-bottom: var(--space-3);
-  color: var(--color-fg-muted);
-}
-
-.impact-modal__scroll {
-  max-height: 60vh;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.impact-modal__group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.impact-modal__floor-name {
-  margin: 0;
-  font-size: var(--text-size-sm);
-  font-weight: var(--text-weight-semibold);
-  letter-spacing: var(--text-tracking-tight);
-  color: var(--color-fg-muted);
-  text-transform: uppercase;
-}
-
-.impact-modal__room {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.impact-modal__room-name {
-  margin: 0;
-  font-size: var(--text-size-sm);
-  font-weight: var(--text-weight-medium);
-  color: var(--color-fg-default);
-}
-
-.impact-modal__items {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.impact-modal__item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: var(--color-bg-surface-raised);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  color: var(--color-fg-default);
-  min-height: var(--touch-target);
-}
-
-.impact-modal__item-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-fg-muted);
-  flex: 0 0 auto;
-}
-
-.impact-modal__item-name {
-  flex: 1 1 auto;
-  font-size: var(--text-size-base);
-}
-
-.impact-modal__cascade-via {
-  flex: 0 0 auto;
-  padding: 0 var(--space-2);
-  background: var(--color-accent-subtle);
-  color: var(--color-fg-muted);
-  border: 1px solid var(--color-accent-border);
-  border-radius: var(--radius-pill);
-  font-size: var(--text-size-xs);
-  font-weight: var(--text-weight-medium);
-  line-height: 1.6;
-  white-space: nowrap;
-}
-
-/* 2026-05 — "Switches that lose control" section. Complements the
- * loses-power list: switches on the off breaker can no longer toggle the
- * lights/outlets they control (those components keep their own power). */
-.impact-modal__switches {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin-top: var(--space-4);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border-subtle);
-}
-
-.impact-modal__switches-note {
-  margin: 0;
-  font-size: var(--text-size-sm);
-  color: var(--color-fg-muted);
-}
-
-.impact-modal__switch-loss {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.impact-modal__switch-controlled {
-  list-style: none;
-  margin: 0;
-  padding-left: var(--space-6);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.impact-modal__switch-controlled li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-size-sm);
-  color: var(--color-fg-muted);
-}
-
-/* G35 Part 1 (cycle-58) — Impact button on BreakerRow.
- *
- * Mitigates Devil OBJ3 (BreakerRow row-wrap pressure at narrow widths):
- * below 720px the button is icon-only (label visually-hidden); the
- * lucide Zap icon + aria-label keep accessibility intact. At ≥720px the
- * label "Impact" is visible alongside the icon.
- */
-@media (max-width: 719px) {
-  .breaker-row__impact-btn {
-    min-width: var(--touch-target);
-    padding: 0 var(--space-2);
-  }
-  .breaker-row__impact-btn .btn__label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-  }
-}
 
 /* =========================================================================
    Cycle-60 — Filter + sort UX primitives (ported from HousesTracker)

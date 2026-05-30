@@ -5,6 +5,7 @@ import type {
   AttachmentParentType,
   Breaker,
   BreakerInput,
+  BreakerStateEvent,
   BreakerTest,
   Building,
   BuildingExportParsed,
@@ -943,6 +944,64 @@ export const latestBreakerTestsByIds = async (
     })
   );
   return out;
+};
+
+// --- Breaker on/off state (2026-05) ---
+//
+// Persistent energization state. The toggle persists `breakers.is_on` AND
+// writes a breaker_state_events audit row (scoped to breaker + panel). State
+// GETs are NOT in the SWR allowlist (audit data must be fresh on read).
+
+/** Toggle a breaker's persistent on/off state. Returns the updated breaker.
+ *  Also records a breaker_state_events audit row server-side. */
+export const setBreakerState = async (
+  breakerId: string,
+  isOn: boolean,
+  note?: string | null
+): Promise<Breaker> => {
+  const res = await fetch(
+    `/api/v1/breakers/${encodeURIComponent(breakerId)}/state`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ isOn, note: note ?? null }),
+    }
+  );
+  return unwrap<Breaker>(res);
+};
+
+export type BreakerStateEventListResponse = {
+  data: BreakerStateEvent[];
+  totalCount: number;
+};
+
+/** List breaker on/off audit events, filterable by breaker and/or panel. */
+export const listBreakerStateEvents = async (filter?: {
+  breakerId?: string;
+  panelId?: string;
+  since?: number;
+  until?: number;
+  limit?: number;
+}): Promise<BreakerStateEventListResponse> => {
+  const params = new URLSearchParams();
+  if (filter?.breakerId) params.set('breakerId', filter.breakerId);
+  if (filter?.panelId) params.set('panelId', filter.panelId);
+  if (filter?.since !== undefined) params.set('since', String(filter.since));
+  if (filter?.until !== undefined) params.set('until', String(filter.until));
+  if (filter?.limit !== undefined) params.set('limit', String(filter.limit));
+  const qs = params.toString();
+  const res = await fetch(`/api/v1/breaker-state-events${qs ? `?${qs}` : ''}`);
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const body = (await res.json()) as { error?: { message?: string } };
+      detail = body.error?.message ?? '';
+    } catch {
+      detail = await res.text().catch(() => '');
+    }
+    throw new ApiHttpError(res.status, detail);
+  }
+  return (await res.json()) as BreakerStateEventListResponse;
 };
 
 // --- Service entries (G40 Part 1 cycle-66 — dated service-log) ---

@@ -239,8 +239,8 @@ const reconstruct = async (
   for (const b of payload.breakers) {
     await tx.execute(
       `INSERT INTO breakers (id, panel_id, slot, slot_position, amperage, poles,
-         label, tandem_half, protection, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+         label, tandem_half, protection, is_on, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         breakerIds.get(b.id),
         remap(panelIds, b.panelId, 'panel'),
@@ -251,6 +251,9 @@ const reconstruct = async (
         b.label,
         b.tandemHalf,
         b.protection,
+        // 2026-05 — restore persisted on/off state (defaults ON for pre-2026-05
+        // exports via breakerSchema's isOn default).
+        b.isOn ? 1 : 0,
         b.createdAt,
       ]
     );

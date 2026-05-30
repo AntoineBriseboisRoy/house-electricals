@@ -83,6 +83,11 @@ import {
 import { PhotoStrip } from '../components/PhotoStrip.js';
 import { suffixDuplicate } from '../lib/duplicateName.js';
 import {
+  computeOffState,
+  groupBreakersByPanel,
+  isComponentOff,
+} from '../lib/breakerOff.js';
+import {
   Button,
   Card,
   CardActions,
@@ -675,6 +680,18 @@ export const FloorEditScreen = (): JSX.Element => {
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [allRooms, componentsOnFloor]);
+
+  /** 2026-05 — off-state for the whole house from the loaded breaker tree, so
+   *  a pin whose circuit is off (directly or via an upstream feeder) renders
+   *  reddish on the map. */
+  const offState = useMemo(
+    () =>
+      computeOffState(
+        breakerGroups.map((g) => g.panel),
+        groupBreakersByPanel(breakerGroups)
+      ),
+    [breakerGroups]
+  );
 
   /** Auto-name lookup: count existing components of the same type on this
    *  floor and label the new one "Outlet N+1" / "Light N+1" / etc. */
@@ -2642,6 +2659,7 @@ export const FloorEditScreen = (): JSX.Element => {
                     const isHoverTarget =
                       linkDrag !== null && linkDrag.hoverPinId === c.id;
                     const isInert = tool !== 'pointer';
+                    const isOff = isComponentOff(offState, c);
                     return (
                       <button
                         key={c.id}
@@ -2651,10 +2669,12 @@ export const FloorEditScreen = (): JSX.Element => {
                           (isSel ? ' floor-plan__pin--selected' : '') +
                           (isHoverTarget ? ' floor-plan__pin--link-target' : '') +
                           (isInert ? ' floor-plan__pin--inert' : '') +
+                          (isOff ? ' floor-plan__pin--off' : '') +
                           (componentDrag?.id === c.id && componentDrag.moved
                             ? ' floor-plan__pin--moving'
                             : '')
                         }
+                        data-off={isOff ? 'true' : undefined}
                         style={{ left: `${left}%`, top: `${top}%` } as CSSProperties}
                         onPointerDown={
                           isInert ? undefined : (e) => startComponentDrag(c.id, e)

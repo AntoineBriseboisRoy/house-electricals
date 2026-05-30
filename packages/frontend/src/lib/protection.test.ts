@@ -13,6 +13,7 @@ const mkBreaker = (over: Partial<Breaker> = {}): Breaker => ({
   poles: 'single',
   tandemHalf: null,
   protection: 'gfci',
+  isOn: true,
   createdAt: 0,
   ...over,
 });

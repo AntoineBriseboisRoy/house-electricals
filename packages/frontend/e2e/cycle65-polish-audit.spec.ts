@@ -292,29 +292,16 @@ test.describe('Cycle 65 polish audit @audit-only', () => {
       await settle(page);
       await snap(page, project, '04-panel-detail-list', { fullPage: true });
 
-      // Impact modal — Impact buttons render only in list view
-      const impactBtn = page.getByTestId('breaker-impact-btn').first();
-      if (await impactBtn.isVisible().catch(() => false)) {
-        await impactBtn.click();
-        await page
-          .locator('[role="dialog"]')
-          .first()
-          .waitFor({ timeout: 5_000 })
-          .catch(() => {});
-        // Best-effort settle on opacity for any role=dialog
-        await page
-          .waitForFunction(
-            () => {
-              const el = document.querySelector('[role="dialog"]') as HTMLElement | null;
-              if (el === null) return false;
-              return parseFloat(getComputedStyle(el).opacity) > 0.95;
-            },
-            null,
-            { timeout: 2_000 }
-          )
-          .catch(() => {});
-        await snap(page, project, '05-impact-modal');
-        await page.keyboard.press('Escape');
+      // 2026-05 — the persistent On/Off toggle replaces the removed Impact
+      // button. Flip a breaker off, snapshot the de-energized row, flip back.
+      const stateToggle = page.getByTestId('breaker-state-toggle').first();
+      if (await stateToggle.isVisible().catch(() => false)) {
+        await stateToggle.click();
+        await settle(page);
+        await snap(page, project, '05-breaker-off');
+        // Restore so the seeded state stays clean for sibling specs.
+        await page.getByTestId('breaker-state-toggle').first().click();
+        await settle(page);
       }
     }
 

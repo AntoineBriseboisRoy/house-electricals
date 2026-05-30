@@ -7,6 +7,7 @@ import type {
   AppUserRepository,
   AttachmentRepository,
   BreakerRepository,
+  BreakerStateEventRepository,
   BreakerTestRepository,
   BuildingRepository,
   ComponentRepository,
@@ -20,6 +21,7 @@ import { buildBuildingRoutes } from './routes/buildings.js';
 import { buildPanelRoutes } from './routes/panels.js';
 import { buildBreakerRoutes } from './routes/breakers.js';
 import { buildBreakerTestRoutes } from './routes/breaker-tests.js';
+import { buildBreakerStateRoutes } from './routes/breaker-state.js';
 import { buildComponentRoutes } from './routes/components.js';
 import { buildFloorPlanRoutes } from './routes/floor-plans.js';
 import { buildFloorRoutes } from './routes/floors.js';
@@ -48,6 +50,8 @@ export type AppDeps = {
   breakerRepository: BreakerRepository;
   /** G36 cycle-61 — audit-trail repo (breaker_tests). */
   breakerTestRepository: BreakerTestRepository;
+  /** 2026-05 — breaker on/off state-change audit (breaker_state_events). */
+  breakerStateEventRepository: BreakerStateEventRepository;
   componentRepository: ComponentRepository;
   floorRepository: FloorRepository;
   wallRepository: WallRepository;
@@ -175,6 +179,13 @@ export const buildApp = (deps: AppDeps): Hono => {
   app.route(
     '/api/v1',
     buildBreakerTestRoutes(deps.breakerRepository, deps.breakerTestRepository)
+  );
+  app.route(
+    '/api/v1',
+    buildBreakerStateRoutes(
+      deps.breakerRepository,
+      deps.breakerStateEventRepository
+    )
   );
   app.route(
     '/api/v1',

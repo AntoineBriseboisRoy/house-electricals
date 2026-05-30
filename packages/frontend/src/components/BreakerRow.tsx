@@ -1,15 +1,25 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { AlertCircle, Camera, ClipboardList, Trash2, Zap } from 'lucide-react';
+import {
+  AlertCircle,
+  Camera,
+  ChevronDown,
+  ClipboardList,
+  Power,
+  PowerOff,
+  Trash2,
+} from 'lucide-react';
 import {
   breakerInputSchema,
   type Breaker,
   type BreakerInput,
   type BreakerTest,
+  type Component,
   type Panel,
 } from '@he/shared';
 import { BreakerForm } from './BreakerForm.js';
-import { Button, IconButton } from '../ui/index.js';
+import { ComponentTypeIcon } from './ComponentTypeIcon.js';
+import { Button, IconButton, Spinner } from '../ui/index.js';
 import { formatRelative, isStaleOlderThanOneYear } from '../lib/relativeTime.js';
 import { formatWatts, type BreakerLoad } from '../lib/load.js';
 
@@ -32,30 +42,34 @@ type Props = {
   allPanels?: Panel[];
   currentSubpanelId?: string | null;
   onChangeFeedsSubpanel?: (subpanelId: string | null) => void | Promise<void>;
-  /** G35 Part 1 (cycle-58) — open the Impact modal for this breaker. The
-   *  screen owns modal state + the precomputed item list; the row only
-   *  fires the request. */
-  onShowImpact?: () => void;
+  /** 2026-05 — toggle the breaker's persistent on/off energization state.
+   *  Replaces the removed Impact button. `nextIsOn` is the desired state.
+   *  The whole card reflects `breaker.isOn` (danger-tinted when off). */
+  onToggleState?: (nextIsOn: boolean) => void | Promise<void>;
+  /** 2026-05 — true while a state toggle POST is in flight (busy + disabled). */
+  stateToggling?: boolean;
   /** 2026-05 — per-circuit load summary (sum of wired components' watts vs
-   *  continuous capacity). Renders a "Load X W / Y W (Z%)" line, colored
-   *  amber > 80% and red > 100%. Undefined/null or zero-watts → hidden. */
+   *  continuous capacity). Renders a load BAR colored amber > 80% / red >
+   *  100%. Undefined/null or zero-watts → hidden. */
   load?: BreakerLoad | null;
   /** G36 cycle-61 — most-recent BreakerTest for this breaker, or null if
-   *  no test was ever logged. The row renders "Last verified: X ago"
-   *  below the slot label, plus a warn dot when verification is stale
-   *  (never tested OR >12 months ago). */
+   *  no test was ever logged. Renders "Last verified: X ago" + a warn dot
+   *  when stale (never tested OR >12 months ago). */
   lastTest?: BreakerTest | null;
-  /** G40 Part 1 cycle-66 — count of service-log entries for THIS breaker.
-   *  When undefined the badge is hidden (e.g. consumers where the log
-   *  isn't loaded yet). When provided (even =0), a small "Log · N" badge
-   *  renders below the slot label; clicking opens the ServiceLogModal. */
+  /** G40 Part 1 cycle-66 — count of service-log entries for THIS breaker. */
   serviceLogCount?: number;
-  /** G40 Part 1 cycle-66 — open the ServiceLogModal for this breaker. The
-   *  parent owns modal state + the entries fetch. */
   onShowServiceLog?: () => void;
-  /** 2026-05 — open the PhotosModal for this breaker (quick view/add without
-   *  entering the edit form). Parent owns the modal state. */
+  /** 2026-05 — open the PhotosModal for this breaker. */
   onShowPhotos?: () => void;
+  /** 2026-05 (design-1 rework) — components footer disclosure. The parent
+   *  (BreakerWithComponents) owns the lazy-load; the row renders the footer
+   *  INSIDE the same card so the components clearly belong to the breaker.
+   *  When `onToggleComponents` is undefined the footer is omitted. */
+  componentCount?: number;
+  componentsExpanded?: boolean;
+  componentsLoading?: boolean;
+  components?: Component[] | null;
+  onToggleComponents?: () => void;
 };
 
 const formatPoles = (poles: Breaker['poles']): string =>
@@ -73,12 +87,18 @@ export const BreakerRow = ({
   allPanels,
   currentSubpanelId,
   onChangeFeedsSubpanel,
-  onShowImpact,
+  onToggleState,
+  stateToggling,
   load,
   lastTest,
   serviceLogCount,
   onShowServiceLog,
   onShowPhotos,
+  componentCount,
+  componentsExpanded,
+  componentsLoading,
+  components,
+  onToggleComponents,
 }: Props): JSX.Element => {
   const form = useForm<BreakerInput>({
     resolver: zodResolver(breakerInputSchema),
@@ -114,10 +134,8 @@ export const BreakerRow = ({
   }
 
   // G36 cycle-61 — "Last verified" hint values. `lastTest === undefined`
-  // means the parent didn't supply the prop (e.g. embedded surfaces where
-  // audit info isn't loaded); hide the hint entirely in that case to
-  // preserve backward-compatible rendering. `lastTest === null` means we
-  // KNOW there's no test yet — show "Last verified: never" + warn dot.
+  // means the parent didn't supply the prop; hide the hint entirely.
+  // `lastTest === null` means no test yet → "never" + warn dot.
   const showVerifiedHint = lastTest !== undefined;
   const verifiedNever = lastTest === null;
   const verifiedStale =
@@ -130,97 +148,183 @@ export const BreakerRow = ({
       : formatRelative(lastTest.testedAt);
   const showWarnDot = verifiedNever || verifiedStale;
 
+  const slotLabel =
+    `Slot ${breaker.slot}` +
+    (breaker.poles === 'tandem' && breaker.tandemHalf !== null
+      ? breaker.tandemHalf
+      : '');
+
+  const hasFooter = onToggleComponents !== undefined;
+  const count = componentCount ?? 0;
+
   return (
-    <li id={`breaker-${breaker.id}`} className="breaker-row">
-      <div className="breaker-row__slot">
-        {/* G34 cycle-42: tandem halves render with their letter suffix
-            (e.g. "Slot 6a" / "Slot 6b") so the user can tell two tandem
-            circuits on slot 6 apart at a glance. */}
-        <span className="breaker-row__slot-label">
-          Slot {breaker.slot}
-          {breaker.poles === 'tandem' && breaker.tandemHalf !== null
-            ? breaker.tandemHalf
-            : ''}
-        </span>
-        {breaker.slotPosition !== null && (
-          <span className="breaker-row__pos">#{breaker.slotPosition}</span>
-        )}
-        {showVerifiedHint && (
-          <span
-            className={
-              'breaker-row__verified' +
-              (showWarnDot ? ' breaker-row__verified--warn' : '')
-            }
-            data-testid="breaker-row-verified"
-            data-breaker-id={breaker.id}
-            data-verified-state={
-              verifiedNever ? 'never' : verifiedStale ? 'stale' : 'fresh'
-            }
-            title={
-              verifiedNever
-                ? 'No verification on record.'
-                : `Last verified ${verifiedText}`
-            }
-          >
-            {showWarnDot && (
-              <AlertCircle
-                size={12}
-                strokeWidth={2.5}
-                aria-hidden="true"
-                className="breaker-row__verified-dot"
-              />
+    <li
+      id={`breaker-${breaker.id}`}
+      className={'breaker-row breaker-row--card' + (!breaker.isOn ? ' breaker-row--off' : '')}
+      data-breaker-on={breaker.isOn ? 'true' : 'false'}
+    >
+      {/* ── Header: identity (left) + actions cluster (upper-right) ── */}
+      <div className="breaker-row__header">
+        <div className="breaker-row__id">
+          <div className="breaker-row__slot-line">
+            {/* G34 cycle-42: tandem halves render with their letter suffix. */}
+            <span className="breaker-row__slot-label">{slotLabel}</span>
+            {breaker.slotPosition !== null && (
+              <span className="breaker-row__pos">#{breaker.slotPosition}</span>
             )}
-            <span className="breaker-row__verified-text">
-              Last verified: {verifiedText}
-            </span>
-          </span>
-        )}
-        {/* G40 Part 1 cycle-66 — service-log badge. Clickable surface
-            that opens the ServiceLogModal (mobile contract: timeline
-            ALWAYS opens in Modal, NEVER inline-expanded). The
-            ClipboardList icon is a lucide pin to match other breaker
-            action icons. */}
-        {serviceLogCount !== undefined && onShowServiceLog !== undefined && (
-          <button
-            type="button"
-            className={
-              'breaker-row__service-log' +
-              (serviceLogCount === 0 ? ' breaker-row__service-log--empty' : '')
-            }
-            onClick={onShowServiceLog}
-            data-testid="breaker-row-service-log"
-            data-breaker-id={breaker.id}
-            data-log-count={serviceLogCount}
-            aria-label={
-              serviceLogCount === 0
-                ? 'Open service log (empty)'
-                : `Open service log (${serviceLogCount} entr${serviceLogCount === 1 ? 'y' : 'ies'})`
-            }
-            title={
-              serviceLogCount === 0
-                ? 'No service entries yet'
-                : `${serviceLogCount} service entr${serviceLogCount === 1 ? 'y' : 'ies'}`
-            }
-          >
-            <ClipboardList
-              size={12}
-              strokeWidth={2.25}
-              aria-hidden="true"
-              className="breaker-row__service-log-icon"
+          </div>
+          <div className="breaker-row__amp">
+            {breaker.amperage}A · {formatPoles(breaker.poles)}
+          </div>
+        </div>
+
+        <div className="breaker-row__actions">
+          {onToggleState !== undefined && (
+            <Button
+              variant={breaker.isOn ? 'secondary' : 'danger'}
+              size="sm"
+              busy={stateToggling}
+              disabled={stateToggling}
+              onClick={() => {
+                void onToggleState(!breaker.isOn);
+              }}
+              aria-label={
+                breaker.isOn
+                  ? `Turn off breaker ${breaker.slot}`
+                  : `Turn on breaker ${breaker.slot}`
+              }
+              className="breaker-row__state-toggle"
+              leadingIcon={
+                breaker.isOn ? (
+                  <Power size={16} strokeWidth={2.25} />
+                ) : (
+                  <PowerOff size={16} strokeWidth={2.25} />
+                )
+              }
+              data-testid="breaker-state-toggle"
+              data-breaker-id={breaker.id}
+              data-breaker-on={breaker.isOn ? 'true' : 'false'}
+            >
+              {breaker.isOn ? 'On' : 'Off'}
+            </Button>
+          )}
+          {onShowPhotos !== undefined && (
+            <IconButton
+              icon={<Camera size={16} strokeWidth={2.25} />}
+              variant="default"
+              onClick={onShowPhotos}
+              aria-label={`Photos for breaker ${breaker.slot}`}
+              data-testid="breaker-row-photos"
+              data-breaker-id={breaker.id}
             />
-            <span className="breaker-row__service-log-text">
-              Log · {serviceLogCount}
-            </span>
-          </button>
-        )}
+          )}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onStartEdit}
+            aria-label={`Edit breaker ${breaker.slot}`}
+          >
+            Edit
+          </Button>
+          {/* Cycle-70 — icon-only danger delete (undoable; cycle-47). */}
+          <IconButton
+            icon={<Trash2 size={16} strokeWidth={2.25} />}
+            variant="danger"
+            onClick={() => {
+              void onDelete();
+            }}
+            aria-label={`Delete breaker ${breaker.slot}`}
+          />
+        </div>
       </div>
-      <div className="breaker-row__meta">
-        <span>
-          {breaker.amperage}A · {formatPoles(breaker.poles)}
-        </span>
-        <span className="breaker-row__label">{breaker.label}</span>
+
+      {/* ── Body: label (+ off badge), meta hints, load bar ── */}
+      <div className="breaker-row__body">
+        <div className="breaker-row__name-line">
+          <span className="breaker-row__label">{breaker.label}</span>
+          {!breaker.isOn && (
+            <span
+              className="breaker-row__off-badge"
+              data-testid="breaker-off-badge"
+              data-breaker-id={breaker.id}
+            >
+              <PowerOff size={11} strokeWidth={2.5} aria-hidden="true" />
+              Off
+            </span>
+          )}
+        </div>
+
+        {(showVerifiedHint ||
+          (serviceLogCount !== undefined && onShowServiceLog !== undefined)) && (
+          <div className="breaker-row__hints">
+            {showVerifiedHint && (
+              <span
+                className={
+                  'breaker-row__verified' +
+                  (showWarnDot ? ' breaker-row__verified--warn' : '')
+                }
+                data-testid="breaker-row-verified"
+                data-breaker-id={breaker.id}
+                data-verified-state={
+                  verifiedNever ? 'never' : verifiedStale ? 'stale' : 'fresh'
+                }
+                title={
+                  verifiedNever
+                    ? 'No verification on record.'
+                    : `Last verified ${verifiedText}`
+                }
+              >
+                {showWarnDot && (
+                  <AlertCircle
+                    size={12}
+                    strokeWidth={2.5}
+                    aria-hidden="true"
+                    className="breaker-row__verified-dot"
+                  />
+                )}
+                <span className="breaker-row__verified-text">
+                  Last verified: {verifiedText}
+                </span>
+              </span>
+            )}
+            {serviceLogCount !== undefined && onShowServiceLog !== undefined && (
+              <button
+                type="button"
+                className={
+                  'breaker-row__service-log' +
+                  (serviceLogCount === 0 ? ' breaker-row__service-log--empty' : '')
+                }
+                onClick={onShowServiceLog}
+                data-testid="breaker-row-service-log"
+                data-breaker-id={breaker.id}
+                data-log-count={serviceLogCount}
+                aria-label={
+                  serviceLogCount === 0
+                    ? 'Open service log (empty)'
+                    : `Open service log (${serviceLogCount} entr${serviceLogCount === 1 ? 'y' : 'ies'})`
+                }
+                title={
+                  serviceLogCount === 0
+                    ? 'No service entries yet'
+                    : `${serviceLogCount} service entr${serviceLogCount === 1 ? 'y' : 'ies'}`
+                }
+              >
+                <ClipboardList
+                  size={12}
+                  strokeWidth={2.25}
+                  aria-hidden="true"
+                  className="breaker-row__service-log-icon"
+                />
+                <span className="breaker-row__service-log-text">
+                  Log · {serviceLogCount}
+                </span>
+              </button>
+            )}
+          </div>
+        )}
+
         {load != null && load.watts > 0 && (
-          <span
+          <div
             className="breaker-row__load"
             data-testid="breaker-row-load"
             data-breaker-id={breaker.id}
@@ -229,61 +333,82 @@ export const BreakerRow = ({
               load.capacity
             )} continuous capacity (${Math.round(load.pct * 100)}%)`}
           >
-            Load {formatWatts(load.watts)} / {formatWatts(load.capacity)} (
-            {Math.round(load.pct * 100)}%)
-          </span>
+            <div className="breaker-row__load-track">
+              <div
+                className="breaker-row__load-fill"
+                data-load-status={load.status}
+                style={{ width: `${Math.min(Math.round(load.pct * 100), 100)}%` }}
+              />
+            </div>
+            <span className="breaker-row__load-text">
+              {formatWatts(load.watts)} / {formatWatts(load.capacity)} ·{' '}
+              {Math.round(load.pct * 100)}%
+            </span>
+          </div>
         )}
       </div>
-      <div className="breaker-row__actions">
-        {onShowImpact !== undefined && (
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={onShowImpact}
-            aria-label="What loses power if this breaker is off"
-            className="breaker-row__impact-btn"
-            leadingIcon={<Zap size={16} strokeWidth={2.25} />}
-            data-testid="breaker-impact-btn"
-            data-breaker-id={breaker.id}
-          >
-            Impact
-          </Button>
-        )}
-        {onShowPhotos !== undefined && (
-          <IconButton
-            icon={<Camera size={16} strokeWidth={2.25} />}
-            variant="default"
-            onClick={onShowPhotos}
-            aria-label={`Photos for breaker ${breaker.slot}`}
-            data-testid="breaker-row-photos"
-            data-breaker-id={breaker.id}
-          />
-        )}
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onStartEdit}
-          aria-label={`Edit breaker ${breaker.slot}`}
-        >
-          Edit
-        </Button>
-        {/* Cycle-70 polish-pass-2 P2 #16 — demote per-row Delete from a
-            full red Button to an icon-only IconButton with danger color.
-            On desktop the previous coral text-buttons stacked vertically
-            (one per row) drew the eye away from the row content. The
-            icon-only affordance preserves the destructive-color cue + the
-            >=44px hit area + the cycle-47 undoable-delete safety net,
-            while removing the visual noise. aria-label intact for SR. */}
-        <IconButton
-          icon={<Trash2 size={16} strokeWidth={2.25} />}
-          variant="danger"
-          onClick={() => {
-            void onDelete();
-          }}
-          aria-label={`Delete breaker ${breaker.slot}`}
-        />
 
-      </div>
+      {/* ── Footer: components disclosure (inside the card) ── */}
+      {hasFooter && (
+        <div className="breaker-row__footer">
+          <button
+            type="button"
+            className="breaker-row__comp-toggle"
+            onClick={onToggleComponents}
+            aria-expanded={componentsExpanded ?? false}
+            disabled={count === 0}
+            data-testid="breaker-row-components-toggle"
+            data-breaker-id={breaker.id}
+            data-count={count}
+          >
+            <span className="breaker-row__comp-count">
+              {count} component{count === 1 ? '' : 's'}
+            </span>
+            <span className="breaker-row__comp-hint">
+              {count === 0
+                ? 'nothing wired'
+                : !breaker.isOn
+                  ? 'on this off circuit'
+                  : 'wired here'}
+            </span>
+            {count > 0 && (
+              <ChevronDown
+                size={16}
+                strokeWidth={2.25}
+                aria-hidden="true"
+                className="breaker-row__comp-chev"
+              />
+            )}
+          </button>
+          {componentsExpanded && (
+            <div className="breaker-row__comp-list">
+              {componentsLoading && <Spinner label="Loading components" />}
+              {!componentsLoading &&
+                components !== null &&
+                components !== undefined &&
+                components.length === 0 && (
+                  <p className="muted breaker-row__comp-empty">
+                    No components on this breaker.
+                  </p>
+                )}
+              {!componentsLoading &&
+                components !== null &&
+                components !== undefined &&
+                components.map((c) => (
+                  <div key={c.id} className="breaker-row__comp-item">
+                    <span className="breaker-row__comp-icon" aria-hidden="true">
+                      <ComponentTypeIcon type={c.type} size={16} />
+                    </span>
+                    <span className="breaker-row__comp-name">{c.name}</span>
+                    {c.room && (
+                      <span className="breaker-row__comp-room">{c.room}</span>
+                    )}
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
     </li>
   );
 };

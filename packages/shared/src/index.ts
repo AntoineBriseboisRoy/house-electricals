@@ -258,6 +258,13 @@ export type Breaker = {
    *  protection on the breaker (the circuit may still have a downstream
    *  GFCI receptacle). */
   protection: ProtectionKind | null;
+  /** 2026-05 — persistent energization state. `true` (the default for new
+   *  breakers) = the circuit is ON; `false` = the user has marked it OFF.
+   *  Off propagates across the app (its components + any subpanel it feeds
+   *  read as de-energized). Toggled via POST /breakers/:id/state, which also
+   *  writes a breaker_state_events audit row. NOT settable via the generic
+   *  breaker PATCH — state changes go through the dedicated audited endpoint. */
+  isOn: boolean;
   createdAt: number;
 };
 
@@ -279,6 +286,10 @@ export interface BreakerRepository {
   create(panelId: string, input: BreakerInput): Promise<Breaker>;
   get(id: string): Promise<Breaker | null>;
   update(id: string, patch: Partial<BreakerInput>): Promise<Breaker | null>;
+  /** 2026-05 — set the persistent on/off energization state. Returns the
+   *  updated breaker, or null when the id doesn't exist. Does NOT write the
+   *  audit row (the route owns that, so the event carries the panel id). */
+  setState(id: string, isOn: boolean): Promise<Breaker | null>;
   delete(id: string): Promise<boolean>;
   deleteByPanel(panelId: string): Promise<void>;
 }
@@ -313,6 +324,9 @@ export const breakerSchema = z.object({
   label: z.string(),
   tandemHalf: tandemHalfSchema.nullable(),
   protection: protectionKindSchema.nullable(),
+  // `.default(true)` keeps pre-2026-05 building exports (which have no isOn
+  // field) importable — a missing value restores as ON.
+  isOn: z.boolean().default(true),
   createdAt: z.number().int().nonnegative(),
 });
 
@@ -919,6 +933,91 @@ export const breakerTestSchema = z.object({
 
 export type BreakerTestInputParsed = z.infer<typeof breakerTestInputSchema>;
 export type BreakerTestListQueryParsed = z.infer<typeof breakerTestListQuerySchema>;
+
+// --- Breaker state-change events (2026-05 — on/off audit) ---
+//
+// A DEDICATED audit log for persistent breaker on/off toggles
+// (`breakers.is_on`). Distinct from `breaker_tests` (verification events) —
+// the user asked for a separate surface. Each row records the state AFTER the
+// action, scoped to BOTH the breaker AND its panel so the audit can be
+// filtered per-breaker and per-panel. Cascades through the breaker AND the
+// panel FK (ON DELETE CASCADE). `note` is optional free text (e.g. why it was
+// turned off). `occurred_at` / `created_at` are epoch ms.
+
+export type BreakerStateEvent = {
+  id: string;
+  breakerId: string;
+  panelId: string;
+  /** The energization state AFTER this action: true = turned ON, false = OFF. */
+  isOn: boolean;
+  occurredAt: number;
+  note: string | null;
+  createdAt: number;
+};
+
+export type BreakerStateEventInput = {
+  breakerId: string;
+  panelId: string;
+  isOn: boolean;
+  /** Defaults to Date.now() on the server when omitted. */
+  occurredAt?: number;
+  note?: string | null;
+};
+
+export type BreakerStateEventListFilter = {
+  breakerId?: string;
+  panelId?: string;
+  /** Inclusive: rows where occurred_at >= since. */
+  since?: number;
+  /** Inclusive: rows where occurred_at <= until. */
+  until?: number;
+  /** Max rows. The route caps to 200 by default (mirrors the audit list). */
+  limit?: number;
+};
+
+export type BreakerStateEventListResult = {
+  data: BreakerStateEvent[];
+  totalCount: number;
+};
+
+export interface BreakerStateEventRepository {
+  list(filter?: BreakerStateEventListFilter): Promise<BreakerStateEventListResult>;
+  create(input: BreakerStateEventInput): Promise<BreakerStateEvent>;
+  /** Returns a Map keyed by breakerId → most-recent state event (or null). */
+  latestByBreaker(
+    breakerIds: readonly string[]
+  ): Promise<Map<string, BreakerStateEvent | null>>;
+}
+
+/** POST /breakers/:id/state body — the desired state + an optional note.
+ *  breakerId + panelId are resolved server-side from the path param. */
+export const breakerStateToggleSchema = z.object({
+  isOn: z.boolean(),
+  note: z.string().max(2000).nullable().optional(),
+});
+
+export const breakerStateEventListQuerySchema = z.object({
+  breakerId: z.string().min(1).optional(),
+  panelId: z.string().min(1).optional(),
+  since: z.coerce.number().int().nonnegative().optional(),
+  until: z.coerce.number().int().nonnegative().optional(),
+  limit: z.coerce.number().int().positive().max(1000).optional(),
+});
+
+export const breakerStateEventSchema = z.object({
+  id: z.string(),
+  breakerId: z.string(),
+  panelId: z.string(),
+  isOn: z.boolean(),
+  occurredAt: z.number().int().nonnegative(),
+  note: z.string().nullable(),
+  createdAt: z.number().int().nonnegative(),
+});
+
+export type BreakerStateToggleParsed = z.infer<typeof breakerStateToggleSchema>;
+export type BreakerStateEventListQueryParsed = z.infer<
+  typeof breakerStateEventListQuerySchema
+>;
 
 // --- Service entries (G40 Part 1 — cycle-66) ---
 //

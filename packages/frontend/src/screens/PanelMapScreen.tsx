@@ -43,6 +43,11 @@ import {
   type PanelWithBreakers,
 } from '../api.js';
 import { suffixDuplicate } from '../lib/duplicateName.js';
+import {
+  computeOffState,
+  groupBreakersByPanel,
+  isComponentOff,
+} from '../lib/breakerOff.js';
 import { ComponentTypeIcon, componentTypeLabel } from '../components/ComponentTypeIcon.js';
 import { useMapDrag, type DropResult } from '../hooks/useMapDrag.js';
 import { useMultiSelect } from '../hooks/useMultiSelect.js';
@@ -307,6 +312,17 @@ export const PanelMapScreen = (): JSX.Element => {
         selected.length === 1 ? 'component' : 'components',
     });
   }, [components, confirm, deleteManyWithUndo, ms]);
+
+  // 2026-05 — off-state from the loaded breaker tree, so off circuits render
+  // reddish on the map.
+  const offState = useMemo(
+    () =>
+      computeOffState(
+        breakerGroups.map((g) => g.panel),
+        groupBreakersByPanel(breakerGroups)
+      ),
+    [breakerGroups]
+  );
 
   // G42(f) cycle-51 — bulk assign breaker via N PATCHes (NO backend bulk
   // endpoint, per the cycle-50 OBJ1 pin). Reuses the same picker shape
@@ -1339,6 +1355,7 @@ export const PanelMapScreen = (): JSX.Element => {
                       left: `${((c.posX ?? 0) / 10000) * 100}%`,
                       top: `${((c.posY ?? 0) / 10000) * 100}%`,
                     };
+                    const isOff = isComponentOff(offState, c);
                     return (
                       <button
                         key={c.id}
@@ -1347,8 +1364,10 @@ export const PanelMapScreen = (): JSX.Element => {
                         className={
                           'floor-plan__pin' +
                           (selectedComponentId === c.id ? ' floor-plan__pin--selected' : '') +
-                          (drag?.id === c.id ? ' floor-plan__pin--dragging' : '')
+                          (drag?.id === c.id ? ' floor-plan__pin--dragging' : '') +
+                          (isOff ? ' floor-plan__pin--off' : '')
                         }
+                        data-off={isOff ? 'true' : undefined}
                         style={pinStyle}
                         onClick={() => setSelectedComponentId(c.id)}
                         aria-label={`${c.name} — ${componentTypeLabel(c.type)}`}

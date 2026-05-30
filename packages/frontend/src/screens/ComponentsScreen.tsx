@@ -6,10 +6,14 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import {
   AlertTriangle,
   Camera,
+  ChevronDown,
   ClipboardList,
+  Layers,
   Lightbulb,
   Map as MapIcon,
+  Pencil,
   Plus,
+  PowerOff,
   Search,
   Trash2,
   Zap,
@@ -45,6 +49,11 @@ import { ComponentForm } from '../components/ComponentForm.js';
 import { PhotosModal } from '../components/PhotosModal.js';
 import { ProtectionBadge } from '../components/ProtectionBadge.js';
 import {
+  computeOffState,
+  groupBreakersByPanel,
+  isComponentOff,
+} from '../lib/breakerOff.js';
+import {
   Badge,
   Button,
   Card,
@@ -54,7 +63,6 @@ import {
   EmptyState,
   FilterPopover,
   FilterTriggerButton,
-  IconButton,
   Input,
   Modal,
   NoComponents,
@@ -99,11 +107,39 @@ const readSearchFromUrl = (): string => {
 type SortBy = 'name' | 'room' | 'created';
 type SortOrder = 'asc' | 'desc';
 
+/** 2026-05 — "Group by" buckets for the Library list. `none` = flat list. */
+type GroupBy =
+  | 'none'
+  | 'type'
+  | 'room'
+  | 'protection'
+  | 'breaker'
+  | 'panel'
+  | 'status';
+
+const GROUP_OPTIONS: readonly { key: GroupBy; label: string }[] = [
+  { key: 'none', label: 'None' },
+  { key: 'type', label: 'Type' },
+  { key: 'room', label: 'Room' },
+  { key: 'protection', label: 'Protection' },
+  { key: 'breaker', label: 'Breaker / slot' },
+  { key: 'panel', label: 'Panel' },
+  { key: 'status', label: 'Status' },
+];
+
 type ComponentsFilterState = {
   room: string | null;
   type: ComponentType | null;
+  /** When true, show only components flagged `critical`. Client-side filter
+   *  (there's no backend `?critical=` query) — the DashboardScreen "View in
+   *  library →" link sets it via a `?critical=1` deep-link param. */
+  critical: boolean;
   sortBy: SortBy;
   sortOrder: SortOrder;
+  /** 2026-05 — persisted "group by" choice. `useFilterState` shallow-merges
+   *  over defaults, so older serialized state without this field reads as
+   *  'none'. */
+  groupBy: GroupBy;
 };
 
 const FILTER_STORAGE_KEY = 'he.components-filter';
@@ -111,8 +147,10 @@ const FILTER_STORAGE_KEY = 'he.components-filter';
 const FILTER_DEFAULTS: ComponentsFilterState = {
   room: null,
   type: null,
+  critical: false,
   sortBy: 'created',
   sortOrder: 'asc',
+  groupBy: 'none',
 };
 
 const SORT_OPTIONS: readonly SortOption<SortBy>[] = [
@@ -162,7 +200,14 @@ export const ComponentsScreen = (): JSX.Element => {
     FILTER_STORAGE_KEY,
     FILTER_DEFAULTS
   );
-  const { room: filterRoom, type: filterType, sortBy, sortOrder } = filterState;
+  const {
+    room: filterRoom,
+    type: filterType,
+    critical: filterCritical,
+    sortBy,
+    sortOrder,
+    groupBy,
+  } = filterState;
   const [search, setSearch] = useState(() => readSearchFromUrl());
   const [searchInput, setSearchInput] = useState(() => readSearchFromUrl());
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -170,6 +215,19 @@ export const ComponentsScreen = (): JSX.Element => {
   // Modal — was a big inline Card eating ~half the screen on a list view.
   const [addModalOpen, setAddModalOpen] = useState(false);
   const filterPopover = useFilterPopover();
+  // 2026-05 — separate popover for the "Group by" pill (sibling to Filter).
+  const groupPopover = useFilterPopover();
+  // 2026-05 — which component cards are expanded (compact rows expand to the
+  // full detail on click). Independent toggles (multiple can be open at once).
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(new Set());
+  const toggleExpanded = useCallback((id: string): void => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
   /** G31 cycle-39 — panels + their breakers, grouped, so the ComponentForm
    *  Wiring section can offer two cascading selects (Panel → Breaker).
    *  Fetched once on mount; refreshes after every save (since adding a
@@ -243,6 +301,26 @@ export const ComponentsScreen = (): JSX.Element => {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
   }, [searchInput, setLocation]);
+
+  // DashboardScreen "View in library →" deep-link. A `?critical=1` param
+  // arrives with the critical filter pre-applied so the user lands on the
+  // exact subset the Status card counted. Consume it ONCE on mount into the
+  // persisted filter state, then strip it from the URL so it doesn't linger
+  // or re-trigger on subsequent renders.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('critical') !== '1') return;
+    setFilterState((prev) => ({ ...prev, critical: true }));
+    params.delete('critical');
+    const next = params.toString();
+    const pathname = window.location.pathname.startsWith('/library')
+      ? '/library'
+      : '/components';
+    setLocation(`${pathname}${next ? `?${next}` : ''}`, { replace: true });
+    // Mount-only: this is a one-shot URL → filter handoff.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // G25 cycle-28 — listAllBreakersGrouped fetch removed: the inline
   // BreakerPicker dropdown in component rows was retired in favor of
@@ -422,10 +500,14 @@ export const ComponentsScreen = (): JSX.Element => {
   // Cycle-60 — sort happens client-side over the server-filtered list.
   // The server returns canonical `created_at ASC, id ASC` (per CLAUDE.md
   // "Search filters, never reorders") so we don't break that contract.
-  const visibleComponents = useMemo(
-    () => sortComponents(components, sortBy, sortOrder),
-    [components, sortBy, sortOrder]
-  );
+  // The `critical` flag has no backend query, so it's filtered client-side
+  // here over the already server-filtered set, before sorting.
+  const visibleComponents = useMemo(() => {
+    const filtered = filterCritical
+      ? components.filter((c) => c.critical === true)
+      : components;
+    return sortComponents(filtered, sortBy, sortOrder);
+  }, [components, filterCritical, sortBy, sortOrder]);
 
   // G37 cycle-68 — map breakerId → protection so the ComponentsScreen breaker
   // chip can show the badge alongside the slot label. ResolvedBreakerSummary
@@ -442,12 +524,103 @@ export const ComponentsScreen = (): JSX.Element => {
     return map;
   }, [breakerGroups]);
 
+  // 2026-05 — off-state for the whole house, derived from the already-loaded
+  // breakerGroups. A component whose wired breaker is off (directly or via an
+  // upstream feeder) gets an "Off" badge + de-energized row.
+  const offState = useMemo(
+    () =>
+      computeOffState(
+        breakerGroups.map((g) => g.panel),
+        groupBreakersByPanel(breakerGroups)
+      ),
+    [breakerGroups]
+  );
+
+  // 2026-05 — "Group by" bucketing. Returns a stable { key, label } per
+  // component for the active grouping. `~`-prefixed keys are the
+  // "missing"/catch-all buckets (No room / Unassigned / No protection) and
+  // sort to the bottom.
+  const groupValueOf = useCallback(
+    (c: ResolvedComponent): { key: string; label: string } => {
+      switch (groupBy) {
+        case 'type':
+          return { key: c.type, label: componentTypeLabel(c.type) };
+        case 'room':
+          return c.room
+            ? { key: c.room, label: c.room }
+            : { key: '~none', label: 'No room' };
+        case 'protection': {
+          const p =
+            c.protection ??
+            (c.breaker ? breakerProtectionById.get(c.breaker.id) ?? null : null);
+          return p
+            ? { key: p, label: p.toUpperCase() }
+            : { key: '~none', label: 'No protection' };
+        }
+        case 'breaker':
+          return c.breaker
+            ? {
+                key: c.breaker.id,
+                label: `Slot ${c.breaker.slot}${c.breaker.tandemHalf ?? ''} · ${c.breaker.label}`,
+              }
+            : { key: '~unassigned', label: 'Unassigned' };
+        case 'panel':
+          return c.breaker
+            ? { key: c.breaker.panelId, label: c.breaker.panelName }
+            : { key: '~unassigned', label: 'Unassigned' };
+        case 'status':
+          return c.breakerId === null
+            ? { key: '~unassigned', label: 'Unassigned' }
+            : isComponentOff(offState, c)
+              ? { key: 'off', label: 'Off' }
+              : { key: 'on', label: 'On' };
+        default:
+          return { key: '', label: '' };
+      }
+    },
+    [groupBy, breakerProtectionById, offState]
+  );
+
+  const groupedComponents = useMemo(() => {
+    if (groupBy === 'none') {
+      return [{ key: '', label: '', items: visibleComponents }];
+    }
+    const map = new Map<
+      string,
+      { key: string; label: string; items: ResolvedComponent[] }
+    >();
+    for (const c of visibleComponents) {
+      const { key, label } = groupValueOf(c);
+      let g = map.get(key);
+      if (g === undefined) {
+        g = { key, label, items: [] };
+        map.set(key, g);
+      }
+      g.items.push(c);
+    }
+    return [...map.values()].sort((a, b) => {
+      // Catch-all (~) buckets last; otherwise alphabetical by label.
+      const aSentinel = a.key.startsWith('~');
+      const bSentinel = b.key.startsWith('~');
+      if (aSentinel !== bSentinel) return aSentinel ? 1 : -1;
+      return a.label.localeCompare(b.label);
+    });
+  }, [groupBy, visibleComponents, groupValueOf]);
+
+  const groupLabel =
+    GROUP_OPTIONS.find((g) => g.key === groupBy)?.label ?? 'None';
+
   // Cycle-60 — count of active filters (excluding search, which has its
   // own input above). Drives the badge on the Filter pill.
   const activeFilterCount =
-    (filterRoom !== null ? 1 : 0) + (filterType !== null ? 1 : 0);
+    (filterRoom !== null ? 1 : 0) +
+    (filterType !== null ? 1 : 0) +
+    (filterCritical ? 1 : 0);
   const hasAnyFilter =
-    searchInput.trim() !== '' || filterRoom !== null || filterType !== null;
+    searchInput.trim() !== '' ||
+    filterRoom !== null ||
+    filterType !== null ||
+    filterCritical;
 
   // G42(c) cycle-47 — one-tap delete + 30s undo. Snapshot the current
   // list so undo can restore the exact pre-delete order (the canonical
@@ -780,6 +953,19 @@ export const ComponentsScreen = (): JSX.Element => {
             }
             testId="components-sort"
           />
+          {/* 2026-05 — Group-by pill (sibling to Filter/Sort). Opens a
+              FilterPopover with the grouping options as chips (same look as
+              the Type filter). Buckets the list by Type / Room / Protection /
+              Breaker / Panel / Status. */}
+          <FilterTriggerButton
+            ref={groupPopover.buttonRef}
+            icon={Layers}
+            label={groupBy === 'none' ? 'Group' : `Group: ${groupLabel}`}
+            active={groupBy !== 'none'}
+            onClick={groupPopover.toggle}
+            testId="components-group-trigger"
+            ariaLabel="Group components"
+          />
           {activeFilterCount > 0 && (
             // Cycle-70 polish-pass-2 P2 #14 — was variant="ghost" (bare
             // text), looked like body copy next to the FilterTriggerButton
@@ -793,6 +979,7 @@ export const ComponentsScreen = (): JSX.Element => {
                   ...prev,
                   room: null,
                   type: null,
+                  critical: false,
                 }))
               }
               data-testid="components-filter-clear"
@@ -802,6 +989,44 @@ export const ComponentsScreen = (): JSX.Element => {
           )}
         </div>
       </Card>
+
+      <FilterPopover
+        isOpen={groupPopover.isOpen}
+        popoverRef={groupPopover.popoverRef}
+        position={groupPopover.position}
+        ariaLabel="Group components"
+        testId="components-group-popover"
+      >
+        <div className="filter-popover__section">
+          <h3 className="filter-popover__section-title">Group by</h3>
+          <div
+            className="filter-popover__chips"
+            role="group"
+            aria-label="Group by"
+          >
+            {GROUP_OPTIONS.map((g) => (
+              <button
+                key={g.key}
+                type="button"
+                className={
+                  groupBy === g.key
+                    ? 'filter-popover__chip filter-popover__chip--active'
+                    : 'filter-popover__chip'
+                }
+                onClick={() => {
+                  setFilterState((prev) => ({ ...prev, groupBy: g.key }));
+                  groupPopover.close();
+                }}
+                data-testid="components-group-option"
+                data-group={g.key}
+                aria-pressed={groupBy === g.key}
+              >
+                {g.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </FilterPopover>
 
       <FilterPopover
         isOpen={filterPopover.isOpen}
@@ -869,6 +1094,33 @@ export const ComponentsScreen = (): JSX.Element => {
             disabled={roomOptions.length === 0}
           />
         </div>
+        <div className="filter-popover__section">
+          <h3 className="filter-popover__section-title">Flags</h3>
+          <div
+            className="filter-popover__chips"
+            role="group"
+            aria-label="Filter by flag"
+          >
+            <button
+              type="button"
+              className={
+                filterCritical
+                  ? 'filter-popover__chip filter-popover__chip--active'
+                  : 'filter-popover__chip'
+              }
+              onClick={() =>
+                setFilterState((prev) => ({
+                  ...prev,
+                  critical: !prev.critical,
+                }))
+              }
+              data-testid="filter-critical-chip"
+              aria-pressed={filterCritical}
+            >
+              Critical only
+            </button>
+          </div>
+        </div>
         <div className="filter-popover__footer">
           {/* Cycle-70 polish-pass-2 P2 #14 — was variant="ghost" (bare text).
               Secondary gives a clear button shape paired with the primary
@@ -882,6 +1134,7 @@ export const ComponentsScreen = (): JSX.Element => {
                 ...prev,
                 room: null,
                 type: null,
+                critical: false,
               }));
             }}
             disabled={activeFilterCount === 0}
@@ -954,9 +1207,24 @@ export const ComponentsScreen = (): JSX.Element => {
             />
           )
         ) : (
-          <ul className="component-list">
-            {visibleComponents.map((c) =>
-              editingId === c.id ? (
+          groupedComponents.map((group) => (
+            <div key={group.key || '~all'} className="component-group">
+              {groupBy !== 'none' && (
+                <div
+                  className="component-group__head"
+                  data-testid="component-group-head"
+                  data-group-key={group.key}
+                >
+                  <span className="component-group__label">{group.label}</span>
+                  <span className="component-group__count">
+                    {group.items.length}
+                  </span>
+                  <span className="component-group__rule" aria-hidden="true" />
+                </div>
+              )}
+              <ul className="component-list">
+                {group.items.map((c) =>
+                  editingId === c.id ? (
                 <EditingRow
                   key={c.id}
                   component={c}
@@ -971,193 +1239,243 @@ export const ComponentsScreen = (): JSX.Element => {
                   onSave={(patch) => handleUpdate(c.id, patch)}
                 />
               ) : (
-                /* G25 cycle-28 — compact 2-row layout. Row 1 = identity
-                   (icon + name + unassigned-badge + type + room). Row 2 =
-                   wiring + actions (breaker chip → panel hash deep-link,
-                   map link if placed, Edit/Delete icon buttons). The
-                   BreakerPicker dropdown is REMOVED from the inline row —
-                   it's still in EditingRow (click Edit to change breaker).
-                   This is the major space-saver. */
-                <li
-                  key={c.id}
-                  className={
-                    ms.isSelected(c.id)
-                      ? 'component-row component-row--selected'
-                      : 'component-row'
-                  }
-                  data-testid="component-row"
-                  data-component-id={c.id}
-                  data-selected={ms.isSelected(c.id) ? 'true' : 'false'}
-                >
-                  <div className="component-row__primary">
-                    <span className="component-row__select">
-                      <Checkbox
-                        checked={ms.isSelected(c.id)}
-                        onChange={() => ms.toggle(c.id)}
-                        ariaLabel={`Select ${c.name}`}
-                        testId="component-row-checkbox"
-                      />
-                    </span>
-                    <span className="component-row__icon" aria-hidden="true">
-                      <ComponentTypeIcon type={c.type} />
-                    </span>
-                    <div className="component-row__identity">
-                      <div className="component-row__name-line">
-                        <span className="component-row__name">{c.name}</span>
-                        {c.critical && (
-                          <Tooltip content="Marked as critical (priority for backup power)">
-                            <span
-                              className="badge badge--critical"
-                              data-testid="badge-critical"
-                              tabIndex={0}
-                            >
-                              <AlertTriangle size={11} strokeWidth={2.5} aria-hidden="true" />
-                              <span>Critical</span>
-                            </span>
-                          </Tooltip>
-                        )}
-                        {c.protection !== null && (
-                          <ProtectionBadge kind={c.protection} />
-                        )}
-                        {c.breakerId === null && (
-                          <Badge tone="warn">Unassigned</Badge>
-                        )}
-                      </div>
-                      <div className="component-row__meta">
-                        <span>{componentTypeLabel(c.type)}</span>
-                        {c.room !== null && <span>· {c.room}</span>}
-                        {/* G40 Part 2 cycle-67 — service-log badge.
-                            Mirrors the cycle-66 BreakerRow pattern; same
-                            visual treatment, just on the component row.
-                            Reuses .breaker-row__service-log* classes so
-                            the styling stays in lockstep. Clicking opens
-                            the ServiceLogModal (Modal-only timeline
-                            contract pinned cycle-66).
-
-                            NOTE: the badge uses `data-target-component-id`
-                            (NOT `data-component-id`) on purpose — the
-                            parent `<li>` already carries `data-component-id`
-                            per the cycle-50 G42(f) pin, and the bulk-actions
-                            e2e spec queries `[data-component-id="X"]`
-                            expecting a single match. The badge gets its
-                            own attribute name to keep that contract intact. */}
-                        {serviceEntriesByComponentId.has(c.id) && (
+                /* 2026-05 — compact, expandable card (matches the breaker
+                   design-1 language). The COLLAPSED row is a dense one-liner:
+                   checkbox + icon + name (+ critical/off/unassigned) + "Type ·
+                   Room · ⚡slot" + quick actions (map/photos/edit/delete) + an
+                   expand chevron. Clicking the body (or the chevron) reveals
+                   the DETAIL — the full breaker chip, protection, service log,
+                   and notes. The detail is always in the DOM (CSS-toggled) so
+                   the breaker chip stays countable for bulk-actions e2e. */
+                (() => {
+                  const isOff = isComponentOff(offState, c);
+                  const isExpanded = expandedIds.has(c.id);
+                  const logCount = serviceEntriesByComponentId.get(c.id)?.length;
+                  return (
+                    <li
+                      key={c.id}
+                      className={
+                        'component-row' +
+                        (ms.isSelected(c.id) ? ' component-row--selected' : '') +
+                        (isOff ? ' component-row--off' : '') +
+                        (isExpanded ? ' component-row--expanded' : '')
+                      }
+                      data-testid="component-row"
+                      data-component-id={c.id}
+                      data-selected={ms.isSelected(c.id) ? 'true' : 'false'}
+                      data-off={isOff ? 'true' : undefined}
+                    >
+                      <div className="component-row__row">
+                        <span className="component-row__select">
+                          <Checkbox
+                            checked={ms.isSelected(c.id)}
+                            onChange={() => ms.toggle(c.id)}
+                            ariaLabel={`Select ${c.name}`}
+                            testId="component-row-checkbox"
+                          />
+                        </span>
+                        {/* Click the body to expand (mouse). Keyboard users use
+                            the chevron button. */}
+                        <div
+                          className="component-row__main"
+                          onClick={() => toggleExpanded(c.id)}
+                        >
+                          <span className="component-row__icon" aria-hidden="true">
+                            <ComponentTypeIcon type={c.type} />
+                          </span>
+                          <div className="component-row__identity">
+                            <div className="component-row__name-line">
+                              <span className="component-row__name">{c.name}</span>
+                              {c.critical && (
+                                <Tooltip content="Marked as critical (priority for backup power)">
+                                  <span
+                                    className="badge badge--critical"
+                                    data-testid="badge-critical"
+                                    tabIndex={0}
+                                  >
+                                    <AlertTriangle size={11} strokeWidth={2.5} aria-hidden="true" />
+                                    <span>Critical</span>
+                                  </span>
+                                </Tooltip>
+                              )}
+                              {c.breakerId === null && (
+                                <Badge tone="warn">Unassigned</Badge>
+                              )}
+                              {isOff && (
+                                <Badge
+                                  tone="warn"
+                                  data-testid="component-off-badge"
+                                  data-target-component-id={c.id}
+                                >
+                                  <PowerOff size={11} strokeWidth={2.5} aria-hidden="true" />
+                                  <span>Off</span>
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="component-row__meta">
+                              <span>{componentTypeLabel(c.type)}</span>
+                              {c.room !== null && <span>· {c.room}</span>}
+                              {c.breaker !== null && (
+                                <span className="component-row__meta-slot">
+                                  ·{' '}
+                                  <Zap size={11} strokeWidth={2.5} aria-hidden="true" />
+                                  slot {c.breaker.slot}
+                                  {c.breaker.tandemHalf ?? ''}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="component-row__quick">
+                          {c.floorId !== null &&
+                            c.posX !== null &&
+                            c.posY !== null && (
+                              <Tooltip content="View on floor plan">
+                                <Link
+                                  href={`/floors/${c.floorId}/edit#pin-${c.id}`}
+                                  className="component-row__map-link"
+                                  aria-label={`View ${c.name} on the floor plan`}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <MapIcon size={16} strokeWidth={2.25} aria-hidden="true" />
+                                </Link>
+                              </Tooltip>
+                            )}
                           <button
                             type="button"
-                            className={
-                              'component-row__service-log' +
-                              (serviceEntriesByComponentId.get(c.id)!.length === 0
-                                ? ' component-row__service-log--empty'
-                                : '')
-                            }
-                            onClick={() => setServiceLogComponentId(c.id)}
-                            data-testid="component-row-service-log"
-                            data-target-component-id={c.id}
-                            data-log-count={
-                              serviceEntriesByComponentId.get(c.id)!.length
-                            }
+                            className="component-row__expand"
+                            onClick={() => toggleExpanded(c.id)}
+                            aria-expanded={isExpanded}
                             aria-label={
-                              serviceEntriesByComponentId.get(c.id)!.length === 0
-                                ? 'Open service log (empty)'
-                                : `Open service log (${serviceEntriesByComponentId.get(c.id)!.length} entries)`
+                              isExpanded
+                                ? `Collapse ${c.name} details`
+                                : `Expand ${c.name} details`
                             }
-                            title={
-                              serviceEntriesByComponentId.get(c.id)!.length === 0
-                                ? 'No service entries yet'
-                                : `${serviceEntriesByComponentId.get(c.id)!.length} service entries`
-                            }
+                            data-testid="component-row-expand"
+                            data-target-component-id={c.id}
                           >
-                            <ClipboardList
-                              size={12}
+                            <ChevronDown
+                              size={18}
                               strokeWidth={2.25}
                               aria-hidden="true"
-                              className="component-row__service-log-icon"
+                              className="component-row__expand-chev"
                             />
-                            <span className="component-row__service-log-text">
-                              Log · {serviceEntriesByComponentId.get(c.id)!.length}
-                            </span>
                           </button>
-                        )}
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                  <div className="component-row__secondary">
-                    {c.breaker !== null ? (
-                      <Link
-                        href={`/panels/${c.breaker.panelId}#breaker-${c.breaker.id}`}
-                        className="component-row__breaker-chip"
-                        aria-label={`Show breaker ${c.breaker.label} on ${c.breaker.panelName}`}
-                      >
-                        <Zap size={14} strokeWidth={2.25} aria-hidden="true" />
-                        <span className="component-row__breaker-chip-label">
-                          slot {c.breaker.slot}{c.breaker.tandemHalf ?? ''} · {c.breaker.label}
-                        </span>
-                        <span className="component-row__breaker-chip-amp">
-                          {c.breaker.amperage}A
-                        </span>
-                        {/* G37 cycle-68 — when the wired breaker has GFCI/AFCI/dual
-                            protection, surface it inline on the chip too so the
-                            user sees protection regardless of whether it lives on
-                            the breaker or the receptacle. */}
-                        {breakerProtectionById.has(c.breaker.id) && (
-                          <ProtectionBadge
-                            kind={breakerProtectionById.get(c.breaker.id)!}
-                          />
-                        )}
-                      </Link>
-                    ) : (
-                      <span className="component-row__breaker-chip component-row__breaker-chip--unwired">
-                        Not wired to any breaker
-                      </span>
-                    )}
-                    {c.floorId !== null &&
-                      c.posX !== null &&
-                      c.posY !== null && (
-                        <Tooltip content="View on floor plan">
+
+                      {/* Detail — always rendered, CSS-shown when expanded. */}
+                      <div className="component-row__detail">
+                        {c.breaker !== null ? (
                           <Link
-                            href={`/floors/${c.floorId}/edit#pin-${c.id}`}
-                            className="component-row__map-link"
-                            aria-label={`View ${c.name} on the floor plan`}
+                            href={`/panels/${c.breaker.panelId}#breaker-${c.breaker.id}`}
+                            className="component-row__breaker-chip"
+                            aria-label={`Show breaker ${c.breaker.label} on ${c.breaker.panelName}`}
                           >
-                            <MapIcon size={16} strokeWidth={2.25} aria-hidden="true" />
+                            <Zap size={14} strokeWidth={2.25} aria-hidden="true" />
+                            <span className="component-row__breaker-chip-label">
+                              {c.breaker.panelName} · slot {c.breaker.slot}
+                              {c.breaker.tandemHalf ?? ''} · {c.breaker.label}
+                            </span>
+                            <span className="component-row__breaker-chip-amp">
+                              {c.breaker.amperage}A
+                            </span>
+                            {breakerProtectionById.has(c.breaker.id) && (
+                              <ProtectionBadge
+                                kind={breakerProtectionById.get(c.breaker.id)!}
+                              />
+                            )}
                           </Link>
-                        </Tooltip>
-                      )}
-                    <div className="component-row__actions">
-                      <IconButton
-                        icon={<Camera size={16} strokeWidth={2.25} />}
-                        variant="default"
-                        onClick={() => setPhotosComponentId(c.id)}
-                        aria-label={`Photos for ${c.name}`}
-                        data-testid="component-row-photos"
-                        data-target-component-id={c.id}
-                      />
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setEditingId(c.id)}
-                        aria-label={`Edit component ${c.name}`}
-                      >
-                        Edit
-                      </Button>
-                      {/* Cycle-70 polish-pass-2 P2 #16 — demote per-row
-                          Delete to an icon-only danger IconButton. With
-                          one button per row the previous coral text
-                          column dominated the screen; the icon retains
-                          destructive-color cue + the cycle-47 undoable-
-                          delete safety net + the >=44px hit area. */}
-                      <IconButton
-                        icon={<Trash2 size={16} strokeWidth={2.25} />}
-                        variant="danger"
-                        onClick={() => handleDelete(c.id)}
-                        aria-label={`Delete component ${c.name}`}
-                      />
-                    </div>
-                  </div>
-                </li>
-              )
-            )}
-          </ul>
+                        ) : (
+                          <span className="component-row__breaker-chip component-row__breaker-chip--unwired">
+                            Not wired to any breaker
+                          </span>
+                        )}
+                        {(c.protection !== null || logCount !== undefined) && (
+                          <div className="component-row__detail-row">
+                            {c.protection !== null && (
+                              <ProtectionBadge kind={c.protection} />
+                            )}
+                            {logCount !== undefined && (
+                              <button
+                                type="button"
+                                className={
+                                  'component-row__service-log' +
+                                  (logCount === 0
+                                    ? ' component-row__service-log--empty'
+                                    : '')
+                                }
+                                onClick={() => setServiceLogComponentId(c.id)}
+                                data-testid="component-row-service-log"
+                                data-target-component-id={c.id}
+                                data-log-count={logCount}
+                                aria-label={
+                                  logCount === 0
+                                    ? 'Open service log (empty)'
+                                    : `Open service log (${logCount} entries)`
+                                }
+                                title={
+                                  logCount === 0
+                                    ? 'No service entries yet'
+                                    : `${logCount} service entries`
+                                }
+                              >
+                                <ClipboardList
+                                  size={12}
+                                  strokeWidth={2.25}
+                                  aria-hidden="true"
+                                  className="component-row__service-log-icon"
+                                />
+                                <span className="component-row__service-log-text">
+                                  Log · {logCount}
+                                </span>
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {c.notes !== null && c.notes.trim().length > 0 && (
+                          <p className="component-row__notes">{c.notes}</p>
+                        )}
+                        <div className="component-row__detail-actions">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            leadingIcon={<Camera size={15} strokeWidth={2.25} />}
+                            onClick={() => setPhotosComponentId(c.id)}
+                            aria-label={`Photos for ${c.name}`}
+                            data-testid="component-row-photos"
+                            data-target-component-id={c.id}
+                          >
+                            Photos
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            leadingIcon={<Pencil size={15} strokeWidth={2.25} />}
+                            onClick={() => setEditingId(c.id)}
+                            aria-label={`Edit component ${c.name}`}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            leadingIcon={<Trash2 size={15} strokeWidth={2.25} />}
+                            onClick={() => handleDelete(c.id)}
+                            aria-label={`Delete component ${c.name}`}
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })()
+                  )
+                )}
+              </ul>
+            </div>
+          ))
         )}
       </section>
       {modalNode}

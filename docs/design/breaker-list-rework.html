@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Breaker list rework — distinct directions</title>
+<style>
+  :root {
+    --color-bg-canvas:#1a1917; --color-bg-surface:#252420; --color-bg-surface-raised:#34322c;
+    --color-bg-hover:#38352f; --color-bg-input:#15140f;
+    --color-fg-default:#f0ebe6; --color-fg-muted:#9a958e; --color-fg-subtle:#6f6a64;
+    --color-fg-on-accent:#16261d;
+    --color-accent:#7a9e8a; --color-accent-hover:#8eb29c;
+    --color-accent-subtle:rgba(122,158,138,.16); --color-accent-border:rgba(122,158,138,.42);
+    --color-danger:#d3805f; --color-danger-strong:#c4603a;
+    --color-danger-subtle:rgba(196,96,58,.16); --color-danger-border:rgba(196,96,58,.5);
+    --color-warning:#d6a44e;
+    --color-border-subtle:#3a3732; --color-border-strong:#4d4942;
+    --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-6:24px; --space-8:32px;
+    --radius-sm:6px; --radius-md:12px; --radius-lg:16px; --radius-pill:999px;
+    --fam:'Plus Jakarta Sans','Inter',system-ui,sans-serif;
+    --shadow-md:0 8px 24px -10px rgba(0,0,0,.5),0 2px 6px -3px rgba(0,0,0,.4);
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#100f0d; color:var(--color-fg-default); font-family:var(--fam);
+    -webkit-font-smoothing:antialiased; padding:var(--space-8) var(--space-4) 80px; }
+  h1 { font-size:1.6rem; margin:0 0 8px; letter-spacing:-.01em; }
+  .lede { color:var(--color-fg-muted); max-width:82ch; line-height:1.55; margin:0 0 8px; }
+  .lede b{ color:var(--color-fg-default); }
+  .asks { display:flex; gap:10px; flex-wrap:wrap; margin:14px 0 4px; }
+  .ask { font-size:.8rem; color:var(--color-fg-default); background:var(--color-bg-surface);
+    border:1px solid var(--color-border-subtle); border-radius:var(--radius-pill); padding:6px 14px; }
+  .ask b{ color:var(--color-accent); }
+
+  .gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(360px,1fr)); gap:var(--space-8) var(--space-6); margin-top:var(--space-8); align-items:start; }
+  .choice { display:flex; flex-direction:column; gap:var(--space-3); }
+  .choice__head { display:flex; align-items:baseline; gap:var(--space-3); }
+  .choice__num { flex:0 0 auto; width:30px; height:30px; border-radius:var(--radius-pill); display:grid; place-items:center; background:var(--color-accent); color:var(--color-fg-on-accent); font-weight:800; }
+  .choice__title { font-size:1.12rem; font-weight:700; margin:0; }
+  .choice__tag { font-size:.8rem; color:var(--color-accent); font-weight:600; }
+  .choice__desc { color:var(--color-fg-muted); font-size:.85rem; line-height:1.5; margin:0; }
+  .choice__desc b{ color:var(--color-fg-default); }
+  .pc { display:flex; gap:var(--space-4); font-size:.78rem; }
+  .pc .pros{color:#9ec5ad;} .pc .cons{color:#d6a07e;}
+  .pc ul{ margin:4px 0 0; padding-left:16px; line-height:1.45; }
+
+  /* faux phone frame the breaker rows live in */
+  .frame { background:var(--color-bg-canvas); border:1px solid var(--color-border-subtle);
+    border-radius:var(--radius-lg); padding:var(--space-3); display:flex; flex-direction:column; gap:var(--space-3); }
+  .frame__label { font-size:.66rem; text-transform:uppercase; letter-spacing:.08em; color:var(--color-fg-subtle); font-weight:700; }
+
+  svg.i { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; display:block; }
+  svg.i.sm { width:13px; height:13px; }
+
+  /* shared icon-button */
+  .ib { width:34px; height:34px; border-radius:var(--radius-md); border:1px solid var(--color-border-subtle);
+    background:var(--color-bg-surface); color:var(--color-fg-muted); display:grid; place-items:center; cursor:pointer; }
+  .ib:hover{ background:var(--color-bg-hover); color:var(--color-fg-default); }
+  .ib--danger{ color:var(--color-danger); }
+  .actions { display:flex; gap:6px; }
+
+  /* On/Off pill toggle */
+  .ostate { display:inline-flex; align-items:center; gap:6px; font-weight:700; font-size:.82rem;
+    border-radius:var(--radius-md); padding:8px 13px; cursor:pointer; border:1px solid; }
+  .ostate--on { color:var(--color-accent); background:var(--color-accent-subtle); border-color:var(--color-accent-border); }
+  .ostate--off { color:var(--color-danger); background:var(--color-danger-subtle); border-color:var(--color-danger-border); }
+
+  /* iOS-style switch */
+  .sw { width:46px; height:26px; border-radius:999px; position:relative; cursor:pointer; flex:0 0 auto;
+    background:var(--color-accent); border:1px solid rgba(0,0,0,.2); transition:background .15s; }
+  .sw::after{ content:''; position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%;
+    background:#fff; transition:transform .15s; }
+  .sw[data-on='false']{ background:var(--color-danger-strong); }
+  .sw[data-on='false']::after{ transform:translateX(20px); }
+
+  /* load bar */
+  .load { display:flex; flex-direction:column; gap:4px; }
+  .load__track { height:6px; border-radius:99px; background:var(--color-bg-input); overflow:hidden; }
+  .load__fill { height:100%; border-radius:99px; background:var(--color-accent); }
+  .load__fill[data-lv='warn']{ background:var(--color-warning); }
+  .load__fill[data-lv='over']{ background:var(--color-danger); }
+  .load__txt { font-size:.72rem; color:var(--color-fg-muted); }
+
+  /* OFF chip */
+  .offchip { display:inline-flex; align-items:center; gap:4px; font-size:.66rem; font-weight:800; letter-spacing:.04em;
+    text-transform:uppercase; color:var(--color-danger); border:1px solid var(--color-danger-border); border-radius:var(--radius-pill); padding:2px 7px; }
+  .verified { display:inline-flex; align-items:center; gap:5px; font-size:.74rem; color:var(--color-warning); }
+  .logpill { display:inline-flex; align-items:center; gap:5px; font-size:.72rem; color:var(--color-fg-muted);
+    border:1px solid var(--color-border-subtle); border-radius:var(--radius-pill); padding:2px 8px; }
+
+  /* component sub-rows (shared) */
+  .comps { display:flex; flex-direction:column; }
+  .comp { display:flex; align-items:center; gap:8px; font-size:.8rem; padding:7px 2px; }
+  .comp .ico{ color:var(--color-accent); display:grid; place-items:center; }
+  .comp .rm{ margin-left:auto; font-size:.72rem; color:var(--color-fg-subtle); }
+  .compchip { display:inline-flex; align-items:center; gap:5px; font-size:.74rem; padding:4px 9px; border-radius:var(--radius-pill);
+    background:var(--color-bg-input); border:1px solid var(--color-border-subtle); }
+  .compchip .ico{ color:var(--color-accent); display:grid; place-items:center; }
+
+  /* OFF treatment applied to a card via [data-off] */
+  [data-off='true'] .comp .ico, [data-off='true'] .compchip .ico { color:var(--color-danger); }
+  [data-off='true'] .load__fill { background:var(--color-danger) !important; opacity:.65; }
+
+  .micro { font-size:.7rem; color:var(--color-fg-subtle); margin:0; }
+  footer { margin-top:56px; color:var(--color-fg-subtle); font-size:.8rem; }
+</style>
+</head>
+<body>
+  <h1>Breaker list — clearer, off-aware rework</h1>
+  <p class="lede">Five <b>structurally different</b> takes on the breaker list row. Every one (1) keeps the components <b>visibly part of their breaker</b> instead of a detached row below, (2) moves the actions to the <b>upper-right corner</b>, and (3) makes an <b>off circuit read red at a glance</b>. Each design is shown in both its <b>ON</b> and <b>OFF</b> state so you can compare the de-energized treatment directly. Tap <b>"components"</b> rows to expand.</p>
+  <div class="asks">
+    <span class="ask"><b>1.</b> components belong to the breaker</span>
+    <span class="ask"><b>2.</b> actions top-right</span>
+    <span class="ask"><b>3.</b> off = reddish everywhere</span>
+  </div>
+
+  <div class="gallery" id="gallery"></div>
+  <footer>Prototypes only — not wired into the app. Styled with the real app tokens (warm/sage palette).</footer>
+
+<script>
+const I = (p,cls='') => `<svg class="i ${cls}" viewBox="0 0 24 24">${p}</svg>`;
+const POWER   = '<path d="M12 2v9"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/>';
+const POWEROFF= '<path d="M18.4 6.6a9 9 0 0 1 2 9.6"/><path d="M5.6 6.6a9 9 0 0 0 11.5 13"/><path d="M12 2v6"/><path d="M3 3l18 18"/>';
+const CAMERA  = '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="3.5"/>';
+const PENCIL  = '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>';
+const TRASH   = '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>';
+const CHEV    = '<path d="m6 9 6 6 6-6"/>';
+const ZAP     = '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>';
+const MORE    = '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>';
+const ALERT   = '<path d="M10.3 3.8 1.8 18a2 2 0 0 0 1.7 3h16.9a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>';
+const OUTLET  = '<rect x="5" y="3" width="14" height="18" rx="2.5"/><line x1="10" y1="9" x2="10" y2="11.5"/><line x1="14" y1="9" x2="14" y2="11.5"/>';
+const BULB    = '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.1 14a5 5 0 1 0-6.2 0c.6.5 1.1 1.2 1.1 2h4c0-.8.5-1.5 1.1-2z"/>';
+const FRIDGE  = '<rect x="6" y="2" width="12" height="20" rx="2"/><line x1="6" y1="10" x2="18" y2="10"/><line x1="9" y1="5" x2="9" y2="7"/><line x1="9" y1="13" x2="9" y2="15"/>';
+
+/* sample breakers (mirrors the screenshots) */
+const ON  = {slot:'1', pos:1, amp:'20A · 1P', label:'Kitchen counter GFCI', protection:'GFCI',
+  watts:880, cap:1920, pct:46, comps:[{i:OUTLET,n:'Counter outlet',r:'Kitchen'},{i:FRIDGE,n:'Refrigerator',r:'Kitchen'}]};
+const OFF = {slot:'1', pos:1, amp:'20A · 1P', label:'Garage outlets', protection:null,
+  watts:250, cap:1920, pct:13, comps:[{i:OUTLET,n:'Bench outlet',r:'Garage'},{i:OUTLET,n:'Door opener',r:'Garage'}]};
+
+const lvl = p => p>100?'over':p>80?'warn':'ok';
+const loadBar = b => `<div class="load"><div class="load__track"><div class="load__fill" data-lv="${lvl(b.pct)}" style="width:${Math.min(b.pct,100)}%"></div></div>
+  <span class="load__txt">${b.watts.toLocaleString()} W / ${b.cap.toLocaleString()} W · ${b.pct}%</span></div>`;
+const compList = (b,off)=>`<div class="comps">${b.comps.map(c=>`<div class="comp">${I(c.i,'sm')}<span>${c.n}</span><span class="rm">${c.r}</span></div>`).join('')}</div>`;
+const compChips = b => b.comps.map(c=>`<span class="compchip">${I(c.i,'sm')}${c.n}</span>`).join('');
+
+/* ---------- DESIGN 1 — header actions + footer disclosure ---------- */
+function d1(b,off){ return `
+  <div class="d1card" data-off="${off}">
+    <style>
+      .d1card{ background:var(--color-bg-surface); border:1px solid var(--color-border-subtle); border-radius:var(--radius-md); overflow:hidden; }
+      .d1card[data-off='true']{ border-color:var(--color-danger-border); background:linear-gradient(0deg,var(--color-danger-subtle),var(--color-danger-subtle)),var(--color-bg-surface); }
+      .d1top{ display:flex; align-items:flex-start; gap:10px; padding:12px 12px 10px; }
+      .d1id .slot{ font-weight:800; font-size:1rem; } .d1id .slot .pos{ color:var(--color-fg-subtle); font-weight:600; font-size:.8rem; margin-left:4px;}
+      .d1id .amp{ font-size:.78rem; color:var(--color-fg-muted); margin-top:1px; }
+      .d1act{ margin-left:auto; display:flex; align-items:center; gap:6px; }
+      .d1body{ padding:0 12px 12px; display:flex; flex-direction:column; gap:9px; }
+      .d1name{ display:flex; align-items:center; gap:8px; font-size:.92rem; font-weight:600; }
+      .d1card[data-off='true'] .d1name{ color:var(--color-fg-muted); }
+      .d1foot{ border-top:1px solid var(--color-border-subtle); }
+      .d1card[data-off='true'] .d1foot{ border-color:var(--color-danger-border); }
+      .d1disc{ width:100%; display:flex; align-items:center; gap:8px; padding:10px 12px; background:none; border:0; color:inherit; font:inherit; cursor:pointer; }
+      .d1disc .ct{ font-weight:700; font-size:.82rem; } .d1disc .cv{ margin-left:auto; color:var(--color-fg-subtle); transition:transform .15s; }
+      .d1disc[aria-expanded='true'] .cv{ transform:rotate(180deg); }
+      .d1exp{ padding:0 12px 10px; }
+    </style>
+    <div class="d1top">
+      <div class="d1id"><div class="slot">Slot ${b.slot}<span class="pos">#${b.pos}</span></div><div class="amp">${b.amp}</div></div>
+      <div class="d1act">
+        <span class="ostate ${off?'ostate--off':'ostate--on'}" onclick="flip(this)">${I(off?POWEROFF:POWER,'sm')}${off?'Off':'On'}</span>
+        <button class="ib" title="Photos">${I(CAMERA)}</button>
+        <button class="ib" title="Edit">${I(PENCIL)}</button>
+        <button class="ib ib--danger" title="Delete">${I(TRASH)}</button>
+      </div>
+    </div>
+    <div class="d1body">
+      <div class="d1name">${b.label}${off?`<span class="offchip">${I(POWEROFF,'sm')}Off</span>`:''}${b.protection&&!off?`<span class="logpill" style="color:var(--color-warning);border-color:var(--color-danger-border)">${b.protection}</span>`:''}</div>
+      ${loadBar(b)}
+    </div>
+    <div class="d1foot">
+      <button class="d1disc" aria-expanded="false" onclick="disc(this)"><span class="ct">${b.comps.length} component${b.comps.length>1?'s':''}</span><span class="micro" style="color:var(--color-fg-subtle)">${off?'on this off circuit':'wired here'}</span><span class="cv">${I(CHEV,'sm')}</span></button>
+      <div class="d1exp" hidden>${compList(b,off)}</div>
+    </div>
+  </div>`; }
+
+/* ---------- DESIGN 2 — status rail + switch + always-visible comps ---------- */
+function d2(b,off){ return `
+  <div class="d2card" data-off="${off}">
+    <style>
+      .d2card{ display:flex; background:var(--color-bg-surface); border:1px solid var(--color-border-subtle); border-radius:var(--radius-md); overflow:hidden; }
+      .d2card[data-off='true']{ border-color:var(--color-danger-border); }
+      .d2rail{ width:5px; flex:0 0 auto; background:var(--color-accent); }
+      .d2card[data-off='true'] .d2rail{ background:var(--color-danger); }
+      .d2main{ flex:1; min-width:0; padding:11px 12px; display:flex; flex-direction:column; gap:9px; }
+      .d2top{ display:flex; align-items:center; gap:10px; }
+      .d2top .slot{ font-weight:800; } .d2top .amp{ font-size:.78rem; color:var(--color-fg-muted); }
+      .d2top .acts{ margin-left:auto; display:flex; align-items:center; gap:8px; }
+      .d2top .menu{ color:var(--color-fg-subtle); cursor:pointer; }
+      .d2name{ font-size:.9rem; font-weight:600; display:flex; align-items:center; gap:8px; }
+      .d2card[data-off='true'] .d2name{ color:var(--color-fg-muted); }
+      .d2comps{ border-top:1px dashed var(--color-border-subtle); padding-top:4px; }
+      .d2card[data-off='true'] .d2comps{ border-color:var(--color-danger-border); }
+      .d2comps .hd{ font-size:.66rem; text-transform:uppercase; letter-spacing:.07em; color:var(--color-fg-subtle); font-weight:700; margin:4px 0 0;}
+    </style>
+    <div class="d2rail"></div>
+    <div class="d2main">
+      <div class="d2top">
+        <span class="slot">Slot ${b.slot}</span><span class="amp">${b.amp}</span>
+        <span class="acts"><span class="sw" data-on="${!off}" onclick="sw(this)"></span><span class="menu ib" style="border:0;width:auto;height:auto;background:none">${I(MORE)}</span></span>
+      </div>
+      <div class="d2name">${b.label}${off?`<span class="offchip">${I(POWEROFF,'sm')}Off</span>`:''}</div>
+      ${loadBar(b)}
+      <div class="d2comps"><p class="hd">${b.comps.length} component${b.comps.length>1?'s':''} on this circuit</p>${compList(b,off)}</div>
+    </div>
+  </div>`; }
+
+/* ---------- DESIGN 3 — two-column, components as inline chips ---------- */
+function d3(b,off){ return `
+  <div class="d3card" data-off="${off}">
+    <style>
+      .d3card{ background:var(--color-bg-surface); border:1px solid var(--color-border-subtle); border-radius:var(--radius-md); padding:12px; display:flex; flex-direction:column; gap:10px; }
+      .d3card[data-off='true']{ border-color:var(--color-danger-border); background:linear-gradient(0deg,var(--color-danger-subtle),var(--color-danger-subtle)),var(--color-bg-surface); box-shadow:inset 4px 0 0 var(--color-danger); }
+      .d3top{ display:flex; align-items:flex-start; gap:10px; }
+      .d3id .slot{ font-weight:800; font-size:1rem; }
+      .d3id .lab{ font-size:.86rem; color:var(--color-fg-muted); margin-top:1px; }
+      .d3card[data-off='true'] .d3id .slot{ color:var(--color-danger); }
+      .d3act{ margin-left:auto; display:flex; gap:6px; }
+      .d3meta{ display:flex; align-items:center; gap:10px; font-size:.76rem; color:var(--color-fg-muted); flex-wrap:wrap;}
+      .d3chips{ display:flex; gap:6px; flex-wrap:wrap; }
+    </style>
+    <div class="d3top">
+      <div class="d3id"><div class="slot">Slot ${b.slot} · ${b.amp.replace(' · ',' ')}</div><div class="lab">${b.label}${off?` <span class="offchip">${I(POWEROFF,'sm')}Off</span>`:''}</div></div>
+      <div class="d3act">
+        <button class="ib ${off?'':''}" style="${off?'color:var(--color-danger);border-color:var(--color-danger-border);background:var(--color-danger-subtle)':'color:var(--color-accent);border-color:var(--color-accent-border);background:var(--color-accent-subtle)'}" title="Toggle power" onclick="flipib(this,${off})">${I(off?POWEROFF:POWER)}</button>
+        <button class="ib" title="Edit">${I(PENCIL)}</button>
+        <button class="ib ib--danger" title="Delete">${I(TRASH)}</button>
+      </div>
+    </div>
+    ${loadBar(b)}
+    <div class="d3meta"><span>Powers:</span><div class="d3chips">${compChips(b)}</div></div>
+  </div>`; }
+
+/* ---------- DESIGN 4 — power-first hero zone ---------- */
+function d4(b,off){ return `
+  <div class="d4card" data-off="${off}">
+    <style>
+      .d4card{ display:flex; background:var(--color-bg-surface); border:1px solid var(--color-border-subtle); border-radius:var(--radius-md); overflow:hidden; }
+      .d4card[data-off='true']{ border-color:var(--color-danger-border); }
+      .d4l{ flex:1; min-width:0; padding:12px; display:flex; flex-direction:column; gap:9px; }
+      .d4head{ display:flex; align-items:flex-start; }
+      .d4head .slot{ font-weight:800; } .d4head .slot .amp{ font-weight:600; color:var(--color-fg-muted); font-size:.78rem; margin-left:6px;}
+      .d4mini{ margin-left:auto; display:flex; gap:4px; }
+      .d4mini .ib{ width:28px; height:28px; }
+      .d4name{ font-size:.9rem; font-weight:600; } .d4card[data-off='true'] .d4name{ color:var(--color-fg-muted); }
+      .d4comp{ width:100%; display:flex; align-items:center; gap:8px; padding:8px 10px; margin-top:2px; background:var(--color-bg-input);
+        border:1px solid var(--color-border-subtle); border-radius:var(--radius-md); cursor:pointer; font:inherit; color:inherit;}
+      .d4comp .cv{ margin-left:auto; color:var(--color-fg-subtle); transition:transform .15s; } .d4comp[aria-expanded='true'] .cv{transform:rotate(180deg);}
+      .d4exp{ margin-top:2px; }
+      .d4r{ flex:0 0 86px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; cursor:pointer;
+        background:var(--color-accent-subtle); color:var(--color-accent); border-left:1px solid var(--color-accent-border); font-weight:800; }
+      .d4card[data-off='true'] .d4r{ background:var(--color-danger); color:#fff; border-color:var(--color-danger-strong); }
+      .d4r .lab{ font-size:.84rem; letter-spacing:.04em; }
+    </style>
+    <div class="d4l">
+      <div class="d4head"><span class="slot">Slot ${b.slot}<span class="amp">${b.amp}</span></span>
+        <span class="d4mini"><button class="ib" title="Photos">${I(CAMERA)}</button><button class="ib" title="Edit">${I(PENCIL)}</button><button class="ib ib--danger" title="Delete">${I(TRASH)}</button></span></div>
+      <div class="d4name">${b.label}</div>
+      ${loadBar(b)}
+      <button class="d4comp" aria-expanded="false" onclick="disc4(this)">${I(ZAP,'sm')}<span style="font-weight:700;font-size:.82rem">${b.comps.length} component${b.comps.length>1?'s':''}</span><span class="cv">${I(CHEV,'sm')}</span></button>
+      <div class="d4exp" hidden>${compList(b,off)}</div>
+    </div>
+    <div class="d4r" onclick="flipzone(this,${off})">${I(off?POWEROFF:POWER)}<span class="lab">${off?'OFF':'ON'}</span></div>
+  </div>`; }
+
+/* ---------- DESIGN 5 — compact dense scan row ---------- */
+function d5(b,off){ return `
+  <div class="d5card" data-off="${off}">
+    <style>
+      .d5card{ background:var(--color-bg-surface); border:1px solid var(--color-border-subtle); border-radius:var(--radius-md); padding:9px 11px; display:flex; flex-direction:column; gap:6px; }
+      .d5card[data-off='true']{ border-color:var(--color-danger-border); background:linear-gradient(0deg,var(--color-danger-subtle),var(--color-danger-subtle)),var(--color-bg-surface); }
+      .d5row{ display:flex; align-items:center; gap:10px; }
+      .d5slot{ display:inline-flex; align-items:center; gap:6px; font-weight:800; flex:0 0 auto; }
+      .d5slot .dot{ width:9px; height:9px; border-radius:50%; background:var(--color-accent); }
+      .d5card[data-off='true'] .d5slot .dot{ background:var(--color-danger); }
+      .d5card[data-off='true'] .d5slot{ color:var(--color-danger); }
+      .d5name{ font-size:.86rem; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .d5card[data-off='true'] .d5name{ color:var(--color-fg-muted); }
+      .d5pct{ font-size:.74rem; color:var(--color-fg-muted); flex:0 0 auto; }
+      .d5act{ margin-left:auto; display:flex; gap:4px; flex:0 0 auto; }
+      .d5act .ib{ width:30px; height:30px; }
+      .d5cbtn{ align-self:flex-start; display:inline-flex; align-items:center; gap:6px; font:inherit; font-size:.74rem; color:var(--color-fg-muted);
+        background:var(--color-bg-input); border:1px solid var(--color-border-subtle); border-radius:var(--radius-pill); padding:3px 9px; cursor:pointer;}
+      .d5cbtn .cv{ transition:transform .15s; } .d5cbtn[aria-expanded='true'] .cv{transform:rotate(180deg);}
+      .d5exp{ padding-left:4px; }
+    </style>
+    <div class="d5row">
+      <span class="d5slot"><span class="dot"></span>${b.slot}</span>
+      <span class="d5name">${b.label}</span>
+      ${off?`<span class="offchip">Off</span>`:`<span class="d5pct">${b.amp} · ${b.pct}%</span>`}
+      <span class="d5act">
+        <button class="ib" style="${off?'color:var(--color-danger)':'color:var(--color-accent)'}" title="Toggle" onclick="flipib(this,${off})">${I(off?POWEROFF:POWER,'sm')}</button>
+        <button class="ib" title="Edit">${I(PENCIL,'sm')}</button>
+        <button class="ib ib--danger" title="Delete">${I(TRASH,'sm')}</button>
+      </span>
+    </div>
+    <button class="d5cbtn" aria-expanded="false" onclick="disc(this)">${b.comps.length} component${b.comps.length>1?'s':''}<span class="cv">${I(CHEV,'sm')}</span></button>
+    <div class="d5exp" hidden>${compList(b,off)}</div>
+  </div>`; }
+
+const designs = [
+  { n:1, title:'Header actions + footer disclosure', tag:'safest clear rework',
+    desc:'Card with a clean header: identity left, the <b>On/Off pill + icon actions top-right</b>. Body = label + a real <b>load bar</b>. A full-width <b>"N components"</b> disclosure is the card footer (inside the same border) so it unmistakably belongs to the breaker. Off → the whole card goes danger-tinted with an <b>OFF</b> chip.',
+    pros:['Components are literally inside the card','Actions clearly top-right','Load becomes a glanceable bar'],
+    cons:['Tallest of the five','One tap to see components'], r:d1 },
+  { n:2, title:'Status rail + switch', tag:'state-forward',
+    desc:'A full-height <b>colored rail</b> (green on / red off) ties the breaker and its components into one visual unit. A real <b>toggle switch</b> top-right makes power the primary action; the rest fold behind a <b>⋯</b> menu to declutter. Components are <b>always visible</b> under a divider.',
+    pros:['Rail reads on/off instantly','Components never hidden','Switch is the obvious primary action'],
+    cons:['⋯ menu hides edit/photos','Always-open comps add height'], r:d2 },
+  { n:3, title:'Two-column, components as chips', tag:'compact',
+    desc:'Identity + label on the left, <b>icon actions top-right</b>. Components render as <b>inline chips</b> right in the card — no separate "Show" row at all. Off → red left bar + red slot + tinted card.',
+    pros:['Components always shown, very compact','No disclosure needed','Reads in one glance'],
+    cons:['Chips get busy past ~4 components','Less room for long names'], r:d3 },
+  { n:4, title:'Power-first hero zone', tag:'boldest off state',
+    desc:'A large tappable <b>ON / OFF zone</b> on the right is the hero — sage when on, a <b>solid red block</b> when off (impossible to miss). Small photo/edit/delete icons sit in the very top-right; components are a footer disclosure.',
+    pros:['Off state is unmissable','Toggling is a big easy target','Secondary actions still top-right'],
+    cons:['Red block is visually heavy','Wide — needs the full row width'], r:d4 },
+  { n:5, title:'Compact dense scan row', tag:'best for many breakers',
+    desc:'A tight one-line row for scanning a full panel: <b>status dot</b> + slot + name + load%, with <b>icon actions top-right</b>. A small <b>"N components"</b> pill expands inline. Off → red-tinted row, red dot + slot, OFF chip.',
+    pros:['Most breakers per screen','Status dot = instant on/off scan','Still has top-right actions'],
+    cons:['Long labels truncate','Smaller tap targets'], r:d5 },
+];
+
+const gallery=document.getElementById('gallery');
+designs.forEach(d=>{
+  const w=document.createElement('div'); w.className='choice';
+  w.innerHTML=`
+    <div class="choice__head"><div class="choice__num">${d.n}</div>
+      <div><p class="choice__title">${d.title}</p><span class="choice__tag">${d.tag}</span></div></div>
+    <p class="choice__desc">${d.desc}</p>
+    <div class="frame">
+      <span class="frame__label">On</span>${d.r(ON,false)}
+      <span class="frame__label" style="margin-top:6px">Off — de-energized</span>${d.r(OFF,true)}
+    </div>
+    <div class="pc"><div class="pros"><b>Pros</b><ul>${d.pros.map(x=>`<li>${x}</li>`).join('')}</ul></div>
+      <div class="cons"><b>Cons</b><ul>${d.cons.map(x=>`<li>${x}</li>`).join('')}</ul></div></div>`;
+  gallery.appendChild(w);
+});
+
+/* tiny interactions */
+function disc(btn){ const open=btn.getAttribute('aria-expanded')==='true'; btn.setAttribute('aria-expanded',String(!open));
+  const exp=btn.parentElement.querySelector('.d1exp,.d5exp')|| btn.nextElementSibling; if(exp) exp.hidden=open; }
+function disc4(btn){ const open=btn.getAttribute('aria-expanded')==='true'; btn.setAttribute('aria-expanded',String(!open)); btn.nextElementSibling.hidden=open; }
+function sw(el){ el.dataset.on = el.dataset.on==='true' ? 'false':'true'; const card=el.closest('[data-off]'); if(card) card.dataset.off = el.dataset.on==='false'; }
+function flip(el){ const card=el.closest('[data-off]'); const off=card.dataset.off!=='true'; card.dataset.off=off;
+  el.className='ostate '+(off?'ostate--off':'ostate--on'); el.innerHTML=(off?'<svg class="i sm" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.4 6.6a9 9 0 0 1 2 9.6"/><path d="M5.6 6.6a9 9 0 0 0 11.5 13"/><path d="M12 2v6"/><path d="M3 3l18 18"/></svg>Off':'<svg class="i sm" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v9"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>On'); }
+function flipib(){ /* static demo — toggling shown via the two example cards */ }
+function flipzone(){ /* static demo */ }
+</script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useRoute } from 'wouter';
 import {
   AlertTriangle,
@@ -23,6 +23,7 @@ import {
   listBreakers,
   listComponents,
   listFloors,
+  setBreakerState,
   updateComponent,
 } from '../api.js';
 import { useModal } from '../hooks/useModal.js';
@@ -44,7 +45,6 @@ import {
   Tooltip,
 } from '../ui/index.js';
 
-const VISIBILITY_RESET_DELAY_MS = 10_000;
 
 /** Sentinel for the "All floors" segmented-control option. */
 const ALL_FLOORS = '__all__' as const;
@@ -142,7 +142,17 @@ export const TestPanelScreen = (): JSX.Element => {
       setBreakersByPanel(
         new Map(allBreakerGroups.map((g) => [g.panel.id, g.breakers]))
       );
-      setOffBreakers(new Set());
+      // 2026-05 — the off-set is now PERSISTENT (DB-backed via breaker.isOn),
+      // not ephemeral. Seed it from every house-wide breaker the user has
+      // marked off so the de-energized state survives reloads + propagates.
+      setOffBreakers(
+        new Set(
+          allBreakerGroups
+            .flatMap((g) => g.breakers)
+            .filter((br) => !br.isOn)
+            .map((br) => br.id)
+        )
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load panel.');
     } finally {
@@ -253,28 +263,9 @@ export const TestPanelScreen = (): JSX.Element => {
     };
   }, []);
 
-  // Lifecycle resets for the ephemeral offBreakers set: clear on visibilityState=hidden+10s.
-  const hiddenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    const onVisibilityChange = (): void => {
-      if (document.visibilityState === 'hidden') {
-        if (hiddenTimer.current) clearTimeout(hiddenTimer.current);
-        hiddenTimer.current = setTimeout(() => {
-          setOffBreakers(new Set());
-        }, VISIBILITY_RESET_DELAY_MS);
-      } else {
-        if (hiddenTimer.current) {
-          clearTimeout(hiddenTimer.current);
-          hiddenTimer.current = null;
-        }
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      if (hiddenTimer.current) clearTimeout(hiddenTimer.current);
-    };
-  }, []);
+  // 2026-05 — the off-set is now PERSISTENT (DB-backed), so the old
+  // ephemeral resets (clear on refresh / on visibilityState=hidden+10s) are
+  // gone. State changes go through `setBreakerState` and survive reloads.
 
   // G39 Part 2 (cycle-57): cascade-off breaker ids + attribution map.
   // A breaker is "cascade-off" when some feeder UPSTREAM is in the
@@ -354,44 +345,39 @@ export const TestPanelScreen = (): JSX.Element => {
     return components.filter((c) => c.floorId === selection);
   }, [components, selection]);
 
-  /** Legacy: toggle ephemeral off-set. Still used by the cascade walker.
-   *  Kept as a building block — `toggleWalkThrough` calls it. */
-  const toggleBreaker = (id: string): void => {
+  /** 2026-05 — toggle a breaker's PERSISTENT on/off state, optimistically.
+   *  Turning OFF also arms track mode (tap darkened components to assign them
+   *  to this breaker — the original walk-through workflow); turning ON
+   *  disarms it. The state change is persisted via `setBreakerState` (which
+   *  also writes a breaker_state_events audit row); on failure we roll the
+   *  optimistic flip back. */
+  const toggleWalkThrough = (id: string): void => {
+    const isCurrentlyOff = offBreakers.has(id);
+    const nextIsOn = isCurrentlyOff; // currently off → turning back on
     setOffBreakers((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
+      if (isCurrentlyOff) next.delete(id);
       else next.add(id);
       return next;
     });
+    setTrackingBreakerId(nextIsOn ? null : id);
+    void (async () => {
+      try {
+        await setBreakerState(id, nextIsOn);
+      } catch (e) {
+        // Roll back the optimistic flip.
+        setOffBreakers((prev) => {
+          const next = new Set(prev);
+          if (nextIsOn) next.add(id);
+          else next.delete(id);
+          return next;
+        });
+        toast.error(
+          e instanceof Error ? e.message : 'Failed to update breaker state.'
+        );
+      }
+    })();
   };
-
-  /** Refactor 2026-05 follow-up — single "Walk through" action.
-   *  Combines the previously-separate "Mark off" (visual flip) + "Track"
-   *  (tap-to-tag) into one button. Click → both off-state and track mode
-   *  arm for this breaker. Click again → restore + stop tracking. The
-   *  off-state itself is INTENTIONALLY ephemeral (mirrors a breaker the
-   *  user just flipped IRL); what's persisted is the component-to-breaker
-   *  assignment made by tapping each darkened component while tracking. */
-  const toggleWalkThrough = (id: string): void => {
-    const wasActive = trackingBreakerId === id && offBreakers.has(id);
-    if (wasActive) {
-      setOffBreakers((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      setTrackingBreakerId(null);
-    } else {
-      setOffBreakers((prev) => {
-        const next = new Set(prev);
-        next.add(id);
-        return next;
-      });
-      setTrackingBreakerId(id);
-    }
-  };
-  // Silence unused-import warnings now that toggleBreaker is internal only.
-  void toggleBreaker;
 
   const tapComponent = async (component: ResolvedComponent): Promise<void> => {
     if (trackingBreakerId === null) return;

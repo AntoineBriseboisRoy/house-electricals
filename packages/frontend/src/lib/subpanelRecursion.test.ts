@@ -27,6 +27,7 @@ const makeBreaker = (
   label: partial.label ?? `Breaker ${partial.id}`,
   tandemHalf: partial.tandemHalf ?? null,
   protection: partial.protection ?? null,
+  isOn: partial.isOn ?? true,
   createdAt: partial.createdAt ?? Date.now(),
 });
 

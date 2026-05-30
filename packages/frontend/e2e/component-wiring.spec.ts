@@ -61,6 +61,8 @@ test.describe('G31 component-edit wiring @cycle-39', () => {
     await expect(row).toBeVisible();
 
     // Click its Edit button.
+    // 2026-05 — Edit lives in the row's expandable detail; open it first.
+    await row.getByTestId('component-row-expand').click();
     await row.getByRole('button', { name: /Edit component/i }).click();
 
     // Two ComponentForms render on this page (create + edit). Scope to
@@ -99,6 +101,8 @@ test.describe('G31 component-edit wiring @cycle-39', () => {
     ).toBeVisible();
 
     const row = page.locator('li.component-row', { hasText: targetName });
+    // 2026-05 — Edit lives in the row's expandable detail; open it first.
+    await row.getByTestId('component-row-expand').click();
     await row.getByRole('button', { name: /Edit component/i }).click();
     const editingRow = page.locator('li.component-row--editing');
 
@@ -132,6 +136,8 @@ test.describe('G31 component-edit wiring @cycle-39', () => {
       hasText: 'Kitchen Outlet 1',
     });
     await expect(row).toBeVisible();
+    // 2026-05 — Edit lives in the row's expandable detail; open it first.
+    await row.getByTestId('component-row-expand').click();
     await row.getByRole('button', { name: /Edit component/i }).click();
     const editingRow = page.locator('li.component-row--editing');
 
