@@ -18,6 +18,7 @@ import { PrintableDiagramScreen } from './screens/PrintableDiagramScreen.js';
 import { PrintableBundleScreen } from './screens/PrintableBundleScreen.js';
 import { AuditScreen } from './screens/AuditScreen.js';
 import { DashboardScreen } from './screens/DashboardScreen.js';
+import { TroubleshootScreen } from './screens/TroubleshootScreen.js';
 import { LoginScreen } from './screens/LoginScreen.js';
 import { SignupScreen } from './screens/SignupScreen.js';
 import { useAuth } from './contexts/AuthContext.js';
@@ -139,6 +140,7 @@ const AuthedApp = (): JSX.Element => {
             /audit; NOT a 5th bottom-tab). Reached via the Status link in
             the Panels header. */}
         <Route path="/dashboard" component={DashboardScreen} />
+        <Route path="/troubleshoot" component={TroubleshootScreen} />
         <Route path="/test/:panelId" component={TestPanelScreen} />
         <Route path="/panels/:id/test" component={TestPanelScreen} />
         <Route path="/audit" component={AuditScreen} />

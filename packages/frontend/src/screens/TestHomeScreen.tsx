@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'wouter';
-import { CircuitBoard, ClipboardList } from 'lucide-react';
+import { CircuitBoard, ClipboardList , Zap } from 'lucide-react';
 import type { Panel } from '@he/shared';
 import {
   latestBreakerTestsByIds,
@@ -83,6 +83,15 @@ export const TestHomeScreen = (): JSX.Element => {
         title="Test"
         subtitle="Walk through a panel to verify each breaker controls what it should."
       />
+
+      <Link
+        href="/troubleshoot"
+        className="test-home__troubleshoot"
+        data-testid="open-troubleshoot"
+      >
+        <Zap size={18} aria-hidden="true" />
+        <span>Something not working? Troubleshoot →</span>
+      </Link>
 
       {rows === null ? (
         <Skeleton variant="row" count={3} />
