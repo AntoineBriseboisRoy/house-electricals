@@ -30,6 +30,7 @@ import { buildExportRoutes } from './routes/export.js';
 import { buildImportRoutes } from './routes/import.js';
 import { buildWallRoutes } from './routes/walls.js';
 import { buildSwitchControlRoutes } from './routes/switch-controls.js';
+import { buildWarningDismissalRoutes } from './routes/warning-dismissals.js';
 import { devStaticRoutes } from './routes/dev-static.js';
 import { healthRoutes } from './routes/health.js';
 import { configRoutes } from './routes/config.js';
@@ -198,6 +199,7 @@ export const buildApp = (deps: AppDeps): Hono => {
     '/api/v1',
     buildSwitchControlRoutes(deps.db, deps.componentRepository)
   );
+  app.route('/api/v1', buildWarningDismissalRoutes(deps.db));
   app.route(
     '/api/v1',
     buildAttachmentRoutes(

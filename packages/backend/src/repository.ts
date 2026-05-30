@@ -467,6 +467,20 @@ export const initSchema = async (db: Db): Promise<void> => {
     -- per-building indexes are guaranteed present, so this drop is safe.
     DROP INDEX IF EXISTS idx_unique_panels_name;
     DROP INDEX IF EXISTS idx_unique_floors_name;
+
+    -- Warning dismissals (2026-05). Persists a user's "dismiss this warning"
+    -- choice, scoped by (building, warning-kind, period) so it auto-expires:
+    -- the monthly GFCI/AFCI banner dismisses for the CURRENT month only, and
+    -- reappears next month because the period_start key changes. building_id
+    -- FK CASCADE so a deleted building drops its dismissals. The composite PK
+    -- IS the lookup index (building_id + kind + period_start) — no extra index.
+    CREATE TABLE IF NOT EXISTS warning_dismissals (
+      building_id TEXT NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      period_start BIGINT NOT NULL,
+      created_at BIGINT NOT NULL,
+      PRIMARY KEY (building_id, kind, period_start)
+    );
   `);
 };
 

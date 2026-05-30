@@ -173,6 +173,44 @@ export const buildingSchema = z.object({
 export type BuildingInputParsed = z.infer<typeof buildingInputSchema>;
 export type BuildingPatchParsed = z.infer<typeof buildingPatchSchema>;
 
+// --- Warning dismissals (2026-05) -------------------------------------------
+//
+// Persists a user's "dismiss this warning" choice, scoped so it auto-expires.
+// The first (and only) consumer is the monthly GFCI/AFCI "untested this month"
+// banner on PanelListScreen: dismissing it writes a row keyed on the current
+// month-start epoch, so next month — when the period key changes — the banner
+// reappears on its own with no cleanup needed.
+//
+// Key = (building_id, kind, period_start):
+//  - building_id : per-building (each building tracks its own dismissals)
+//  - kind        : a closed string id of WHICH warning (frozen enum below)
+//  - period_start: epoch ms of the period the dismissal applies to (for the
+//                  monthly warning this is startOfMonthEpoch()). A different
+//                  period = a different row = the warning is live again.
+
+/** Closed set of dismissible warnings. Add a value here + nowhere else when a
+ *  new warning becomes dismissible. */
+export const warningKindSchema = z.enum(['protection-monthly']);
+export type WarningKind = z.infer<typeof warningKindSchema>;
+
+export type WarningDismissal = {
+  buildingId: string;
+  kind: WarningKind;
+  /** Epoch ms identifying the period this dismissal covers. */
+  periodStart: number;
+  createdAt: number;
+};
+
+/** POST body to record a dismissal. buildingId is taken from the query/active
+ *  building server-side is NOT done — it's explicit here to match the flat
+ *  building-scoped route convention (mirrors switch-controls ?buildingId). */
+export const warningDismissalInputSchema = z.object({
+  buildingId: z.string().min(1),
+  kind: warningKindSchema,
+  periodStart: z.number().int().nonnegative(),
+});
+export type WarningDismissalInput = z.infer<typeof warningDismissalInputSchema>;
+
 /** Body for the move-to-building endpoints (panels/floors). */
 export const moveToBuildingSchema = z.object({
   buildingId: z.string().min(1),

@@ -2146,19 +2146,23 @@ h2 {
   border-color: var(--color-warning-border);
 }
 .protection-aggregate-card__inner {
+  /* NO padding here — the parent .card already provides var(--space-4); a
+   * second layer of padding made the banner feel oversized. The dismiss (X)
+   * is a sibling (direct child of .card) so it anchors to the real box corner,
+   * not this padding-inset row. */
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  flex-wrap: wrap;
 }
 .protection-aggregate-card__icon {
   display: inline-flex;
   color: var(--color-warning);
   flex-shrink: 0;
+  /* nudge the icon to sit on the title's optical baseline */
+  margin-top: 2px;
 }
 .protection-aggregate-card__body {
-  flex: 1 1 220px;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -2166,6 +2170,8 @@ h2 {
 }
 .protection-aggregate-card__title {
   margin: 0;
+  /* reserve room so a long title never runs under the corner X */
+  padding-right: var(--touch-target);
   font-weight: var(--text-weight-semibold);
   color: var(--color-fg-default);
 }
@@ -2173,6 +2179,24 @@ h2 {
   margin: 0;
   font-size: var(--text-size-sm);
   color: var(--color-fg-muted);
+}
+/* "Test all now" sits below the text, right-aligned so its right edge lines up
+ * with the right edge of the text block above it. */
+.protection-aggregate-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-3);
+}
+/* Dismiss (X) pinned to the card's top-right corner. Muted ghost so it reads
+ * as a secondary "not now". Tucked tight to the corner via small offsets. */
+.protection-aggregate-card__dismiss {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  color: var(--color-fg-muted);
+}
+.protection-aggregate-card__dismiss:hover {
+  color: var(--color-fg-default);
 }
 
 .component-row__assign {
@@ -3803,6 +3827,10 @@ h2 {
 }
 
 /* G15 desktop canvas — 3-column layout on >=960px, single column below */
+/* 2026-05 — the tools surface is now a horizontal carousel (`.tool-bar`)
+   spanning the TOP on both breakpoints. Mobile: single column, the bar
+   stacks above canvas + props. Desktop (>=960px): a 2-col / 2-row grid —
+   the bar spans the full top row; canvas (main) + props (right) sit below. */
 .floor-edit__layout {
   display: grid;
   grid-template-columns: 1fr;
@@ -3812,20 +3840,18 @@ h2 {
 
 @media (min-width: 960px) {
   .floor-edit__layout {
-    grid-template-columns: 240px 1fr 320px;
+    grid-template-columns: 1fr 320px;
+    grid-template-rows: auto 1fr;
     align-items: start;
+  }
+  /* The toolbar spans both content columns along the top row. */
+  .floor-edit__layout > .tool-bar {
+    grid-column: 1 / -1;
   }
   /* On desktop the body should fill the viewport, not collapse to mobile width. */
   .floor-edit__body {
     max-width: none;
   }
-}
-
-.floor-edit__tools {
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  padding: var(--space-3);
 }
 
 .floor-edit__canvas {
@@ -3849,95 +3875,81 @@ h2 {
   margin-bottom: 0;
 }
 
-/* Tool palette — vertical on desktop, horizontal on phone */
-.tool-palette {
+/* Tool carousel (2026-05) — replaces the old vertical `.tool-palette` grid
+   on BOTH breakpoints. A horizontal, scroll-snapping track of labelled tool
+   pills, flanked by prev/next paging arrows. One component, identical on
+   mobile + desktop (only the arrow + kbd-badge visibility flips on touch).
+   No new token NAMES (cycle-11/17/20 rule). */
+.tool-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2);
+}
+
+.tool-bar__track {
   list-style: none;
   margin: 0;
   padding: 0;
+  flex: 1;
+  min-width: 0;
   display: flex;
-  flex-direction: column;
   gap: var(--space-2);
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: var(--space-4);
+  /* Hide the scrollbar — paging arrows (desktop) + native swipe (touch) are
+     the affordances; a visible bar would clutter the slim strip. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.tool-bar__track::-webkit-scrollbar {
+  display: none;
+}
+.tool-bar__track > li {
+  flex: 0 0 auto;
+  scroll-snap-align: center;
+}
+
+/* Pills: icon + label, pill-shaped, never wrap. Active = accent-subtle
+   (same treatment the old palette used — cycle-84 P2 #8). */
+.tool-bar__pill {
+  white-space: nowrap;
+  border-radius: var(--radius-pill);
+}
+.tool-bar__pill[data-active] {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+.tool-bar__pill[data-active]:hover {
+  background: color-mix(
+    in srgb,
+    var(--color-accent-subtle) 70%,
+    var(--color-accent-hover)
+  );
+}
+
+.tool-bar__arrow {
+  flex: 0 0 auto;
+}
+.tool-bar__arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 @media (max-width: 959px) {
-  /* G28 cycle-34 + 2026-05: pack the tools into an even 3-column grid so no
-     tool is orphaned on its own row. (The prior flex-wrap relied on a
-     :last-child full-width rule meant for a since-removed Reset-zoom button;
-     once that button moved to the floating on-canvas controls the rule
-     pushed "Switch" — the new last child — onto its own line.) On touch the
-     kbd badges + the section divider are hidden, and each tool button fills
-     its grid cell for equal, tappable widths. */
-  .tool-palette {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: var(--space-1);
-  }
-  .tool-palette > li > .kbd-badge,
-  .tool-palette > li .kbd-badge {
+  /* Touch users swipe the track natively, so the paging arrows + the kbd
+     hint badges (no physical keyboard) only add clutter — hide both. */
+  .tool-bar__arrow {
     display: none;
   }
-  .tool-palette > li .btn {
-    width: 100%;
-    padding-inline: var(--space-2);
-  }
-  /* display:none removes the divider from the grid flow entirely, so the 6
-     tools pack cleanly into two rows of three. Selector is `> li.tool-...`
-     (specificity 0,2,1) so it can't be out-specificity'd by `> li` rules. */
-  .tool-palette > li.tool-palette__divider {
+  .tool-bar__pill .kbd-badge {
     display: none;
   }
-  /* The extra-component icon row spans the full palette width on mobile so its
-     4 icons get an even, tappable layout instead of cramming into one column. */
-  .tool-palette > li:has(.tool-palette__component-extras) {
-    grid-column: 1 / -1;
-  }
-}
-
-.tool-palette__divider {
-  height: 1px;
-  background: var(--color-border-subtle);
-  margin: var(--space-1) 0;
-}
-
-/* Cycle-84 (P2 #8) — FloorEdit tool-palette active state via data-active
-   attribute on the .btn--ghost Button. Replaces the prior dominant
-   variant="primary" treatment. Uses existing accent-subtle tokens
-   (cycle-23 G22) — no new token NAMES. */
-.tool-palette > li .btn[data-active] {
-  background: var(--color-accent-subtle);
-  color: var(--color-accent);
-  border-color: var(--color-accent-border);
-}
-.tool-palette > li .btn[data-active]:hover {
-  background: color-mix(
-    in srgb,
-    var(--color-accent-subtle) 70%,
-    var(--color-accent-hover)
-  );
-}
-
-/* The 4 less-common component quick-create tools — a compact icon row inside
-   the palette so every catalog type is placeable without a full-width button
-   each. Reuses the .icon-btn primitive; active state mirrors the .btn rule. */
-.tool-palette__component-extras {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--space-1);
-}
-.tool-palette__component-extras .icon-btn {
-  width: 100%;
-}
-.tool-palette__component-extras .icon-btn[data-active] {
-  background: var(--color-accent-subtle);
-  color: var(--color-accent);
-  border-color: var(--color-accent-border);
-}
-.tool-palette__component-extras .icon-btn[data-active]:hover {
-  background: color-mix(
-    in srgb,
-    var(--color-accent-subtle) 70%,
-    var(--color-accent-hover)
-  );
 }
 
 /* Tooltip primitive (cycle-75).

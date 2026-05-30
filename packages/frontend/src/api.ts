@@ -24,6 +24,8 @@ import type {
   SwitchControl,
   Wall,
   WallInput,
+  WarningDismissal,
+  WarningKind,
 } from '@he/shared';
 
 /**
@@ -798,6 +800,47 @@ export const listSwitchControlsByBuilding = async (
     `/api/v1/switch-controls?buildingId=${encodeURIComponent(bid)}`
   );
   return unwrap<SwitchControl[]>(res);
+};
+
+// --- Warning dismissals (2026-05) -------------------------------------------
+
+/**
+ * List the dismissed warnings for a building (optionally one kind). Building-
+ * scoped via the active building when not passed. Returns [] when no building
+ * is set. Callers check whether any row's `periodStart` matches the current
+ * period to decide if a warning is still dismissed.
+ */
+export const listWarningDismissals = async (
+  kind?: WarningKind,
+  buildingId?: string
+): Promise<WarningDismissal[]> => {
+  const bid = buildingId ?? activeBuildingId;
+  if (bid === null || bid === undefined || bid.length === 0) return [];
+  const params = new URLSearchParams({ buildingId: bid });
+  if (kind !== undefined) params.set('kind', kind);
+  const res = await fetch(`/api/v1/warning-dismissals?${params.toString()}`);
+  return unwrap<WarningDismissal[]>(res);
+};
+
+/**
+ * Record a warning dismissal for a given period (epoch ms). Idempotent on the
+ * server. Building-scoped via the active building when not passed.
+ */
+export const dismissWarning = async (
+  kind: WarningKind,
+  periodStart: number,
+  buildingId?: string
+): Promise<WarningDismissal> => {
+  const bid = buildingId ?? activeBuildingId;
+  if (bid === null || bid === undefined || bid.length === 0) {
+    throw new Error('No active building to record the dismissal against.');
+  }
+  const res = await fetch('/api/v1/warning-dismissals', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ buildingId: bid, kind, periodStart }),
+  });
+  return unwrap<WarningDismissal>(res);
 };
 
 export const deleteRoom = async (id: string): Promise<void> => {

@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link } from 'wouter';
-import { Activity, CornerDownRight, Plus, ShieldAlert } from 'lucide-react';
+import { Activity, CornerDownRight, Plus, ShieldAlert, X } from 'lucide-react';
 import type { Breaker, Panel } from '@he/shared';
 import {
   ApiHttpError,
   createBreakerTest,
   createPanel,
+  dismissWarning,
   latestBreakerTestsByIds,
   listAllBreakersGrouped,
   listPanels,
+  listWarningDismissals,
 } from '../api.js';
 import { suffixDuplicate } from '../lib/duplicateName.js';
 import { startOfMonthEpoch } from '../lib/datetime.js';
@@ -18,6 +20,7 @@ import {
   Button,
   Card,
   EmptyState,
+  IconButton,
   Input,
   Modal,
   NoPanels,
@@ -67,6 +70,13 @@ export const PanelListScreen = (): JSX.Element => {
   /** G37 Part 2 cycle-69 — in-flight flag for the "Test all now" fan-out
    *  so the button can disable + show progress text. */
   const [testingAll, setTestingAll] = useState(false);
+  /** 2026-05 — period_start values for which the user dismissed the monthly
+   *  protection banner (this building). The banner is hidden when the current
+   *  monthStart is in this set; next month monthStart changes so it reappears.
+   *  Persisted server-side via /warning-dismissals. */
+  const [protectionDismissals, setProtectionDismissals] = useState<number[]>(
+    []
+  );
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -80,11 +90,14 @@ export const PanelListScreen = (): JSX.Element => {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [allPanels, grouped] = await Promise.all([
+      const [allPanels, grouped, dismissals] = await Promise.all([
         listPanels(),
         listAllBreakersGrouped(),
+        // Best-effort — a dismissals fetch failure must not break the list.
+        listWarningDismissals('protection-monthly').catch(() => []),
       ]);
       setPanels(allPanels);
+      setProtectionDismissals(dismissals.map((d) => d.periodStart));
       const idx = new Map<
         string,
         {
@@ -162,6 +175,30 @@ export const PanelListScreen = (): JSX.Element => {
       filterUntestedProtected(protectedBreakers, latestTestByBreaker, monthStart),
     [protectedBreakers, latestTestByBreaker, monthStart]
   );
+
+  /** 2026-05 — true when the user dismissed the monthly protection banner for
+   *  THIS month. Hides the banner until next month (monthStart rolls over). */
+  const protectionDismissed = useMemo(
+    () => protectionDismissals.includes(monthStart),
+    [protectionDismissals, monthStart]
+  );
+
+  /** 2026-05 — dismiss the monthly protection banner for the current month.
+   *  Optimistic (hides immediately) + persists server-side; rolls back the
+   *  local hide on failure so the banner doesn't silently vanish unsaved. */
+  const handleDismissProtection = useCallback(async () => {
+    setProtectionDismissals((prev) =>
+      prev.includes(monthStart) ? prev : [...prev, monthStart]
+    );
+    try {
+      await dismissWarning('protection-monthly', monthStart);
+    } catch (e) {
+      setProtectionDismissals((prev) => prev.filter((p) => p !== monthStart));
+      toast.error(
+        e instanceof Error ? e.message : 'Could not dismiss the reminder.'
+      );
+    }
+  }, [monthStart]);
 
   /** G37 Part 2 cycle-69 — one-tap "Test all now" fan-out. Confirms,
    *  then POSTs one breaker_tests row per untested protected breaker
@@ -406,7 +443,7 @@ export const PanelListScreen = (): JSX.Element => {
           to do). One-tap "Test all now" fans out N POSTs via
           Promise.allSettled and refreshes — card auto-hides when all
           are this-month-tested. */}
-      {!loading && untestedProtected.length > 0 && (
+      {!loading && untestedProtected.length > 0 && !protectionDismissed && (
         <Card
           className="protection-aggregate-card"
           data-testid="panel-list-protection-aggregate-card"
@@ -428,17 +465,31 @@ export const PanelListScreen = (): JSX.Element => {
                 NEC recommends monthly testing of GFCI &amp; AFCI
                 protection devices.
               </p>
+              <div className="protection-aggregate-card__actions">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => void handleTestAllProtected()}
+                  disabled={testingAll}
+                  data-testid="test-all-protected"
+                >
+                  {testingAll ? 'Marking…' : 'Test all now'}
+                </Button>
+              </div>
             </div>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => void handleTestAllProtected()}
-              disabled={testingAll}
-              data-testid="test-all-protected"
-            >
-              {testingAll ? 'Marking…' : 'Test all now'}
-            </Button>
           </div>
+          {/* 2026-05 — dismiss for THIS month; reappears next month. Direct
+              child of the Card (position: relative) so it pins to the box's
+              true top-right corner, not the padding-inset content area. */}
+          <IconButton
+            icon={<X size={18} strokeWidth={2.25} />}
+            aria-label="Dismiss this month's reminder"
+            variant="ghost"
+            onClick={() => void handleDismissProtection()}
+            disabled={testingAll}
+            data-testid="dismiss-protection-warning"
+            className="protection-aggregate-card__dismiss"
+          />
         </Card>
       )}
 
