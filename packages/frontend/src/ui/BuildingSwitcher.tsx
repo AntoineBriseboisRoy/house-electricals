@@ -3,7 +3,7 @@ import { Building2, ChevronsUpDown } from 'lucide-react';
 import type { Building } from '@he/shared';
 import { useBuilding } from '../contexts/BuildingContext.js';
 import { useModal } from '../hooks/useModal.js';
-import { ApiHttpError } from '../api.js';
+import { ApiHttpError, importBuilding } from '../api.js';
 import { toast } from './toast.js';
 import { BuildingsModal } from './BuildingsModal.js';
 
@@ -27,9 +27,11 @@ export const BuildingSwitcher = (): JSX.Element => {
     createBuilding,
     renameBuilding,
     deleteBuilding,
+    refresh,
   } = useBuilding();
   const { prompt, confirm, modalNode } = useModal();
   const [open, setOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const handleSwitch = (id: string): void => {
     if (id !== currentBuildingId) switchBuilding(id);
@@ -99,6 +101,62 @@ export const BuildingSwitcher = (): JSX.Element => {
     }
   };
 
+  /**
+   * G43 — restore a building from a previously-exported JSON file. Reads +
+   * parses the file (bad JSON → toast), POSTs the envelope to
+   * /api/v1/buildings/import, then refreshes the building list, switches the
+   * active building to the freshly restored copy, and closes the modal. The
+   * backend 400 messages (wrong format / unsupported version) are
+   * user-meaningful, so we pull `.error.message` out of the ApiHttpError
+   * detail and surface it verbatim.
+   */
+  const handleImport = async (file: File): Promise<void> => {
+    setImporting(true);
+    try {
+      const text = await file.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        toast.error('That file isn’t valid JSON.');
+        return;
+      }
+      const building = await importBuilding(parsed);
+      // The building is saved server-side now. Refresh the list best-effort —
+      // a transient GET /buildings hiccup must NOT fall into the catch below
+      // and falsely toast "could not import" (which would tempt a duplicate
+      // re-import). Worst case the list catches up on the next natural load.
+      try {
+        await refresh();
+      } catch {
+        /* list updates on next load — the import already succeeded */
+      }
+      switchBuilding(building.id);
+      toast.success(`Imported “${building.name}”.`);
+      setOpen(false);
+    } catch (err) {
+      let message = 'Could not import that building.';
+      if (err instanceof ApiHttpError) {
+        // The backend's error body is { error: { message } }; ApiHttpError
+        // carries the raw response text in `detail`.
+        try {
+          const body = JSON.parse(err.detail) as {
+            error?: { message?: string };
+          };
+          if (body.error?.message) message = body.error.message;
+          else if (err.detail) message = err.detail;
+        } catch {
+          if (err.detail) message = err.detail;
+        }
+      } else if (err instanceof Error && err.message) {
+        message = err.message;
+      }
+      toast.error(message);
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <>
       <button
@@ -118,11 +176,13 @@ export const BuildingSwitcher = (): JSX.Element => {
         open={open}
         buildings={buildings}
         currentBuildingId={currentBuildingId}
+        busy={importing}
         onClose={() => setOpen(false)}
         onSwitch={handleSwitch}
         onCreate={() => void handleCreate()}
         onRename={(b) => void handleRename(b)}
         onDelete={(b) => void handleDelete(b)}
+        onImport={(file) => void handleImport(file)}
       />
       {modalNode}
     </>

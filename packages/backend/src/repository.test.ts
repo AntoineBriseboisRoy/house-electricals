@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Db } from './db.js';
 import {
+  initSchema,
   PgBreakerRepository,
   PgComponentRepository,
   PgFloorRepository,
@@ -210,5 +211,81 @@ describe('G35 Part 2 cycle-59: components.critical column', () => {
         ['x-1', 'outlet', 'Bad', 1, 2, 1000]
       )
     );
+  });
+});
+
+// audit/harden — regression for the import-blocking index bug. initSchema()
+// runs on EVERY backend boot; it re-creates the legacy GLOBAL
+// idx_unique_{panels,floors}_name each time, while the one-time per-building
+// swap only drops it on first creation. So after a SECOND init (a reboot) the
+// global index came back and coexisted with the per-building one, wrongly
+// blocking two buildings from sharing a "Main Floor"/"Main Panel" — which broke
+// building import (cloning a building whose names already exist). The fix drops
+// the global indexes UNCONDITIONALLY after the swap.
+describe('initSchema idempotency across reboots (legacy global name indexes)', () => {
+  let cleanup: () => Promise<void>;
+  let db: Db;
+
+  beforeEach(async () => {
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    db = t.db;
+  });
+
+  afterEach(async () => {
+    await cleanup();
+  });
+
+  it('no legacy global name index survives a second init', async () => {
+    // A second init() == a reboot.
+    await initSchema(db);
+
+    const idx = await db.query<{ indexname: string }>(
+      `SELECT indexname FROM pg_indexes
+       WHERE schemaname = current_schema()
+         AND tablename IN ('panels','floors')
+         AND indexname LIKE 'idx_unique%'`
+    );
+    const names = new Set(idx.map((r) => r.indexname));
+    // The per-building indexes are the canonical ones.
+    assert.ok(names.has('idx_unique_panels_building_name'));
+    assert.ok(names.has('idx_unique_floors_building_name'));
+    // The legacy global ones must NOT survive a reboot.
+    assert.ok(
+      !names.has('idx_unique_panels_name'),
+      'legacy global idx_unique_panels_name must be dropped'
+    );
+    assert.ok(
+      !names.has('idx_unique_floors_name'),
+      'legacy global idx_unique_floors_name must be dropped'
+    );
+  });
+
+  it('two buildings can each have a "Main Floor"/"Main Panel" after a reboot', async () => {
+    await initSchema(db); // reboot
+
+    // Two distinct buildings.
+    await db.execute(
+      `INSERT INTO buildings (id, name, created_at) VALUES ($1,$2,$3), ($4,$5,$6)`,
+      ['bld-a', 'House A', 1, 'bld-b', 'House B', 2]
+    );
+
+    const panels = new PgPanelRepository(db);
+    const floors = new PgFloorRepository(db);
+
+    await panels.create({ name: 'Main Panel', buildingId: 'bld-a' });
+    await panels.create({ name: 'Main Panel', buildingId: 'bld-b' }); // must NOT 23505
+    await floors.create({ name: 'Main Floor', buildingId: 'bld-a' });
+    await floors.create({ name: 'Main Floor', buildingId: 'bld-b' }); // must NOT 23505
+
+    // Sanity: both buildings really do have the same-named container.
+    const pCount = await db.queryOne<{ n: number }>(
+      `SELECT count(*)::int AS n FROM panels WHERE name = 'Main Panel'`
+    );
+    const fCount = await db.queryOne<{ n: number }>(
+      `SELECT count(*)::int AS n FROM floors WHERE name = 'Main Floor'`
+    );
+    assert.equal(pCount?.n, 2);
+    assert.equal(fCount?.n, 2);
   });
 });

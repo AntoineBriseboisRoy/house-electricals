@@ -3101,6 +3101,85 @@ h2 {
   color: #777;
 }
 
+/* G44 — QR scan-index section. A dedicated grid of per-breaker deep-link QR
+   codes (each opens the app to that breaker's slot pulse when scanned). Kept
+   SEPARATE from the compact 2-column .printable-slots grid so the slot grid
+   layout is unchanged. Literal hex only — this lives inside .printable-page
+   and must stay theme-invariant per cycle-27 G24 ADR #4 (paper artifact). */
+.printable-page .printable-scan-index {
+  margin-top: 18pt;
+  padding-top: 8pt;
+  border-top: 2px solid #111;
+}
+.printable-page .printable-scan-index__heading {
+  margin: 0 0 2pt 0;
+  font-size: 12pt;
+  font-weight: 700;
+  color: #111;
+}
+.printable-page .printable-scan-index__note {
+  margin: 0 0 8pt 0;
+  font-size: 8pt;
+  color: #555;
+}
+.printable-page .printable-scan-index__grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96pt, 1fr));
+  gap: 8pt;
+}
+.printable-page .printable-scan-index__item {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 3pt;
+  border: 1px solid #999;
+  border-radius: 4px;
+  padding: 6pt;
+  background: #fff;
+}
+.printable-page .printable-scan-index__caption {
+  font-size: 8pt;
+  line-height: 1.25;
+  color: #111;
+}
+.printable-page .printable-scan-index__slot {
+  font-weight: 700;
+}
+.printable-page .printable-scan-index__label {
+  display: block;
+  color: #333;
+}
+/* QR wrapper from ui/qr.tsx — keep the SVG crisp + block-level on paper. */
+.printable-page .qr {
+  display: inline-flex;
+  line-height: 0;
+  background: #fff;
+}
+.printable-page .qr > svg {
+  display: block;
+}
+/* Panel-level QR in the header; the visible origin text below it makes a
+   wrong/stale-origin printed label human-diagnosable (PIN 4). */
+.printable-page .printable-page__qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4pt;
+  flex: 0 0 auto;
+}
+.printable-page .printable-scan-index__origin {
+  font-size: 7pt;
+  color: #555;
+  word-break: break-all;
+  max-width: 120pt;
+}
+
 @media print {
   @page { size: letter; margin: 0.5in; }
   body {
@@ -3595,6 +3674,11 @@ h2 {
   .tool-palette > li.tool-palette__divider {
     display: none;
   }
+  /* The extra-component icon row spans the full palette width on mobile so its
+     4 icons get an even, tappable layout instead of cramming into one column. */
+  .tool-palette > li:has(.tool-palette__component-extras) {
+    grid-column: 1 / -1;
+  }
 }
 
 .tool-palette__divider {
@@ -3613,6 +3697,30 @@ h2 {
   border-color: var(--color-accent-border);
 }
 .tool-palette > li .btn[data-active]:hover {
+  background: color-mix(
+    in srgb,
+    var(--color-accent-subtle) 70%,
+    var(--color-accent-hover)
+  );
+}
+
+/* The 4 less-common component quick-create tools — a compact icon row inside
+   the palette so every catalog type is placeable without a full-width button
+   each. Reuses the .icon-btn primitive; active state mirrors the .btn rule. */
+.tool-palette__component-extras {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-1);
+}
+.tool-palette__component-extras .icon-btn {
+  width: 100%;
+}
+.tool-palette__component-extras .icon-btn[data-active] {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+.tool-palette__component-extras .icon-btn[data-active]:hover {
   background: color-mix(
     in srgb,
     var(--color-accent-subtle) 70%,
@@ -6170,4 +6278,139 @@ h2 {
   top: var(--space-4);
   right: var(--space-4);
   background: var(--color-bg-surface-raised);
+}
+
+/* ===========================================================================
+   G45 — Home status dashboard (/dashboard).
+   Count cards composed from already-computed signals. No new token NAMES —
+   reads existing color/space/radius/text tokens only.
+   =========================================================================== */
+.dashboard__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.dashboard-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.dashboard-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.dashboard-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--color-fg-muted);
+}
+
+.dashboard-card__icon[data-status='over'] {
+  color: var(--color-danger);
+}
+
+.dashboard-card__icon[data-status='warn'] {
+  color: var(--color-warning);
+}
+
+.dashboard-card__icon[data-status='ok'] {
+  color: var(--color-success);
+}
+
+.dashboard-card__icon[data-status='info'] {
+  color: var(--color-accent);
+}
+
+.dashboard-card__title {
+  font-size: var(--text-size-base);
+  font-weight: var(--text-weight-semibold);
+  color: var(--color-fg-default);
+  margin: 0;
+}
+
+.dashboard-card__metric {
+  font-size: var(--text-size-base);
+  color: var(--color-fg-default);
+  margin: 0;
+}
+
+.dashboard-card__count {
+  font-size: var(--text-size-xl);
+  font-weight: var(--text-weight-bold);
+  color: var(--color-fg-strong);
+}
+
+.dashboard-card__count[data-tier='over'] {
+  color: var(--color-danger);
+}
+
+.dashboard-card__count[data-tier='warn'] {
+  color: var(--color-warning);
+}
+
+.dashboard-card__count[data-tier='info'] {
+  color: var(--color-fg-strong);
+}
+
+.dashboard-card__calm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-muted);
+  margin: 0;
+}
+
+.dashboard-card__link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-medium);
+  color: var(--color-accent);
+  text-decoration: none;
+  min-height: var(--touch-target);
+  align-self: flex-start;
+}
+
+.dashboard-card__link:hover {
+  text-decoration: underline;
+}
+
+.dashboard-card__counts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.dashboard-card__count-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: inherit;
+  min-height: var(--touch-target);
+  background: var(--color-bg-hover);
+}
+
+.dashboard-card__count-row:hover {
+  background: var(--color-bg-input);
+}
+
+.dashboard-card__count-label {
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-muted);
 }

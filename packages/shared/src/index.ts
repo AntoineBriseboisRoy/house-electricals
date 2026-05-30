@@ -1092,3 +1092,49 @@ export type SignupInputParsed = z.infer<typeof signupInputSchema>;
 export type ChangePasswordInputParsed = z.infer<
   typeof changePasswordInputSchema
 >;
+
+// ── Building export/import envelope (G43 — 2026-05) ──────────────────────────
+//
+// The single source of truth for the `house-electricals-building-export`
+// payload shape. The EXPORT route's output type (`BuildingExport` in
+// routes/export.ts) is derived from `BuildingExportParsed` below, and the
+// IMPORT route validates incoming payloads with `buildingExportSchema`. Sharing
+// one schema makes "what export writes" provably identical to "what import
+// accepts" — they can never silently drift apart.
+
+/** A switch_controls triple. Composed here (vs reusing the input schema, which
+ *  omits `switchId` because that comes from the URL path on the write route) so
+ *  the export/import envelope carries the full link. Mirrors the `SwitchControl`
+ *  type. */
+export const switchControlSchema = z.object({
+  switchId: z.string(),
+  gangIndex: z.number().int().min(0).max(7),
+  controlledId: z.string(),
+});
+
+/** The exported component carries `posX`/`posY` (placement on a floor plan).
+ *  The base `componentSchema` omits them — it predates the export feature and
+ *  is only used for type inference elsewhere — so the export envelope extends
+ *  it. Keep bounds in sync with `componentInputSchema`'s posX/posY. */
+export const exportComponentSchema = componentSchema.extend({
+  posX: z.number().int().min(COORD_MIN).max(COORD_MAX).nullable(),
+  posY: z.number().int().min(COORD_MIN).max(COORD_MAX).nullable(),
+});
+
+export const buildingExportSchema = z.object({
+  format: z.literal('house-electricals-building-export'),
+  version: z.literal(1),
+  exportedAt: z.number(),
+  building: buildingSchema,
+  floors: z.array(floorSchema),
+  rooms: z.array(roomSchema),
+  walls: z.array(wallSchema),
+  panels: z.array(panelSchema),
+  breakers: z.array(breakerSchema),
+  components: z.array(exportComponentSchema),
+  switchControls: z.array(switchControlSchema),
+  serviceEntries: z.array(serviceEntrySchema),
+  breakerTests: z.array(breakerTestSchema),
+});
+
+export type BuildingExportParsed = z.infer<typeof buildingExportSchema>;

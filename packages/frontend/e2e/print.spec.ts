@@ -12,6 +12,7 @@ import { test, expect } from '@playwright/test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { authedFetch, E2E_BACKEND_URL } from './authed-fetch.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -38,9 +39,12 @@ test.describe('G24 printable diagram @cycle-27', () => {
     // Heading is the panel name.
     await expect(page.getByRole('heading', { name: 'Main Panel' })).toBeVisible();
 
-    // Slot grid is present with the seeded breakers.
-    await expect(page.getByText('Kitchen lights')).toBeVisible();
-    await expect(page.getByText('Kitchen outlets')).toBeVisible();
+    // Slot grid is present with the seeded breakers. Scope to the slot grid
+    // (G44 added a "Scan index" section that ALSO renders the labels, which
+    // would make a bare getByText ambiguous under strict mode).
+    const slots = page.getByLabel('Breaker slots');
+    await expect(slots.getByText('Kitchen lights')).toBeVisible();
+    await expect(slots.getByText('Kitchen outlets')).toBeVisible();
 
     // Escape-hatch confirmed: no bottom-tabs nav in the DOM.
     await expect(page.locator('.bottom-tabs')).toHaveCount(0);
@@ -78,5 +82,60 @@ test.describe('G24 printable diagram @cycle-27', () => {
     await expect(link).toBeVisible();
     const href = await link.getAttribute('href');
     expect(href).toBe(`/panels/${seeded.panelId}/print`);
+  });
+
+  // G44 — QR deep-link labels. The panel header carries a panel-level QR and a
+  // dedicated "Scan index" section carries one QR per OCCUPIED breaker, each
+  // encoding the verbatim G44 deep-link contract:
+  //   panel:   <origin>/panels/<id>
+  //   breaker: <origin>/panels/<id>#breaker-<bid>
+  // Assert via the data-qr-value attribute rendered by ui/qr.tsx (PIN 1),
+  // NOT by decoding the SVG.
+  test('renders panel-level + per-breaker QR deep links @g44', async ({ page }) => {
+    const seeded = loadSeeded();
+
+    // Fetch the occupied breakers (slotPosition !== null) — the SAME set the
+    // scan index iterates. Includes both tandem halves + the double-pole id.
+    // authedFetch needs an absolute URL (raw fetch, not the page fixture).
+    const res = await authedFetch(
+      `${E2E_BACKEND_URL}/api/v1/panels/${seeded.panelId}/breakers`
+    );
+    const body = (await res.json()) as {
+      data: Array<{ id: string; slotPosition: number | null }>;
+    };
+    const occupied = body.data.filter((b) => b.slotPosition !== null);
+    expect(occupied.length).toBeGreaterThan(0);
+
+    await page.goto(`/panels/${seeded.panelId}/print`);
+    await expect(page.getByTestId('printable-page')).toBeVisible();
+
+    // Origin is computed from the page URL at render time (PIN 4).
+    const origin = new URL(page.url()).origin;
+
+    // Panel-level QR in the header encodes the panel URL.
+    const panelQr = page.locator(
+      '[data-testid="printable-panel-qr"] [data-qr-value]'
+    );
+    await expect(panelQr).toHaveAttribute(
+      'data-qr-value',
+      `${origin}/panels/${seeded.panelId}`
+    );
+
+    // Scan index has exactly one QR item per occupied breaker.
+    const indexItems = page.locator('[data-testid="printable-scan-index-item"]');
+    await expect(indexItems).toHaveCount(occupied.length);
+
+    // Every occupied breaker has a QR encoding its exact deep link.
+    for (const b of occupied) {
+      const expected = `${origin}/panels/${seeded.panelId}#breaker-${b.id}`;
+      const qr = page.locator(
+        `[data-testid="printable-scan-index-item"][data-breaker-id="${b.id}"] [data-qr-value]`
+      );
+      await expect(qr).toHaveAttribute('data-qr-value', expected);
+    }
+
+    // No app chrome on the print escape-hatch route (existing contract holds).
+    await expect(page.locator('.bottom-tabs')).toHaveCount(0);
+    await expect(page.locator('.theme-toggle')).toHaveCount(0);
   });
 });

@@ -245,6 +245,29 @@ export const createBuilding = async (input: BuildingInput): Promise<Building> =>
   return unwrap<Building>(res);
 };
 
+/**
+ * G43 (2026-05) — restore a building from an exported JSON envelope. POSTs the
+ * parsed export to /api/v1/buildings/import; the backend validates the shared
+ * buildingExportSchema and replies 201 { data: Building } or 400
+ * { error: { message } } (bad envelope / unsupported version). On failure we
+ * throw ApiHttpError whose detail carries the raw response body — callers parse
+ * `.error.message` out of it for a readable toast.
+ */
+export const importBuilding = async (payload: unknown): Promise<Building> => {
+  const res = await fetch('/api/v1/buildings/import', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new ApiHttpError(res.status, detail);
+  }
+  const json = (await res.json()) as ApiEnvelope<Building>;
+  return json.data;
+};
+
 export const updateBuilding = async (
   id: string,
   patch: { name?: string }

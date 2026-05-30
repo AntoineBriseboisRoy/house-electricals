@@ -93,6 +93,10 @@ const screens: { name: string; path: (s: ReturnType<typeof loadSeeded>) => strin
   // responsiveness (G28 — cycle-34)" rule 3: every new top-level route
   // joins this array).
   { name: 'Audit', path: () => '/audit', waitFor: 'Audit log' },
+  // G45 — home status dashboard (per CLAUDE.md "Mobile responsiveness
+  // (G28 — cycle-34)" rule 3: every new top-level route joins this array).
+  // The ScreenHeader title "Status" is the deterministic wait anchor.
+  { name: 'Dashboard', path: () => '/dashboard', waitFor: 'Status' },
 ];
 
 test.describe('G28 mobile overflow triage @cycle-34', () => {

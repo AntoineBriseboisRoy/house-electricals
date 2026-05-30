@@ -9,6 +9,7 @@ import type {
 import { getPanel, listBreakers, listComponents } from '../api.js';
 import { formatDate } from '../lib/datetime.js';
 import { ComponentTypeIcon, componentTypeLabel } from '../components/ComponentTypeIcon.js';
+import { Qr } from '../ui/qr.js';
 
 /** G37 Part 2 cycle-69 — print-styled protection chip. Monochrome
  *  black-on-white (no --color-warning* tokens — those are screen amber
@@ -256,6 +257,40 @@ export const PrintableDiagramScreen = (): JSX.Element => {
     day: 'numeric',
   });
 
+  // G44 — deep-link URLs built from window.location.origin AT RENDER TIME (the
+  // verbatim G44-pinned contract; not configurable this cycle). Defensive empty
+  // fallback for non-browser/empty origin — in practice always present here.
+  //
+  // AUTH DEGRADATION (PIN 5 — documented, NOT solved): the realistic scan
+  // device is the owner's already-logged-in phone (30-day he_auth cookie). On
+  // that path the authed cold-load works — App.tsx mounts the route Switch once
+  // phase==='authed', and the PanelDetailScreen hash consumer fires on initial
+  // mount AND on hashchange, so #breaker-<id> pulses the slot. An
+  // UNAUTHENTICATED scan instead lands on the login screen and the hash is lost
+  // — deep-link-through-login is an out-of-scope future enhancement, not G44.
+  const origin =
+    typeof window !== 'undefined' && window.location.origin
+      ? window.location.origin
+      : '';
+  const panelUrl = `${origin}/panels/${panelId}`;
+  const breakerUrl = (breakerId: string): string =>
+    `${origin}/panels/${panelId}#breaker-${breakerId}`;
+
+  // The QR scan-index iterates the SAME set the slot grid renders: every
+  // breaker with a non-null slotPosition (this includes BOTH tandem halves —
+  // each half is its own breaker row with its own id — and the double-pole
+  // breaker, which has a single id). Order matches the slot grid: by slot
+  // position, then tandem half within a slot.
+  const indexBreakers = breakers
+    .filter((b) => b.slotPosition !== null)
+    .slice()
+    .sort((a, b) => {
+      const sa = a.slotPosition ?? 0;
+      const sb = b.slotPosition ?? 0;
+      if (sa !== sb) return sa - sb;
+      return (a.tandemHalf ?? '').localeCompare(b.tandemHalf ?? '');
+    });
+
   return (
     <div className="printable-page" data-testid="printable-page">
       <header className="printable-page__header">
@@ -265,6 +300,13 @@ export const PrintableDiagramScreen = (): JSX.Element => {
             Electrical breaker reference · {panel.slotCount}-slot panel
           </p>
         </div>
+        {/* G44 — panel-level QR (larger). Encodes the panel URL; the visible
+            origin text below makes a stale/wrong-origin printed label
+            human-diagnosable (Lock-in mitigation). */}
+        <div className="printable-page__qr" data-testid="printable-panel-qr">
+          <Qr value={panelUrl} size={96} />
+          <span className="printable-scan-index__origin">{origin}</span>
+        </div>
         <div className="printable-page__meta">
           <span>Printed {printedOn}</span>
         </div>
@@ -273,6 +315,47 @@ export const PrintableDiagramScreen = (): JSX.Element => {
       <ol className="printable-slots" aria-label="Breaker slots">
         {slots}
       </ol>
+
+      {/* G44 — Scan index. One deep-link QR per occupied breaker, in its own
+          section so the compact slot grid above is untouched. May flow onto a
+          page 2 (each item is break-inside: avoid). */}
+      {indexBreakers.length > 0 && (
+        <section
+          className="printable-scan-index"
+          data-testid="printable-scan-index"
+          aria-label="Breaker scan index"
+        >
+          <h2 className="printable-scan-index__heading">Scan index</h2>
+          <p className="printable-scan-index__note">
+            Scan a code with your phone to open this panel straight to that
+            breaker. Origin: {origin}
+          </p>
+          <ol className="printable-scan-index__grid">
+            {indexBreakers.map((b) => {
+              const slotN = b.slotPosition ?? 0;
+              const slotLabel = `Slot ${slotN}${b.tandemHalf ?? ''}`;
+              return (
+                <li
+                  key={b.id}
+                  className="printable-scan-index__item"
+                  data-testid="printable-scan-index-item"
+                  data-breaker-id={b.id}
+                >
+                  <Qr value={breakerUrl(b.id)} size={64} />
+                  <span className="printable-scan-index__caption">
+                    <span className="printable-scan-index__slot">
+                      {slotLabel}
+                    </span>
+                    <span className="printable-scan-index__label">
+                      {b.label}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      )}
 
       <footer className="printable-page__footer">
         <span>Generated by House Electricals</span>

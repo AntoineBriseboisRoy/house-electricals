@@ -455,6 +455,18 @@ export const initSchema = async (db: Db): Promise<void> => {
         CREATE UNIQUE INDEX idx_unique_floors_building_name ON floors(building_id, name);
       END IF;
     END $$;
+
+    -- Drop the legacy GLOBAL name indexes UNCONDITIONALLY (idempotent). The
+    -- swap DROP above only fires the ONE time the per-building index is first
+    -- created; but the earlier CREATE UNIQUE INDEX IF NOT EXISTS of the global
+    -- panels/floors name index runs on EVERY boot and re-creates it each
+    -- restart, so it kept coming back and coexisting with the per-building one.
+    -- A surviving global index wrongly blocks two buildings from sharing a
+    -- "Main Floor"/"Main Panel" -- which broke building IMPORT (restoring or
+    -- cloning a building whose floor or panel names already exist). By here the
+    -- per-building indexes are guaranteed present, so this drop is safe.
+    DROP INDEX IF EXISTS idx_unique_panels_name;
+    DROP INDEX IF EXISTS idx_unique_floors_name;
   `);
 };
 

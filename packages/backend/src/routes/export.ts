@@ -4,20 +4,16 @@ import type {
   Breaker,
   BreakerRepository,
   BreakerTest,
-  Building,
+  BuildingExportParsed,
   BuildingRepository,
   Component,
   ComponentRepository,
-  Floor,
   FloorRepository,
-  Panel,
   PanelRepository,
-  Room,
   RoomRepository,
   ServiceEntry,
   ServiceEntryParentType,
   SwitchControl,
-  Wall,
   WallRepository,
 } from '@he/shared';
 import type { Db } from '../db.js';
@@ -49,21 +45,13 @@ type ExportDeps = {
   componentRepository: ComponentRepository;
 };
 
-export type BuildingExport = {
-  format: 'house-electricals-building-export';
-  version: 1;
-  exportedAt: number;
-  building: Building;
-  floors: Floor[];
-  rooms: Room[];
-  walls: Wall[];
-  panels: Panel[];
-  breakers: Breaker[];
-  components: Component[];
-  switchControls: SwitchControl[];
-  serviceEntries: ServiceEntry[];
-  breakerTests: BreakerTest[];
-};
+/**
+ * The export payload shape. Derived from the SHARED `buildingExportSchema`
+ * (via `BuildingExportParsed`) so the export's output is provably identical to
+ * what the import route validates — they share one source of truth and can
+ * never silently drift. See @he/shared "Building export/import envelope".
+ */
+export type BuildingExport = BuildingExportParsed;
 
 /** Gather the whole building tree, or null when the building doesn't exist. */
 const gather = async (

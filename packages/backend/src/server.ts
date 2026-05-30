@@ -27,6 +27,7 @@ import { buildRoomRoutes } from './routes/rooms.js';
 import { buildServiceEntryRoutes } from './routes/service-entries.js';
 import { buildAttachmentRoutes } from './routes/attachments.js';
 import { buildExportRoutes } from './routes/export.js';
+import { buildImportRoutes } from './routes/import.js';
 import { buildWallRoutes } from './routes/walls.js';
 import { buildSwitchControlRoutes } from './routes/switch-controls.js';
 import { devStaticRoutes } from './routes/dev-static.js';
@@ -193,6 +194,16 @@ export const buildApp = (deps: AppDeps): Hono => {
       roomRepository: deps.roomRepository,
       wallRepository: deps.wallRepository,
       componentRepository: deps.componentRepository,
+    })
+  );
+  // G43 (2026-05) — building import/restore (inverse of export). Needs `db`
+  // for the atomic single-transaction reconstruction + the building repo to
+  // read the created building back.
+  app.route(
+    '/api/v1',
+    buildImportRoutes({
+      db: deps.db,
+      buildingRepository: deps.buildingRepository,
     })
   );
 

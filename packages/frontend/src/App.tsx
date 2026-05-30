@@ -11,6 +11,7 @@ import { MapLandingScreen } from './screens/MapLandingScreen.js';
 import { FloorEditScreen } from './screens/FloorEditScreen.js';
 import { PrintableDiagramScreen } from './screens/PrintableDiagramScreen.js';
 import { AuditScreen } from './screens/AuditScreen.js';
+import { DashboardScreen } from './screens/DashboardScreen.js';
 import { LoginScreen } from './screens/LoginScreen.js';
 import { SignupScreen } from './screens/SignupScreen.js';
 import { useAuth } from './contexts/AuthContext.js';
@@ -105,6 +106,10 @@ const AuthedApp = (): JSX.Element => {
             a follow-up cycle removes them once nothing links to them. */}
         <Route path="/test" component={TestHomeScreen} />
         <Route path="/test/audit" component={AuditScreen} />
+        {/* G45 — home status dashboard (AppShell-wrapped flat route, like
+            /audit; NOT a 5th bottom-tab). Reached via the Status link in
+            the Panels header. */}
+        <Route path="/dashboard" component={DashboardScreen} />
         <Route path="/test/:panelId" component={TestPanelScreen} />
         <Route path="/panels/:id/test" component={TestPanelScreen} />
         <Route path="/audit" component={AuditScreen} />

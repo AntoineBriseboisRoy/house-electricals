@@ -73,6 +73,10 @@ import {
 } from '../api.js';
 import { BreakerPicker } from '../components/BreakerPicker.js';
 import { ComponentForm } from '../components/ComponentForm.js';
+import {
+  ComponentTypeIcon,
+  componentTypeLabel,
+} from '../components/ComponentTypeIcon.js';
 import { PhotoStrip } from '../components/PhotoStrip.js';
 import { suffixDuplicate } from '../lib/duplicateName.js';
 import {
@@ -139,12 +143,24 @@ type Tool =
   | 'pointer'
   | 'wall'
   | 'room'
-  /** G19 quick-create tools: tap on canvas → POST /components at the snapped point. */
-  | 'outlet'
-  | 'light'
-  | 'switch';
+  /** G19 quick-create tools: tap on canvas → POST /components at the snapped
+   *  point. One per ComponentType so every component the catalog supports can
+   *  be placed directly on the plan. */
+  | ComponentType;
 
-const QUICK_CREATE_TOOLS: ReadonlySet<Tool> = new Set(['outlet', 'light', 'switch']);
+/** The component types reachable as quick-create tools — exactly the @he/shared
+ *  ComponentType union. The order also drives the secondary palette row. */
+const QUICK_CREATE_TYPES: readonly ComponentType[] = [
+  'outlet',
+  'light',
+  'switch',
+  'appliance',
+  'junction_box',
+  'smoke_detector',
+  'other',
+];
+
+const QUICK_CREATE_TOOLS: ReadonlySet<Tool> = new Set<Tool>(QUICK_CREATE_TYPES);
 
 /** Pointer travel (client px) before a pin pointerdown counts as a drag-move
  *  rather than a tap-select. Small enough to feel responsive, large enough to
@@ -453,9 +469,10 @@ export const FloorEditScreen = (): JSX.Element => {
     if (type === 'switch') {
       return gangs > 1 ? `${gangs}-gang switch ${n}` : `Switch ${n}`;
     }
-    if (type === 'outlet') return `Outlet ${n}`;
-    if (type === 'light') return `Light ${n}`;
-    return `${type} ${n}`;
+    // Outlet/Light/Appliance/Junction box/Smoke detector/Other — use the
+    // canonical catalog label (ComponentTypeIcon LABELS) so names read the
+    // same everywhere ("Junction box 1", not "junction_box 1").
+    return `${componentTypeLabel(type)} ${n}`;
   };
 
   /** Quick-create handler — invoked by the canvas pointerdown when a
@@ -465,7 +482,7 @@ export const FloorEditScreen = (): JSX.Element => {
     async (point: { x: number; y: number }): Promise<void> => {
       if (floor === null) return;
       if (!QUICK_CREATE_TOOLS.has(tool)) return;
-      const type = tool as 'outlet' | 'light' | 'switch';
+      const type = tool as ComponentType;
       let gangs = 1;
       if (type === 'switch') {
         const picked = await pick<number>({
@@ -1666,9 +1683,18 @@ export const FloorEditScreen = (): JSX.Element => {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
         return;
       }
+      // Ignore browser/OS chords (Ctrl+S "save page", Cmd+L address bar,
+      // Alt+D, Ctrl+R reload, …). Without this a habitual Ctrl+S would flip
+      // the active tool AND clear the user's current selection underneath.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key.toLowerCase();
       if (k === 'v') setTool('pointer');
       else if (k === 'w') setTool('wall');
@@ -1676,6 +1702,10 @@ export const FloorEditScreen = (): JSX.Element => {
       else if (k === 'o') setTool('outlet');
       else if (k === 'l') setTool('light');
       else if (k === 's') setTool('switch');
+      else if (k === 'a') setTool('appliance');
+      else if (k === 'j') setTool('junction_box');
+      else if (k === 'd') setTool('smoke_detector');
+      else if (k === 'x') setTool('other');
       else if (k === 'escape') {
         setSelectedWallId(null);
         setSelectedRoomId(null);
@@ -2079,6 +2109,37 @@ export const FloorEditScreen = (): JSX.Element => {
                   Switch
                   <span className="kbd-badge" aria-hidden="true">S</span>
                 </Button>
+              </li>
+              {/* The 4 less-common component types as a compact icon row so
+                  every catalog type is placeable from the canvas without
+                  giving each a full-width button (which would dominate the
+                  sidebar + risk mobile overflow). Glyphs reuse the canonical
+                  ComponentTypeIcon; the title carries the kbd hint. */}
+              <li>
+                <div
+                  className="tool-palette__component-extras"
+                  role="group"
+                  aria-label="More component types"
+                >
+                  {(
+                    [
+                      { type: 'appliance', key: 'A' },
+                      { type: 'junction_box', key: 'J' },
+                      { type: 'smoke_detector', key: 'D' },
+                      { type: 'other', key: 'X' },
+                    ] as const
+                  ).map(({ type, key }) => (
+                    <IconButton
+                      key={type}
+                      icon={<ComponentTypeIcon type={type} size={18} />}
+                      variant="ghost"
+                      data-active={tool === type || undefined}
+                      aria-label={`${componentTypeLabel(type)} (${key})`}
+                      onClick={() => setTool(type)}
+                      data-testid={`tool-${type}`}
+                    />
+                  ))}
+                </div>
               </li>
               {/* Fit-to-view lives ONLY in the floating on-canvas zoom
                  controls (grouped with zoom in/out) — a duplicate here was

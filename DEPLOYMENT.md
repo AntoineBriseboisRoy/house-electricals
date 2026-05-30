@@ -59,7 +59,7 @@ On Windows Docker Desktop / WSL2 / macOS this isn't necessary — the VFS layer 
 | `POSTGRES_PASSWORD` | Postgres password — **set a strong value in production**     | `postgres`                                           |
 | `POSTGRES_DB`       | Database name                                                | `house_electricals`                                  |
 | `DATA_PATH`         | Host path holding `floor-plans/` + `.auth-secret` (relational data lives in the Postgres volume, not here) | `./data` |
-| `IMAGE`             | (compose.prod.yaml only) Registry path for the unified image — **required, no default** | _e.g._ `ghcr.io/<your-github-username>/house-electricals:latest` |
+| `IMAGE`             | (compose.prod.yaml only) Registry path + release channel for the unified image — **required, no default**. Channels: `:stable` (recommended), `:beta`, `:nightly`; or pin `:X.Y.Z` / `:sha-…` for a frozen rollback. See [RELEASING.md](RELEASING.md). | _e.g._ `ghcr.io/<your-github-username>/house-electricals:stable` |
 
 There are no `AUTH_USERNAME` / `AUTH_PASSWORD` env vars. The first time you open the app in a browser, a one-time sign-up form mints the account (scrypt-hashed password stored in the Postgres `app_users` table). See [README → Login](README.md#login) for the full account lifecycle (sign-up, change password, reset).
 

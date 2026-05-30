@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link } from 'wouter';
-import { CornerDownRight, Plus, ShieldAlert } from 'lucide-react';
+import { Activity, CornerDownRight, Plus, ShieldAlert } from 'lucide-react';
 import type { Breaker, Panel } from '@he/shared';
 import {
   ApiHttpError,
@@ -12,6 +12,7 @@ import {
 } from '../api.js';
 import { suffixDuplicate } from '../lib/duplicateName.js';
 import { startOfMonthEpoch } from '../lib/datetime.js';
+import { filterUntestedProtected } from '../lib/protection.js';
 import { useModal } from '../hooks/useModal.js';
 import {
   Button,
@@ -151,16 +152,16 @@ export const PanelListScreen = (): JSX.Element => {
 
   /** G37 Part 2 cycle-69 — subset of protectedBreakers whose latest
    *  test is null OR before monthStart. Hidden card when length === 0
-   *  (per spec: "no chrome eaten when nothing to do"). */
-  const untestedProtected = useMemo<Breaker[]>(() => {
-    return protectedBreakers.filter((b) => {
-      const last = latestTestByBreaker.get(b.id);
-      // Map miss (load in flight) → treat as untested so the card
-      // surfaces eagerly; once tests load it self-corrects.
-      if (last === undefined || last === null) return true;
-      return last < monthStart;
-    });
-  }, [protectedBreakers, latestTestByBreaker, monthStart]);
+   *  (per spec: "no chrome eaten when nothing to do").
+   *
+   *  G45 (2026-05) — the filter logic now lives in the pure
+   *  `lib/protection.ts` (single source of truth, unit-tested, shared
+   *  with the status dashboard). Behavior is byte-identical. */
+  const untestedProtected = useMemo<Breaker[]>(
+    () =>
+      filterUntestedProtected(protectedBreakers, latestTestByBreaker, monthStart),
+    [protectedBreakers, latestTestByBreaker, monthStart]
+  );
 
   /** G37 Part 2 cycle-69 — one-tap "Test all now" fan-out. Confirms,
    *  then POSTs one breaker_tests row per untested protected breaker
@@ -325,6 +326,17 @@ export const PanelListScreen = (): JSX.Element => {
   return (
     <>
       <ScreenHeader title="House Electricals" subtitle="Map your electrical panels">
+        {/* G45 — Status dashboard entry point. AppShell-wrapped /dashboard
+            route (NOT a 5th bottom-tab). */}
+        <Link
+          href="/dashboard"
+          className="screen-header__link"
+          data-testid="open-dashboard"
+          aria-label="Open status dashboard"
+        >
+          <Activity size={16} strokeWidth={2} />
+          Status
+        </Link>
         <Button
           variant="primary"
           size="sm"
