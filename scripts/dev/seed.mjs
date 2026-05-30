@@ -17,9 +17,11 @@
 //   SEED_URL=http://127.0.0.1:3000           backend base URL
 //   SEED_USERNAME=dev   SEED_PASSWORD=devdevdev   the (one) account
 //
-// Idempotency: the script refuses to run twice by default — if a building
-// named "Maple Street House" already exists it bails (so you don't pile up
-// duplicates). Pass --force to seed an additional copy anyway.
+// What it seeds INTO: the ACTIVE building — i.e. the oldest building, which is
+// what `pnpm dev` opens to (the backend auto-seeds "My House" on first boot).
+// So after running this, the data shows IMMEDIATELY in the app — no manual
+// building switch. If that active building is already populated, the script
+// no-ops (idempotent). Pass --force to add a SEPARATE demo building instead.
 //
 //   node scripts/dev/seed.mjs --force
 // =============================================================================
@@ -110,34 +112,63 @@ const seed = async () => {
   console.log(`[seed] target ${BASE}`);
   await authenticate();
 
-  // Guard against duplicate seeds.
+  // 1) Choose the building to seed INTO -------------------------------------
+  // The running app opens on the OLDEST building (the backend's
+  // resolveBuildingId picks `ORDER BY created_at ASC LIMIT 1`, and the
+  // frontend defaults to that). So to make `pnpm dev` actually SHOW data on
+  // first load, we seed into that active/default building (e.g. the
+  // auto-seeded "My House") when it's still empty — NOT a separate building
+  // the user would have to manually switch to.
   const buildings = await get('/api/v1/buildings');
-  const existing = Array.isArray(buildings)
-    ? buildings.find((b) => b.name === BUILDING_NAME)
-    : null;
-  if (existing && !FORCE) {
+  const list = Array.isArray(buildings) ? buildings : [];
+  const sorted = [...list].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+  const active = sorted[0] ?? null; // the building the app opens to
+
+  // Is the active building already populated? (idempotency)
+  let activePanels = [];
+  if (active) {
+    try {
+      activePanels = await get(`/api/v1/panels?buildingId=${active.id}`);
+    } catch {
+      activePanels = [];
+    }
+  }
+  const activeHasData = Array.isArray(activePanels) && activePanels.length > 0;
+
+  let buildingId;
+  let buildingName;
+  if (FORCE) {
+    // Explicit --force: always add a SEPARATE demo building (non-colliding name).
+    const taken = new Set(list.map((b) => b.name));
+    let name = BUILDING_NAME;
+    let n = 2;
+    while (taken.has(name)) name = `${BUILDING_NAME} (copy ${n++})`;
+    const b = await post('/api/v1/buildings', { name });
+    buildingId = b.id;
+    buildingName = b.name;
+    console.log(`[seed] --force: created a new demo building "${b.name}" (${buildingId})`);
+  } else if (active && !activeHasData) {
+    // Reuse the empty active building the app opens to.
+    buildingId = active.id;
+    buildingName = active.name;
+    console.log(`[seed] seeding into the active building "${active.name}" (${buildingId})`);
+  } else if (active && activeHasData) {
     console.log(
-      `[seed] a building named "${BUILDING_NAME}" already exists (id ${existing.id}).\n` +
-        `[seed] nothing to do. Pass --force to seed another copy.`
+      `[seed] the active building "${active.name}" already has ` +
+        `${activePanels.length} panel(s) — looks seeded already.\n` +
+        `[seed] nothing to do. Pass --force to add a SEPARATE demo building.`
     );
     return;
+  } else {
+    // No building at all (the backend normally auto-seeds one, so this is a
+    // belt-and-suspenders fallback).
+    const b = await post('/api/v1/buildings', { name: BUILDING_NAME });
+    buildingId = b.id;
+    buildingName = b.name;
+    console.log(`[seed] created building "${b.name}" (${buildingId})`);
   }
 
-  // 1) Building --------------------------------------------------------------
-  // Normal run uses the canonical name (guarded above). A --force run past an
-  // existing copy picks the next free "(copy N)" so it never collides with the
-  // global-UNIQUE buildings.name.
-  let name = BUILDING_NAME;
-  if (FORCE && existing) {
-    const taken = new Set((Array.isArray(buildings) ? buildings : []).map((b) => b.name));
-    let n = 2;
-    while (taken.has(`${BUILDING_NAME} (copy ${n})`)) n += 1;
-    name = `${BUILDING_NAME} (copy ${n})`;
-  }
-  const building = await post('/api/v1/buildings', { name });
-  const buildingId = building.id;
-  console.log(`[seed] building "${building.name}" (${buildingId})`);
-
+  const building = { id: buildingId, name: buildingName };
   const inB = (extra) => ({ buildingId, ...extra });
 
   // 2) Main panel + breakers -------------------------------------------------
@@ -295,7 +326,7 @@ const seed = async () => {
   console.log('[seed] 2 service-log entries');
 
   console.log('');
-  console.log(`[seed] ✓ done. Open the app, switch to "${building.name}", and explore.`);
+  console.log(`[seed] ✓ done. Open the app — "${building.name}" is the active building, so it shows immediately.`);
   console.log(`[seed]   - Main Panel (30 slots) + Garage Subpanel (fed by a feeder breaker)`);
   console.log(`[seed]   - Main Floor with 4 rooms + components of every type on the plan`);
   console.log(`[seed]   - an overloaded-ish range circuit, an overdue GFCI, a 3-way hall switch`);
