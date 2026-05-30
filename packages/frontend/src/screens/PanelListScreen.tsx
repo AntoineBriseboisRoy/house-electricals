@@ -330,12 +330,12 @@ export const PanelListScreen = (): JSX.Element => {
             route (NOT a 5th bottom-tab). */}
         <Link
           href="/dashboard"
-          className="screen-header__link"
+          className="link-action--header"
           data-testid="open-dashboard"
           aria-label="Open status dashboard"
         >
           <Activity size={16} strokeWidth={2} />
-          Status
+          <span>Status</span>
         </Link>
         <Button
           variant="primary"
