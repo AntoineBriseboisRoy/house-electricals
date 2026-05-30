@@ -1,6 +1,11 @@
+import { useEffect } from 'react';
 import { Route, Switch, useLocation } from 'wouter';
 import { AppShell } from './ui/AppShell.js';
 import { BuildingProvider, useBuilding } from './contexts/BuildingContext.js';
+import {
+  captureRedirectTarget,
+  consumeRedirectTarget,
+} from './lib/postLoginRedirect.js';
 import { PanelListScreen } from './screens/PanelListScreen.js';
 import { PanelDetailScreen } from './screens/PanelDetailScreen.js';
 import { ComponentsScreen } from './screens/ComponentsScreen.js';
@@ -33,6 +38,25 @@ import { useAuth } from './contexts/AuthContext.js';
  */
 export const App = (): JSX.Element => {
   const { state: authState } = useAuth();
+
+  // G44 QR cold-load login-through. A scanned per-breaker QR opens a deep path
+  // (e.g. /panels/:id#breaker-:bid) in a fresh tab; if unauthed, the intended
+  // path+hash would be lost across login. We stash the deep target while
+  // unauthed and restore it once the auth transition completes — preserving the
+  // hash via a full-URL replace so the PanelDetailScreen #breaker consumer
+  // re-fires. Open-redirect-guarded (same-origin relative only); a no-op for
+  // the normal "log in → land on home" case (home is never captured).
+  useEffect(() => {
+    if (authState.phase === 'unauthed') {
+      captureRedirectTarget();
+    } else if (authState.phase === 'authed') {
+      const target = consumeRedirectTarget();
+      if (target !== null) {
+        // window.location.replace (not wouter navigate) so the #hash survives.
+        window.location.replace(target);
+      }
+    }
+  }, [authState.phase]);
 
   // feat/auth-gate — gate everything behind sign-up / login.
   //

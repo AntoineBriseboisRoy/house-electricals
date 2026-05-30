@@ -3,6 +3,7 @@ import { Link } from 'wouter';
 import {
   AlertTriangle,
   CheckCircle2,
+  HelpCircle,
   LayoutGrid,
   ShieldCheck,
   Zap,
@@ -128,14 +129,38 @@ export const DashboardScreen = (): JSX.Element => {
     return m;
   }, [components, breakers]);
 
+  /**
+   * Map of breakerId → whether ANY wired component carries a known
+   * (non-null) loadWatts. lib/load.ts sums null as 0, so a building where
+   * nobody entered watts looks identical to "verified within capacity". We
+   * track known-load presence here (from the already-loaded components) so the
+   * card can tell "no data" apart from "verified OK" — without touching the
+   * shared load math.
+   */
+  const knownLoadByBreakerId = useMemo<Set<string>>(() => {
+    const known = new Set<string>();
+    for (const c of components) {
+      if (
+        c.breakerId !== null &&
+        c.loadWatts !== null &&
+        c.loadWatts !== undefined
+      ) {
+        known.add(c.breakerId);
+      }
+    }
+    return known;
+  }, [components]);
+
   /** Card (a) — overloaded / over-80% circuits. */
   const overload = useMemo(() => {
     let over = 0;
     let warn = 0;
+    let circuitsWithKnownLoad = 0;
     const panelIdsWithOver = new Set<string>();
     for (const b of breakers) {
       const load = loadByBreakerId.get(b.id);
       if (!load) continue;
+      if (knownLoadByBreakerId.has(b.id)) circuitsWithKnownLoad += 1;
       if (load.status === 'over') {
         over += 1;
         panelIdsWithOver.add(b.panelId);
@@ -143,8 +168,8 @@ export const DashboardScreen = (): JSX.Element => {
         warn += 1;
       }
     }
-    return { over, warn, panelIdsWithOver };
-  }, [breakers, loadByBreakerId]);
+    return { over, warn, circuitsWithKnownLoad, panelIdsWithOver };
+  }, [breakers, loadByBreakerId, knownLoadByBreakerId]);
 
   /** Card (b) — GFCI/AFCI untested this month (pure lib/protection.ts). */
   const untestedProtected = useMemo<Breaker[]>(
@@ -199,11 +224,21 @@ export const DashboardScreen = (): JSX.Element => {
           <CardHeader className="dashboard-card__head">
             <span
               className="dashboard-card__icon"
-              data-status={overload.over > 0 ? 'over' : overload.warn > 0 ? 'warn' : 'ok'}
+              data-status={
+                overload.over > 0
+                  ? 'over'
+                  : overload.warn > 0
+                    ? 'warn'
+                    : breakers.length > 0 && overload.circuitsWithKnownLoad === 0
+                      ? 'info'
+                      : 'ok'
+              }
               aria-hidden="true"
             >
               {overload.over > 0 || overload.warn > 0 ? (
                 <Zap size={20} strokeWidth={2} />
+              ) : breakers.length > 0 && overload.circuitsWithKnownLoad === 0 ? (
+                <HelpCircle size={20} strokeWidth={2} />
               ) : (
                 <CheckCircle2 size={20} strokeWidth={2} />
               )}
@@ -239,6 +274,16 @@ export const DashboardScreen = (): JSX.Element => {
                   : 'View panels →'}
               </Link>
             </>
+          ) : breakers.length > 0 && overload.circuitsWithKnownLoad === 0 ? (
+            // No circuit has a known loadWatts — the calm green all-clear would
+            // be a safety guarantee the data hasn't earned. Show an honest,
+            // neutral "no data" state instead (distinct from verified-OK).
+            <p
+              className="dashboard-card__calm"
+              data-testid="dashboard-card-overload-nodata"
+            >
+              No load data entered yet.
+            </p>
           ) : (
             <p className="dashboard-card__calm" data-testid="dashboard-card-overload-calm">
               All circuits within capacity.
