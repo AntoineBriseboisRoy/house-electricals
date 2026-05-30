@@ -2,10 +2,17 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import type { ApiEnvelope, ApiError, Floor, FloorRepository } from '@he/shared';
 import { sniffImage } from '../image-meta.js';
+import { assertInsideDir } from '../safe-path.js';
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+// Hard request-body ceiling enforced BEFORE the body is buffered into memory
+// (G46 FIX 1). Set just above MAX_BYTES so the friendly 413 below still fires
+// for a 10–11 MB upload, while anything larger is rejected by the middleware
+// before `parseBody` can OOM the process.
+const MAX_REQUEST_BYTES = 11 * 1024 * 1024; // 11 MB
 
 const floorPlanDir = (): string => process.env.FLOOR_PLAN_DIR ?? '/data/floor-plans';
 
@@ -22,7 +29,16 @@ export const buildFloorPlanRoutes = (floorRepo: FloorRepository): Hono => {
   const router = new Hono();
   mkdirSync(floorPlanDir(), { recursive: true });
 
-  router.post('/floors/:floorId/floor-plan', async (c) => {
+  router.post(
+    '/floors/:floorId/floor-plan',
+    bodyLimit({
+      maxSize: MAX_REQUEST_BYTES,
+      onError: (c) => {
+        const err: ApiError = { error: { message: 'File too large (max 10 MB).' } };
+        return c.json(err, 413);
+      },
+    }),
+    async (c) => {
     const id = c.req.param('floorId');
     const floor = await floorRepo.get(id);
     if (floor === null) {
@@ -80,16 +96,22 @@ export const buildFloorPlanRoutes = (floorRepo: FloorRepository): Hono => {
     }
 
     if (previous !== null && previous !== filename) {
-      try {
-        unlinkSync(join(floorPlanDir(), previous));
-      } catch {
-        // best-effort: old file may already be gone
+      // `previous` is a DB-stored filename; resolve-inside-dir guard before
+      // unlinking (G46 FIX 4 — defense-in-depth).
+      const prevPath = assertInsideDir(floorPlanDir(), previous);
+      if (prevPath !== null) {
+        try {
+          unlinkSync(prevPath);
+        } catch {
+          // best-effort: old file may already be gone
+        }
       }
     }
 
     const body: ApiEnvelope<Floor> = { data: updated };
     return c.json(body, 200);
-  });
+  }
+  );
 
   router.delete('/floors/:floorId/floor-plan', async (c) => {
     const id = c.req.param('floorId');
@@ -104,10 +126,14 @@ export const buildFloorPlanRoutes = (floorRepo: FloorRepository): Hono => {
       const err: ApiError = { error: { message: 'Floor not found.' } };
       return c.json(err, 404);
     }
-    try {
-      unlinkSync(join(floorPlanDir(), previous));
-    } catch {
-      // best-effort
+    // `previous` is a DB-stored filename; guard before unlinking (G46 FIX 4).
+    const prevPath = assertInsideDir(floorPlanDir(), previous);
+    if (prevPath !== null) {
+      try {
+        unlinkSync(prevPath);
+      } catch {
+        // best-effort
+      }
     }
     const body: ApiEnvelope<Floor> = { data: updated };
     return c.json(body, 200);

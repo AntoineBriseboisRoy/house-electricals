@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Hono, type Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import {
   newId,
   type ApiEnvelope,
@@ -12,8 +13,23 @@ import {
   type ComponentRepository,
 } from '@he/shared';
 import { sniffImage } from '../image-meta.js';
+import { assertInsideDir } from '../safe-path.js';
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB — same cap as floor-plan uploads.
+// Hard request-body ceiling enforced BEFORE the body is buffered (G46 FIX 1).
+// Just above MAX_BYTES so the friendly 413 still fires for 10–11 MB; anything
+// larger is rejected by the middleware before `parseBody` can OOM the process.
+const MAX_REQUEST_BYTES = 11 * 1024 * 1024; // 11 MB
+
+// Shared route middleware that rejects an over-sized photo upload before it is
+// buffered into memory.
+const photoBodyLimit = bodyLimit({
+  maxSize: MAX_REQUEST_BYTES,
+  onError: (c) => {
+    const err: ApiError = { error: { message: 'File too large (max 10 MB).' } };
+    return c.json(err, 413);
+  },
+});
 
 // Photos are stored alongside floor-plan images under FLOOR_PLAN_DIR and
 // served by the SAME static route (/files/floor-plans/:filename). Filenames
@@ -96,7 +112,7 @@ export const buildAttachmentRoutes = (
     return c.json(body, 201);
   };
 
-  router.post('/components/:id/photos', async (c) => {
+  router.post('/components/:id/photos', photoBodyLimit, async (c) => {
     const id = c.req.param('id');
     const parent = await componentRepo.get(id);
     if (parent === null) {
@@ -113,7 +129,7 @@ export const buildAttachmentRoutes = (
     return c.json(body, 200);
   });
 
-  router.post('/breakers/:id/photos', async (c) => {
+  router.post('/breakers/:id/photos', photoBodyLimit, async (c) => {
     const id = c.req.param('id');
     const parent = await breakerRepo.get(id);
     if (parent === null) {
@@ -143,11 +159,15 @@ export const buildAttachmentRoutes = (
       return c.json(err, 404);
     }
     // Best-effort file unlink — the row is the source of truth; a missing
-    // file just means it was already gone.
-    try {
-      unlinkSync(join(photoDir(), att.filename));
-    } catch {
-      // best-effort
+    // file just means it was already gone. `att.filename` is a DB-stored
+    // value; resolve-inside-dir guard before unlinking (G46 FIX 4).
+    const filePath = assertInsideDir(photoDir(), att.filename);
+    if (filePath !== null) {
+      try {
+        unlinkSync(filePath);
+      } catch {
+        // best-effort
+      }
     }
     return c.body(null, 204);
   });

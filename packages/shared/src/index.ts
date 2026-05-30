@@ -1121,20 +1121,25 @@ export const exportComponentSchema = componentSchema.extend({
   posY: z.number().int().min(COORD_MIN).max(COORD_MAX).nullable(),
 });
 
+// G46 FIX 2 — each entity array is bounded (.max) so a malicious or corrupt
+// import payload can't drive an unbounded INSERT loop. The ceilings are
+// generous for a single home (orders of magnitude above any real house) but
+// finite; a payload exceeding any cap fails safeParse, and the import route
+// returns the existing 400 "Invalid export file." response.
 export const buildingExportSchema = z.object({
   format: z.literal('house-electricals-building-export'),
   version: z.literal(1),
   exportedAt: z.number(),
   building: buildingSchema,
-  floors: z.array(floorSchema),
-  rooms: z.array(roomSchema),
-  walls: z.array(wallSchema),
-  panels: z.array(panelSchema),
-  breakers: z.array(breakerSchema),
-  components: z.array(exportComponentSchema),
-  switchControls: z.array(switchControlSchema),
-  serviceEntries: z.array(serviceEntrySchema),
-  breakerTests: z.array(breakerTestSchema),
+  floors: z.array(floorSchema).max(200),
+  rooms: z.array(roomSchema).max(5000),
+  walls: z.array(wallSchema).max(20000),
+  panels: z.array(panelSchema).max(1000),
+  breakers: z.array(breakerSchema).max(50000),
+  components: z.array(exportComponentSchema).max(100000),
+  switchControls: z.array(switchControlSchema).max(200000),
+  serviceEntries: z.array(serviceEntrySchema).max(500000),
+  breakerTests: z.array(breakerTestSchema).max(500000),
 });
 
 export type BuildingExportParsed = z.infer<typeof buildingExportSchema>;

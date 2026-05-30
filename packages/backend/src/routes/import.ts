@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import {
   buildingExportSchema,
   newId,
@@ -9,6 +10,13 @@ import {
   type BuildingRepository,
 } from '@he/shared';
 import type { Db, Querier } from '../db.js';
+import { isSafeFilename } from '../safe-path.js';
+
+// Hard request-body ceiling enforced BEFORE the JSON body is buffered into
+// memory (G46 FIX 1). An export of a real home is well under a megabyte; 25 MB
+// is a generous ceiling that still stops a multi-GB POST from OOMing the
+// process before zod ever sees it.
+const MAX_IMPORT_BYTES = 25 * 1024 * 1024; // 25 MB
 
 /**
  * Building import/restore (G43 — 2026-05). The inverse of the building EXPORT
@@ -139,6 +147,18 @@ const reconstruct = async (
 
   // 2. floors — building_id → new building.
   for (const f of payload.floors) {
+    // G46 FIX 4: the floor-plan filename comes from an attacker-controlled
+    // payload, and the image BYTES are not imported (G43 scope) — so a
+    // filename that isn't a single safe segment is stored as NULL rather than
+    // risking a later fs unlink/write escaping FLOOR_PLAN_DIR. A valid
+    // filename has no matching file on disk after import anyway; the operator
+    // re-uploads the plan. Width/height follow the filename (null → null).
+    const rawFilename = f.floorPlan?.filename ?? null;
+    const safeFilename =
+      rawFilename !== null && isSafeFilename(rawFilename) ? rawFilename : null;
+    const safeWidth = safeFilename !== null ? (f.floorPlan?.width ?? null) : null;
+    const safeHeight =
+      safeFilename !== null ? (f.floorPlan?.height ?? null) : null;
     await tx.execute(
       `INSERT INTO floors (id, name, display_order, floor_plan_filename,
          floor_plan_width, floor_plan_height, created_at, panel_id, building_id)
@@ -147,9 +167,9 @@ const reconstruct = async (
         floorIds.get(f.id),
         f.name,
         f.displayOrder,
-        f.floorPlan?.filename ?? null,
-        f.floorPlan?.width ?? null,
-        f.floorPlan?.height ?? null,
+        safeFilename,
+        safeWidth,
+        safeHeight,
         f.createdAt,
         // panel_id is remapped AFTER panels exist — set NULL for now, patched
         // in the panel second-pass below.
@@ -347,7 +367,18 @@ const reconstruct = async (
 export const buildImportRoutes = (deps: ImportDeps): Hono => {
   const router = new Hono();
 
-  router.post('/buildings/import', async (c) => {
+  router.post(
+    '/buildings/import',
+    bodyLimit({
+      maxSize: MAX_IMPORT_BYTES,
+      onError: (c) => {
+        const err: ApiError = {
+          error: { message: 'Import file too large (max 25 MB).' },
+        };
+        return c.json(err, 413);
+      },
+    }),
+    async (c) => {
     // Parse the raw body first so we can produce SPECIFIC envelope-rejection
     // messages from the format/version fields before the full safeParse.
     let body: unknown;
@@ -422,7 +453,8 @@ export const buildImportRoutes = (deps: ImportDeps): Hono => {
     }
     const out: ApiEnvelope<Building> = { data: building };
     return c.json(out, 201);
-  });
+  }
+  );
 
   return router;
 };

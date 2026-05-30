@@ -63,6 +63,35 @@ On Windows Docker Desktop / WSL2 / macOS this isn't necessary — the VFS layer 
 
 There are no `AUTH_USERNAME` / `AUTH_PASSWORD` env vars. The first time you open the app in a browser, a one-time sign-up form mints the account (scrypt-hashed password stored in the Postgres `app_users` table). See [README → Login](README.md#login) for the full account lifecycle (sign-up, change password, reset).
 
+> ### ⚠️ Security: complete the first sign-up over the LAN, BEFORE exposing the app
+>
+> `POST /api/v1/auth/signup` is **public** and **first-POST-wins**: the very
+> first sign-up request claims the single account for the whole deployment.
+> There is no invite token or bootstrap gate today.
+>
+> **Therefore: open the app and create your account over your local network
+> (e.g. `http://<server-lan-ip>:8070/`) FIRST — _before_ you point a Cloudflare
+> Tunnel, reverse proxy, or any public URL at it.** If you expose a fresh,
+> not-yet-signed-up instance to the internet, an opportunistic visitor who
+> reaches the sign-up screen before you could claim the account.
+>
+> If you suspect the account was claimed by someone else (or you just want to
+> start over): delete the `app_users` row (full reset — the sign-up screen
+> reappears) and delete `${DATA_PATH}/.auth-secret` (invalidates any issued
+> session cookie). Then sign up again over the LAN:
+>
+> ```bash
+> docker compose exec db psql -U postgres -d house_electricals -c "DELETE FROM app_users"
+> # then remove the auth secret on the host so old cookies stop verifying:
+> rm -f "${DATA_PATH:-./data}/.auth-secret"
+> docker compose restart app
+> ```
+>
+> A future enhancement (an `AUTH_SETUP_TOKEN` bootstrap gate) would let you
+> expose the app *before* sign-up by requiring a one-time operator-supplied
+> token on the first sign-up; it is out of scope today. Until then, the
+> LAN-first workflow is the supported way to claim the account safely.
+
 The `POSTGRES_*` values seed the `db` container on first boot **and** are interpolated into the `DATABASE_URL` the app connects with — they must stay in sync, which is why both compose files derive `DATABASE_URL` from them rather than asking you to set it twice.
 
 For real-server deployments use an absolute `DATA_PATH` (e.g. `/srv/house-electricals/data`), not a repo-relative path.

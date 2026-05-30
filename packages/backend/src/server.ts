@@ -84,12 +84,35 @@ export const buildApp = (deps: AppDeps): Hono => {
   //   • Strict-Transport-Security (ignored by browsers over plain HTTP /
   //     localhost; honored once a TLS-terminating reverse proxy fronts us)
   //   • strips X-Powered-By
-  // Two defaults are deliberately LEFT OFF by Hono and we keep them off:
-  //   • Cross-Origin-Embedder-Policy (require-corp would break image loads)
-  //   • Content-Security-Policy — a CSP tuned to the Vite/PWA bundle's
-  //     inline styles + service-worker needs is its own tested change;
-  //     shipping a wrong CSP would white-screen the app. Deferred.
-  app.use('*', secureHeaders());
+  // Cross-Origin-Embedder-Policy is deliberately LEFT OFF (require-corp would
+  // break image loads). A conservative same-origin Content-Security-Policy IS
+  // now set (G46 FIX 3): every resource class is locked to 'self' except where
+  // the Vite/PWA bundle genuinely needs more —
+  //   • styleSrc allows 'unsafe-inline' (Vite injects inline <style> + the app
+  //     uses inline style attributes for the floor-canvas transforms);
+  //   • imgSrc allows data:/blob: (icon data-URIs + the PhotoStrip lightbox
+  //     blob: object-URLs);
+  //   • workerSrc allows blob: (the registered service worker);
+  //   • objectSrc 'none' + frameAncestors 'none' + baseUri 'self' harden
+  //     against plugin/clickjacking/base-tag injection.
+  // scriptSrc stays strict 'self' (no inline scripts in the built bundle).
+  app.use(
+    '*',
+    secureHeaders({
+      contentSecurityPolicy: {
+        defaultSrc: ["'self'"],
+        imgSrc: ["'self'", 'data:', 'blob:'],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
+        connectSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+        workerSrc: ["'self'", 'blob:'],
+        manifestSrc: ["'self'"],
+      },
+    })
+  );
 
   // ── PUBLIC ROUTES ────────────────────────────────────────────────────
   // Health stays open so reverse-proxy / monitoring probes work without

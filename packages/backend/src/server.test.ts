@@ -1001,9 +1001,15 @@ describe('security headers', () => {
     assert.equal(res.headers.get('x-powered-by'), null);
   });
 
-  it('does NOT emit a Content-Security-Policy (deferred — must be tuned to the bundle)', async () => {
+  it('emits a conservative same-origin Content-Security-Policy (G46 FIX 3)', async () => {
     const res = await app.request('/api/v1/health');
-    assert.equal(res.headers.get('content-security-policy'), null);
+    const csp = res.headers.get('content-security-policy');
+    // G46 FIX 3 — a CSP tuned to the Vite/PWA bundle is now emitted on every
+    // response (see server.ts). Lock in that it is present + same-origin.
+    assert.ok(csp, 'expected a content-security-policy header');
+    assert.ok(csp.includes("default-src 'self'"), `got: ${csp}`);
+    assert.ok(csp.includes("object-src 'none'"));
+    assert.ok(csp.includes("frame-ancestors 'none'"));
   });
 });
 
