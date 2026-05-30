@@ -734,7 +734,7 @@ export const ComponentsScreen = (): JSX.Element => {
           data-testid="open-add-component"
           aria-label="Add a component"
         >
-          Add component
+          Component
         </Button>
       </ScreenHeader>
 

@@ -345,7 +345,7 @@ export const PanelListScreen = (): JSX.Element => {
           data-testid="open-add-panel"
           aria-label="Add a panel"
         >
-          Add panel
+          Panel
         </Button>
       </ScreenHeader>
 

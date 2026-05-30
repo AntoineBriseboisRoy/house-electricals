@@ -138,7 +138,7 @@ export const MapLandingScreen = (): JSX.Element => {
           data-testid="open-add-floor"
           aria-label="Add a floor"
         >
-          Add floor
+          Floor
         </Button>
       </ScreenHeader>
 

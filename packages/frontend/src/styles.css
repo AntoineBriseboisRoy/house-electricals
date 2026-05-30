@@ -2824,7 +2824,10 @@ h2 {
     border: 0;
   }
   .link-action--header {
+    /* Square icon chip (44x44) so the Status link matches the height of the
+     * adjacent "Add X" button instead of collapsing to a squat wide chip. */
     width: var(--touch-target);
+    height: var(--touch-target);
     padding: 0;
     justify-content: center;
   }
@@ -2845,6 +2848,22 @@ h2 {
     min-width: var(--touch-target);
     padding-inline: 0;
     justify-content: center;
+  }
+  /* EXCEPTION — the primary "Add X" CTAs (open-add-panel / -floor /
+   * -component) KEEP their noun label on mobile so the user sees what the +
+   * adds ("+ Panel", "+ Floor", "+ Component") rather than a bare +. They
+   * stay normal-width buttons; only the secondary header actions collapse. */
+  .screen-header .btn[data-testid^='open-add-'] .btn__label {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+  }
+  .screen-header .btn[data-testid^='open-add-'] {
+    min-width: 0;
+    padding-inline: var(--space-3);
   }
   /* Cycle-65 P0 — at very narrow viewports (<= 480px) the title still
      overruns even with the icon-only action chip + tightened right-pad.
