@@ -524,22 +524,37 @@ export const FloorEditScreen = (): JSX.Element => {
     return () => window.clearTimeout(t);
   }, [loading, componentsOnFloor]);
 
-  /** Refactor 2026-05 iter-5 — scroll the highlighted slot in the
-   *  breaker-context mini-viz into view whenever the selected component
-   *  changes. The mini-viz caps at 280px tall and the active slot may be
-   *  outside the initial scroll position (e.g. slot 18 of 24). Without
-   *  this, the user has to manually scroll to find the ringed slot. */
+  /** Refactor 2026-05 iter-5 — reveal the highlighted slot in the
+   *  breaker-context mini-viz when the selected component changes. The
+   *  mini-viz caps at 280px tall and the active slot may be outside the
+   *  initial scroll position (e.g. slot 18 of 24).
+   *
+   *  2026-05 — scroll ONLY the mini-viz container (set its `scrollTop`),
+   *  NOT `Element.scrollIntoView()`. scrollIntoView walks up and scrolls
+   *  every scrollable ancestor incl. the page/window, which made the whole
+   *  view jump on mobile (the properties drawer sits below the canvas there)
+   *  every time a pin was tapped. Adjusting the container's own scrollTop
+   *  keeps the page anchored. */
   useEffect(() => {
     if (selectedComponentId === null) return;
     const sel = componentsOnFloor.find((c) => c.id === selectedComponentId);
     if (sel === undefined || sel.breaker === null) return;
+    const breakerId = sel.breaker.id;
     const raf = window.requestAnimationFrame(() => {
-      const slotEl = document.querySelector(
-        `[data-testid="component-breaker-context-mini"] [data-breaker-id="${sel.breaker!.id}"]`
+      const container = document.querySelector<HTMLElement>(
+        '[data-testid="component-breaker-context-mini"]'
       );
-      if (slotEl !== null) {
-        slotEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
+      const slotEl = container?.querySelector<HTMLElement>(
+        `[data-breaker-id="${breakerId}"]`
+      );
+      if (!container || !slotEl) return;
+      const cRect = container.getBoundingClientRect();
+      const sRect = slotEl.getBoundingClientRect();
+      // Center the slot within the container's own scroll viewport; the
+      // browser clamps scrollTop, so a short (non-overflowing) grid is a
+      // no-op. The window is never touched.
+      container.scrollTop +=
+        sRect.top - cRect.top - (container.clientHeight - sRect.height) / 2;
     });
     return () => window.cancelAnimationFrame(raf);
   }, [selectedComponentId, componentsOnFloor]);
