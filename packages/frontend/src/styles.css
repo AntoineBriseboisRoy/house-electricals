@@ -792,7 +792,11 @@ body:has(.modal-overlay) .bottom-tabs {
   pointer-events: none;
   cursor: default;
 }
-.screen-header:has(.screen-header__back--spacer) {
+/* On root-tab screens the back button is a display:none spacer; collapse the
+   grid to 2 columns (title | actions) so the title sits flush-left. The grid
+   now lives on .screen-header__bar (G42 breadcrumbs restructure), so target
+   that — the spacer is a child of the bar, so :has still matches. */
+.screen-header__bar:has(.screen-header__back--spacer) {
   grid-template-columns: 1fr auto;
 }
 
@@ -6617,9 +6621,21 @@ h2 {
   gap: var(--space-2);
 }
 .screen-header__bar {
-  display: flex;
+  /* Carries the ORIGINAL .screen-header row layout (back | title | actions).
+     G42(b) flipped .screen-header to flex-column for the breadcrumb strip but
+     left this bar as a plain flex row — which dropped the 3-column grid, so the
+     title stopped filling (1fr) and the actions stopped pinning right (auto):
+     title + Add button collapsed together. Restore the grid here. */
+  display: grid;
+  grid-template-columns: var(--touch-target) 1fr auto;
   align-items: center;
   gap: var(--space-3);
+  /* Span the full header width. .screen-header is now flex-column (for the
+     breadcrumb strip); a grid child isn't guaranteed to stretch on the cross
+     axis across browsers, and when it shrink-wraps the 1fr title column
+     collapses to content and the actions stop pinning right. width:100%
+     restores the original (block-level grid) full-width behaviour. */
+  width: 100%;
 }
 .breadcrumbs {
   /* sits flush-left under the sticky header padding; the back arrow column
