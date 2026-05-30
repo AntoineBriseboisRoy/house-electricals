@@ -198,6 +198,52 @@ After the cycle-42 autonomous batch shipped (Impact "switches that lose control"
 
 - [x] G45 — Home status dashboard (roll-up of signals the app ALREADY computes — explicitly NOT new analysis). A home-level screen (a new `/dashboard` route) that aggregates and surfaces statuses already derived elsewhere in the app, scoped to the active building: (a) overloaded / over-80% circuits via the existing pure `lib/load.ts` helpers; (b) GFCI/AFCI devices not tested this calendar month via G37 `protection` + G36 `breaker_tests` / `latestBreakerTestsByIds` (the same logic already on PanelListScreen's aggregate card); (c) critical components via the G35 `components.critical` flag; (d) simple per-building counts (panels, breakers, components, floors). Each card shows a count and links to the existing surface that handles it (panel detail, test screen, components library) — the dashboard composes, it does not compute anything new. **Explicitly out of scope (Non-goal compliance):** this is NOT code-compliance auditing, load-calculation advice, wire-gauge guidance, or "circuits missing expected protection" inference — every number shown is already calculated by an existing helper or query; the dashboard only re-displays them in one place. Cards with a zero/healthy count render a calm "all good" state (no false alarms). Verified by a Playwright spec that seeds an overloaded circuit + an untested GFCI and asserts both surface on the dashboard with working links.
 
+### Overnight autonomous extension (user-directed, 2026-05-30, "night-may-30")
+
+User went out for the night and directed an unattended autonomous run on a new
+branch `night-may-30`. Each goal is built on its own `feat/*` branch off
+`night-may-30`, verified green (typecheck + tests + build), then **squash-merged**
+into `night-may-30`. Nothing is pushed; the user reviews everything tomorrow.
+Ordered queue (do in order, then continue down the open-goals list): G46 → G47 →
+G41 → remaining G42 polish → deferred review items. Infinite budget; do not stop.
+
+- [ ] G46 — Complete security audit + hardening pass. A thorough security review of
+  the whole app, then fixes for what's found. Cover at minimum: (a) authn/authz —
+  the JWT-cookie gate, scrypt params, the public carve-out routes, cookie flags
+  (HttpOnly/SameSite/Secure), session invalidation; (b) injection — confirm every
+  DB call uses `$1` parameterization (no string-built SQL with user input), the
+  whitelist columns in the flat switch-controls/export routes, zod validation
+  coverage on every mutating route; (c) file upload — the floor-plan + photo
+  pipeline (magic-byte sniff, size cap, path-traversal on filenames, SVG
+  rejection); (d) the new import route (G43) — payload size limits, billion-laughs
+  / deeply-nested JSON, resource exhaustion on a huge tree, the `exec` simple-protocol
+  boundary; (e) dependency audit (`pnpm audit`), and any known-CVE deps; (f) headers
+  / CORS / rate-limiting posture appropriate for a LAN+reverse-proxy single-user app;
+  (g) secrets handling (`.auth-secret`, env vars, nothing in images/logs). Produce a
+  written report (`docs/SECURITY-AUDIT.md`) enumerating findings by severity with
+  file:line, THEN fix the real ones (respecting the single-user/LAN threat model in
+  Constraints — don't over-engineer internet-hardening the vision explicitly scopes
+  out). Add regression tests for each fix. Verify backend tests + frontend build green.
+
+- [ ] G47 — Formal, documented design system. The app already has a token-driven
+  style (G11/G17/G22, `ui/tokens.css` + `ui/` primitives). Consolidate it into a
+  *well-defined, documented* design system that captures the CURRENT app style (do
+  NOT redesign the look) and makes it reusable/consistent/maintainable to speed up
+  future dev. Deliverables: (a) audit the existing primitives + scattered
+  bespoke/duplicated UI across screens; extract repeated patterns into reusable,
+  documented components (no new visual language — formalize what exists); (b) a
+  single source-of-truth design-system doc (`docs/DESIGN-SYSTEM.md`) covering the
+  token families, the component catalog (props, variants, usage, do/don't), spacing/
+  type/color/elevation/motion scales, and contribution rules; (c) optionally a
+  living component gallery/storybook-style route or page if it fits the stack
+  cheaply (council decides — don't add a heavy dep that blows the perf budget);
+  (d) refactor a representative set of screens to consume the formalized components,
+  proving the reuse without changing the rendered look. Research current best
+  practices for design systems (token tiers / primitives-vs-patterns / documentation)
+  and apply them. Preserve ALL pinned token NAMES (cycle-11/17/20 rule) and the
+  ≤200 KB gz perf budget. Verify typecheck + build + e2e green; the app must look
+  the same before and after.
+
 (When all checked, change the heading back to `# VISION (COMPLETE)` to halt the meta-loop. NOTE: the user explicitly extended the loop in cycle-21 ("loop infinite … iterate over design + functionality") so cycle-22+ may add further polish goals; do not auto-flip the heading unless the user signals halt.)
 
 ## Constraints (technical, legal, operational)
