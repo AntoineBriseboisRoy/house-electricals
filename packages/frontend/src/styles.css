@@ -3196,6 +3196,195 @@ h2 {
   .printable-slot { padding: 4pt 6pt; }
 }
 
+/* ===== G41 — "Share with electrician" building PDF bundle =====
+ * Building-scoped multi-page artifact (/buildings/:id/print). Reuses the G24
+ * .printable-page paper contract (white card on screen + black-on-white in
+ * print). All values are LITERAL hex (cycle-27 G24 ADR #4: no design tokens
+ * inside .printable-page — the artifact is theme-invariant). NO new token
+ * NAMES (cycle-11/17/20 rule). The shared .printable-slots/.printable-slot
+ * rules above are reused verbatim for each panel's diagram. */
+
+.printable-bundle__watermark {
+  margin: 0 0 16pt 0;
+  padding: 6pt 10pt;
+  border: 1px solid #111;
+  border-radius: 4px;
+  font-size: 10pt;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 0.02em;
+  color: #111;
+}
+
+.printable-bundle__section {
+  margin-top: 20pt;
+}
+
+.printable-page .printable-bundle__heading {
+  font-size: 15pt;
+  font-weight: 700;
+  margin: 0 0 2pt 0;
+  border-bottom: 1px solid #111;
+  padding-bottom: 4pt;
+  color: #111;
+}
+.printable-page .printable-bundle__heading-sub {
+  font-size: 9pt;
+  color: #555;
+  margin: 0 0 8pt 0;
+}
+
+/* Each panel + floor block reads as its own section. break-inside: avoid keeps
+   a panel grid from splitting awkwardly; break-before: page starts each on a
+   fresh sheet (the :first-child reset avoids a leading blank page). */
+.printable-bundle__panel,
+.printable-bundle__floor {
+  margin-top: 16pt;
+  break-inside: avoid;
+  break-before: page;
+}
+.printable-bundle__section > .printable-bundle__panel:first-child,
+.printable-bundle__section > .printable-bundle__floor:first-child {
+  break-before: auto;
+}
+
+.printable-floor__canvas {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  min-height: 200pt;
+  border: 1px solid #999;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #fff;
+}
+.printable-floor__canvas .floor-plan__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  /* Lighten the underlay so black pins + labels stay legible on paper. */
+  filter: grayscale(1) contrast(0.9) opacity(0.85);
+}
+.printable-floor__canvas .floor-plan__vector {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.printable-floor__canvas .floor-plan__wall {
+  stroke: #111;
+  stroke-width: 40;
+}
+.printable-floor__canvas .floor-plan__room-rect {
+  fill: rgba(0, 0, 0, 0.04);
+  stroke: #555;
+  stroke-width: 16;
+}
+.printable-floor__canvas .floor-plan__room-label {
+  fill: #333;
+  font-size: 280px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.printable-floor__pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 2pt;
+  padding: 0.5pt 3pt 0.5pt 1.5pt;
+  background: #fff;
+  border: 1px solid #111;
+  border-radius: 8pt;
+  font-size: 6.5pt;
+  line-height: 1.1;
+  white-space: nowrap;
+  max-width: 90pt;
+  overflow: hidden;
+  color: #111;
+}
+.printable-floor__pin-icon {
+  display: inline-flex;
+  width: 9pt;
+  height: 9pt;
+  color: #333;
+}
+.printable-floor__pin-icon > svg { width: 100%; height: 100%; }
+.printable-floor__pin-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.printable-bundle__rooms {
+  margin-top: 10pt;
+}
+.printable-bundle__room {
+  margin-top: 6pt;
+  break-inside: avoid;
+}
+.printable-page .printable-bundle__room-name {
+  font-size: 11pt;
+  font-weight: 700;
+  margin: 0 0 2pt 0;
+  color: #111;
+}
+.printable-bundle__room-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.printable-bundle__room-list li {
+  display: flex;
+  align-items: center;
+  gap: 4pt;
+  font-size: 9pt;
+  color: #333;
+  margin-top: 2pt;
+  break-inside: avoid;
+}
+.printable-bundle__room-circuit {
+  font-size: 8pt;
+  color: #555;
+  margin-left: auto;
+}
+.printable-bundle__empty {
+  font-size: 9pt;
+  font-style: italic;
+  color: #777;
+}
+
+.printable-bundle__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8.5pt;
+  margin-top: 8pt;
+  color: #111;
+}
+.printable-bundle__table th,
+.printable-bundle__table td {
+  border: 1px solid #999;
+  padding: 3pt 5pt;
+  text-align: left;
+  vertical-align: top;
+}
+.printable-bundle__table th {
+  background: #f4f4f4;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.printable-bundle__table tr {
+  break-inside: avoid;
+}
+/* The circuit directory starts on a fresh page when printed. */
+@media print {
+  .printable-bundle [data-testid='printable-bundle-directory'] {
+    break-before: page;
+  }
+}
+/* ===== end G41 building PDF bundle ===== */
+
 /* G18 panel visualization — grid of slots that mirrors the physical panel */
 .panel-viz {
   display: grid;

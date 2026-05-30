@@ -7,6 +7,7 @@ import type {
   BreakerInput,
   BreakerTest,
   Building,
+  BuildingExportParsed,
   BuildingInput,
   Component,
   ComponentInput,
@@ -234,6 +235,37 @@ export const submitChangePassword = async (
 export const listBuildings = async (): Promise<Building[]> => {
   const res = await fetch('/api/v1/buildings');
   return unwrap<Building[]>(res);
+};
+
+/**
+ * G41 — fetch a building's FULL tree (the same payload the export.json endpoint
+ * serves) for the "Share with electrician" print bundle. That endpoint returns
+ * the bundle object DIRECTLY (NOT the `{ data }` envelope), so this uses a raw
+ * same-origin fetch (the he_auth cookie attaches automatically) rather than the
+ * `unwrap()` helper. Scoped to the given building id regardless of the active
+ * building.
+ */
+export const getBuildingExport = async (
+  buildingId: string
+): Promise<BuildingExportParsed> => {
+  const res = await fetch(
+    `/api/v1/buildings/${encodeURIComponent(buildingId)}/export.json`,
+    { credentials: 'same-origin', headers: { accept: 'application/json' } }
+  );
+  if (!res.ok) {
+    if (res.status === 401 && unauthorizedHandler !== null) {
+      try {
+        unauthorizedHandler();
+      } catch {
+        // best-effort
+      }
+    }
+    throw new ApiHttpError(
+      res.status,
+      res.status === 404 ? 'Building not found.' : 'Failed to load building.'
+    );
+  }
+  return (await res.json()) as BuildingExportParsed;
 };
 
 export const createBuilding = async (input: BuildingInput): Promise<Building> => {

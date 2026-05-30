@@ -10,6 +10,7 @@ import { PanelMapScreen } from './screens/PanelMapScreen.js';
 import { MapLandingScreen } from './screens/MapLandingScreen.js';
 import { FloorEditScreen } from './screens/FloorEditScreen.js';
 import { PrintableDiagramScreen } from './screens/PrintableDiagramScreen.js';
+import { PrintableBundleScreen } from './screens/PrintableBundleScreen.js';
 import { AuditScreen } from './screens/AuditScreen.js';
 import { DashboardScreen } from './screens/DashboardScreen.js';
 import { LoginScreen } from './screens/LoginScreen.js';
@@ -83,11 +84,15 @@ const AuthedApp = (): JSX.Element => {
   // breaker diagram) belong here.
   const isFloorEdit = /^\/floors\/[^/]+\/edit$/.test(location);
   const isPrint = /^\/panels\/[^/]+\/print$/.test(location);
-  if (isFloorEdit || isPrint) {
+  // G41 — building-scoped "Share with electrician" PDF bundle. Same
+  // escape-hatch contract as the per-panel print (no AppShell chrome).
+  const isBundlePrint = /^\/buildings\/[^/]+\/print$/.test(location);
+  if (isFloorEdit || isPrint || isBundlePrint) {
     return (
       <Switch key={buildingKey}>
         <Route path="/floors/:id/edit" component={FloorEditScreen} />
         <Route path="/panels/:id/print" component={PrintableDiagramScreen} />
+        <Route path="/buildings/:id/print" component={PrintableBundleScreen} />
       </Switch>
     );
   }

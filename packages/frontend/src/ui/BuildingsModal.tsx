@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { Download, Pencil, Plus, Trash2, Upload } from 'lucide-react';
+import { Download, Pencil, Plus, Printer, Trash2, Upload } from 'lucide-react';
 import type { Building } from '@he/shared';
 import { Modal } from './Modal.js';
 import { Button } from './Button.js';
@@ -140,6 +140,21 @@ export const BuildingsModal = ({
                 Export “{current.name}”
               </span>
               <div className="buildings-export__links">
+                {/* G41 — "Share with electrician" PDF bundle. A plain
+                    same-origin link (carries the he_auth cookie) to the
+                    escape-hatch print route, opened in a new tab; the user
+                    prints / saves-as-PDF and shares it themselves (AirDrop /
+                    email / print). Sibling to the JSON/CSV export links. */}
+                <a
+                  className="btn btn--secondary btn--sm"
+                  href={`/buildings/${encodeURIComponent(current.id)}/print`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="share-electrician-pdf"
+                >
+                  <Printer size={15} strokeWidth={2.25} aria-hidden="true" />
+                  Share with electrician (PDF)
+                </a>
                 <a
                   className="btn btn--secondary btn--sm"
                   href={`${base}.json`}
