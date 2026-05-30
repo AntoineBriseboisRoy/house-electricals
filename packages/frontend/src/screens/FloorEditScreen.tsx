@@ -107,6 +107,7 @@ import {
   type Corner,
 } from '../hooks/useRoomEditor.js';
 import { useModal } from '../hooks/useModal.js';
+import { useBuilding } from '../contexts/BuildingContext.js';
 import { useUndoableDelete } from '../hooks/useUndoableDelete.js';
 import { findRoomForPoint, findPointsInRect } from '../lib/roomLookup.js';
 import { snapPoint } from '../lib/snap.js';
@@ -268,6 +269,7 @@ export const FloorEditScreen = (): JSX.Element => {
   const viewport = useViewport();
   const { confirm, prompt, pick, modalNode } = useModal();
   const { deleteWithUndo } = useUndoableDelete();
+  const { currentBuilding } = useBuilding();
 
   const refresh = useCallback(async (): Promise<void> => {
     if (!floorId) return;
@@ -2012,6 +2014,13 @@ export const FloorEditScreen = (): JSX.Element => {
               title={floor.name}
               subtitle={subtitle}
               back="/map"
+              breadcrumbs={[
+                ...(currentBuilding !== null
+                  ? [{ label: currentBuilding.name }]
+                  : []),
+                { label: 'Map', href: '/map' },
+                { label: floor.name },
+              ]}
             >
           <Button
             variant="secondary"

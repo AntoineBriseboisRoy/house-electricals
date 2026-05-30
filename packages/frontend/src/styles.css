@@ -6603,3 +6603,96 @@ h2 {
   font-size: var(--text-size-sm);
   color: var(--color-fg-muted);
 }
+
+/* G42(b) breadcrumbs */
+/* G42(b) cycle — breadcrumb navigation strip. The ScreenHeader now wraps
+   its back/title/actions row in .screen-header__bar so an optional
+   .breadcrumbs strip can stack ABOVE it. .screen-header keeps all its
+   original sticky/padding/background/border properties (declared earlier);
+   only display + flex-direction are overridden here so children stack. The
+   row layout moves to .screen-header__bar. No new token NAMES. */
+.screen-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.screen-header__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.breadcrumbs {
+  /* sits flush-left under the sticky header padding; the back arrow column
+     starts the bar below it, so a small left inset keeps them visually
+     aligned without hard-coding the back button width. */
+  min-width: 0;
+  font-size: var(--text-size-sm);
+  line-height: var(--text-leading-snug);
+}
+.breadcrumbs__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.breadcrumbs__item {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+/* The LEAF (current page) crumb wins the available width and truncates;
+   parent crumbs shrink only enough to fit, never below a readable floor. */
+.breadcrumbs__item:last-child {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.breadcrumbs__crumb {
+  display: inline-block;
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  /* ≥44px touch hit area on links via vertical padding + a transparent
+     tap target; the visible text stays compact. */
+  padding: var(--space-1) var(--space-2);
+  margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-2));
+}
+.breadcrumbs__crumb--link {
+  color: var(--color-fg-muted);
+  text-decoration: none;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out),
+    background var(--motion-duration-fast) var(--motion-ease-out);
+}
+.breadcrumbs__crumb--link:hover {
+  color: var(--color-fg-default);
+  background: var(--color-bg-hover);
+}
+.breadcrumbs__crumb--link:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+.breadcrumbs__crumb--current {
+  color: var(--color-fg-default);
+  font-weight: var(--text-weight-medium);
+}
+.breadcrumbs__sep {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-fg-subtle);
+  flex: 0 0 auto;
+}
+/* Mobile: the leaf can take more of the row; parent crumbs cap tighter so
+   the strip never forces horizontal overflow. */
+@media (max-width: 720px) {
+  .breadcrumbs__crumb {
+    max-width: 12ch;
+  }
+  .breadcrumbs__item:last-child .breadcrumbs__crumb {
+    max-width: 22ch;
+  }
+}

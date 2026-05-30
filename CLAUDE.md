@@ -2,6 +2,42 @@
 
 This is the project-root `CLAUDE.md`. It records *project-wide conventions* that future cycles must respect. Per-package context lives in `packages/*/CLAUDE.md` (if any). Story-specific details belong in commit messages / `scripts/ralph/progress.txt`, not here.
 
+## Breadcrumb navigation strip (G42(b) — 2026-05)
+
+The `<Breadcrumbs>` primitive (`packages/frontend/src/ui/Breadcrumbs.tsx`,
+exported from `ui/index.ts`) is a slim nav strip giving deep-linked visits
+nav context (e.g. "My House › Panels › Main Panel"). Pin these decisions:
+
+1. **Integrated via `ScreenHeader`'s optional `breadcrumbs?: Crumb[]` prop**,
+   NOT rendered ad-hoc per screen. ScreenHeader now wraps its
+   back/title/actions row in a `.screen-header__bar` div and stacks the
+   `.breadcrumbs` strip ABOVE it (`.screen-header` flips to
+   `flex-direction: column`). The original grid row-layout moved verbatim to
+   `.screen-header__bar` — title/back/actions are unchanged. Breadcrumbs
+   render ONLY when the prop is passed + non-empty, so every other
+   ScreenHeader consumer is byte-identical.
+
+2. **`Crumb = { label, href? }`. The LAST crumb is the current page and MUST
+   omit `href`** — it renders as a non-link `<span aria-current="page">`.
+   Crumbs WITH `href` are wouter `<Link>`s. lucide `ChevronRight` separators
+   (aria-hidden). Token-only styling (no new token NAMES — cycle-11/17/20
+   rule); the `.breadcrumbs*` BEM rules read existing tokens.
+
+3. **Building-scoped root crumb**: wired screens prepend the active building
+   name via `useBuilding().currentBuilding` (omitted when null). Wired into
+   PanelDetailScreen ("`<building>` › Panels › `<panel>`") and FloorEditScreen
+   ("`<building>` › Map › `<floor>`"). FloorEdit is an escape-hatch full-bleed
+   route but uses ScreenHeader, so it gets breadcrumbs in its header without
+   touching the canvas. The loading/not-found ScreenHeaders intentionally
+   omit breadcrumbs (no entity name yet).
+
+4. **Mobile-friendly**: crumb labels ellipsis-truncate (`max-width` in ch);
+   the leaf crumb wins width over parents on narrow screens; links keep a
+   ≥44px touch hit area via padding + negative margin (visible text stays
+   compact). DOM hooks (READ-ONLY e2e contract): `data-testid="breadcrumbs"`
+   on the `<nav>`, `data-testid="breadcrumb-crumb"` on each crumb. e2e:
+   `breadcrumbs.spec.ts`.
+
 ## Persistence is PostgreSQL (migrate/postgres) — READ FIRST
 
 House Electricals moved off `node:sqlite` to **PostgreSQL** (branch

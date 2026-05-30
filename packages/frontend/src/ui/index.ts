@@ -8,6 +8,7 @@
 export { AppShell, APP_TABS, type AppShellProps } from './AppShell.js';
 export { BottomTabs, type Tab } from './BottomTabs.js';
 export { ScreenHeader, type ScreenHeaderProps } from './ScreenHeader.js';
+export { Breadcrumbs, type BreadcrumbsProps, type Crumb } from './Breadcrumbs.js';
 export {
   Card,
   CardHeader,

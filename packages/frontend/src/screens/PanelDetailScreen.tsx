@@ -63,6 +63,7 @@ import {
 } from '../ui/index.js';
 import { useModal } from '../hooks/useModal.js';
 import { useUndoableDelete } from '../hooks/useUndoableDelete.js';
+import { useBuilding } from '../contexts/BuildingContext.js';
 import { computeImpact, computeSwitchControlLoss } from '../lib/impact.js';
 import { computeBreakerLoad, type BreakerLoad } from '../lib/load.js';
 
@@ -144,6 +145,7 @@ export const PanelDetailScreen = (): JSX.Element => {
   const [view, setView] = useState<ViewMode>(readView);
   const { confirm, prompt, pick, modalNode } = useModal();
   const { deleteWithUndo } = useUndoableDelete();
+  const { currentBuilding } = useBuilding();
 
   const switchView = (next: ViewMode): void => {
     setView(next);
@@ -872,6 +874,13 @@ export const PanelDetailScreen = (): JSX.Element => {
       <ScreenHeader
         title={panel?.name ?? (loading ? 'Loading…' : 'Panel')}
         back="/"
+        breadcrumbs={[
+          ...(currentBuilding !== null
+            ? [{ label: currentBuilding.name }]
+            : []),
+          { label: 'Panels', href: '/' },
+          { label: panel?.name ?? (loading ? 'Loading…' : 'Panel') },
+        ]}
       >
         {panel &&
           (() => {
