@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Floor editor — design explorations</title>
+<style>
+  :root {
+    --bg: #100f0d; --surface: #252420; --raised: #34322c; --fg: #f0ebe6;
+    --muted: #9a958e; --subtle: #6f6a64; --accent: #7a9e8a; --border: #3a3732;
+    --fam: 'Plus Jakarta Sans','Inter',system-ui,sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--fam);
+    -webkit-font-smoothing: antialiased; padding: 48px 24px 80px; }
+  h1 { font-size: 1.7rem; margin: 0 0 8px; letter-spacing: -.01em; }
+  p.lede { color: var(--muted); max-width: 70ch; line-height: 1.55; margin: 0 0 32px; }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; max-width: 760px; }
+  a.card { display: block; text-decoration: none; color: inherit; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 16px; padding: 20px 22px; transition: border-color .15s, background .15s; }
+  a.card:hover { border-color: var(--accent); background: var(--raised); }
+  a.card .t { font-size: 1.12rem; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+  a.card .d { color: var(--muted); font-size: .9rem; margin-top: 6px; line-height: 1.5; }
+  a.card .new { font-size: .7rem; font-weight: 700; color: var(--accent); border: 1px solid var(--accent);
+    border-radius: 999px; padding: 2px 8px; }
+  .arrow { margin-left: auto; color: var(--subtle); }
+  footer { margin-top: 48px; color: var(--subtle); font-size: .8rem; }
+</style>
+</head>
+<body>
+  <h1>Floor editor — design explorations</h1>
+  <p class="lede">Live, interactive mockups for the tool-selector redesign. Open any page; everything is scrollable / clickable. Styled with the real app tokens.</p>
+  <ul>
+    <li><a class="card" href="./breaker-picker.html">
+      <div class="t">Breaker picker rework <span class="new">NEWEST</span> <span class="arrow">→</span></div>
+      <div class="d">4 ways to make the component form's "Breaker" field nicer, each with an inline "+ New breaker" mini-form to create a circuit without leaving the form.</div>
+    </a></li>
+    <li><a class="card" href="./floor-sidebar-rework.html">
+      <div class="t">Properties sidebar rework <span class="arrow">→</span></div>
+      <div class="d">5 distinct directions for the floor properties sidebar — compacting "Panels here" and getting floor controls out of the way when a component is selected. Toggle both states.</div>
+    </a></li>
+    <li><a class="card" href="./carousel-edge-arrows.html">
+      <div class="t">Carousel edge arrows <span class="arrow">→</span></div>
+      <div class="d">5 takes on the discreet "more to scroll" arrow that appears at the edge only when there are more tools that way. Scroll each bar to see them toggle.</div>
+    </a></li>
+    <li><a class="card" href="./desktop-tool-carousel.html">
+      <div class="t">Desktop tool carousel <span class="arrow">→</span></div>
+      <div class="d">5 desktop carousel layouts in the real 3-column editor frame, each noting how it unifies with the mobile design.</div>
+    </a></li>
+    <li><a class="card" href="./mobile-tool-selector.html">
+      <div class="t">Mobile tool selector <span class="arrow">→</span></div>
+      <div class="d">5 mobile selector designs (wheel, cover flow, dial, filmstrip, drum) in a phone frame.</div>
+    </a></li>
+  </ul>
+  <footer>Prototypes only — not wired into the app.</footer>
+</body>
+</html>

@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -10,6 +9,7 @@ import {
 import { createPortal } from 'react-dom';
 import { ChevronDown, Search, X } from 'lucide-react';
 import { useComboboxKeyboard } from '../hooks/useComboboxKeyboard.js';
+import { usePopoverPosition } from '../hooks/usePopoverPosition.js';
 
 /**
  * Cycle-60: Generic single-select typeahead combobox.
@@ -62,10 +62,6 @@ export type ComboboxProps<T> = {
 
 const defaultEquals = <T,>(a: T, b: T): boolean => a === b;
 
-type Position =
-  | { top: number; bottom?: undefined; left: number; width: number; maxHeight: number }
-  | { top?: undefined; bottom: number; left: number; width: number; maxHeight: number };
-
 export function Combobox<T>({
   value,
   onChange,
@@ -86,43 +82,10 @@ export function Combobox<T>({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const [pos, setPos] = useState<Position | null>(null);
 
-  // Position the portalled listbox relative to the trigger; flip up when
-  // there isn't enough room below. Re-anchor on scroll/resize so it tracks
-  // even when nested inside an overflow-auto FilterPopover.
-  useLayoutEffect(() => {
-    if (!isOpen) return;
-    const compute = (): void => {
-      const el = triggerRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const desired = Math.max(rect.width, 240);
-      const width = Math.min(desired, window.innerWidth - 16, 360);
-      const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-      const spaceBelow = window.innerHeight - rect.bottom - 8;
-      const spaceAbove = rect.top - 8;
-      const flipUp = spaceBelow < 220 && spaceAbove > spaceBelow;
-      const maxHeight = Math.max(160, flipUp ? spaceAbove - 4 : spaceBelow - 4);
-      if (flipUp) {
-        setPos({
-          bottom: window.innerHeight - rect.top + 4,
-          left,
-          width,
-          maxHeight,
-        });
-      } else {
-        setPos({ top: rect.bottom + 4, left, width, maxHeight });
-      }
-    };
-    compute();
-    window.addEventListener('resize', compute);
-    document.addEventListener('scroll', compute, true);
-    return () => {
-      window.removeEventListener('resize', compute);
-      document.removeEventListener('scroll', compute, true);
-    };
-  }, [isOpen]);
+  // Shared positioner (2026-05) — flips up/down + viewport-clamps; re-anchors
+  // on scroll/resize so it tracks inside an overflow-auto FilterPopover.
+  const pos = usePopoverPosition({ isOpen, triggerRef });
 
   // Outside-click closes the listbox. The portalled list lives outside
   // containerRef so we check dropdownRef explicitly.

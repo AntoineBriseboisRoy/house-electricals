@@ -1,47 +1,17 @@
 /**
- * Cycle-85 — Room datalist autocomplete + floor.panelId linking.
+ * Cycle-85 — Room dropdown (strict Combobox of existing rooms).
  *
- * Covers the two user-flagged asks:
- *  1. Room field on ComponentForm shows a datalist of existing rooms so
- *     typos like "Kichen" / "kitchen" don't fragment the canonical
- *     "Kitchen". Free text is still accepted (suggest-only).
- *  2. Linking a floor to a panel via FloorEditScreen's "Linked panel"
- *     select makes ComponentForm pre-select that panel when editing a
- *     component on that floor.
+ * The floor-panel-link tests that used to live here were removed in 2026-05
+ * (the "Linked panel" default-wire picker + the `cf-panel` select no longer
+ * exist). The breaker picker is now covered by `breaker-combo.spec.ts`.
  *
  * Hard rules from cycle-21:
  *  - No page.waitForTimeout.
  *  - Both Playwright projects (mobile + desktop) must pass.
  */
 import { test, expect } from '@playwright/test';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-type SeededState = {
-  seeded?: {
-    panelId: string;
-    breakerIds: string[];
-    floorId: string;
-    roomIds: string[];
-    componentIds: string[];
-  };
-};
-
-const loadSeeded = (): NonNullable<SeededState['seeded']> => {
-  const state = JSON.parse(
-    readFileSync(join(__dirname, '.state.json'), 'utf8')
-  ) as SeededState;
-  if (!state.seeded) throw new Error('no seed');
-  return state.seeded;
-};
-
-import { authedFetch, E2E_BACKEND_URL } from './authed-fetch.js';
-
-test.describe('cycle-85 room dropdown + floor-panel link', () => {
+test.describe('cycle-85 room dropdown', () => {
   test('ComponentForm Room field is a strict Combobox of existing rooms', async ({
     page,
   }) => {
@@ -74,88 +44,14 @@ test.describe('cycle-85 room dropdown + floor-panel link', () => {
     expect(values).toContain('Living Room');
   });
 
-  test('FloorEditScreen — Linked panel select persists via PATCH', async ({
-    page,
-  }) => {
-    const seed = loadSeeded();
-    await page.goto(`/floors/${seed.floorId}/edit`);
-
-    // The picker is at the top of the right sidebar (loaded after the
-    // floor itself).
-    const picker = page.getByTestId('floor-linked-panel');
-    await expect(picker).toBeVisible();
-
-    // Wait for panels to load — picker shouldn't be disabled.
-    await expect(picker).toBeEnabled();
-
-    // The seed has 1 panel ("Main Panel"). Pick it.
-    await picker.selectOption({ label: 'Main Panel' });
-
-    // Server PATCH succeeded — verify by re-fetching the floor.
-    await expect(async () => {
-      const res = await authedFetch(
-        `${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`
-      );
-      const body = (await res.json()) as { data: { panelId: string | null } };
-      expect(body.data.panelId).toBe(seed.panelId);
-    }).toPass();
-
-    // Cleanup — leave the seed floor unlinked so later specs (smoke,
-    // configure, etc.) see the floor in its original shape.
-    await authedFetch(`${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ panelId: null }),
-    });
-  });
-
-  test('Edit form pre-selects Panel from floor.panelId when component is unwired', async ({
-    page,
-  }) => {
-    const seed = loadSeeded();
-    // Step 1: link the floor to the panel via the public API so the
-    // ComponentsScreen sees the floor.panelId on load.
-    await authedFetch(`${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ panelId: seed.panelId }),
-    });
-
-    // Step 2: create a fresh unwired component on this floor.
-    const created = await authedFetch(`${E2E_BACKEND_URL}/api/v1/components`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        type: 'outlet',
-        name: 'Cycle-85 default-wire test',
-        room: null,
-        notes: null,
-        breakerId: null,
-        floorId: seed.floorId,
-      }),
-    });
-    const componentId = ((await created.json()) as { data: { id: string } })
-      .data.id;
-
-    // Step 3: open ComponentsScreen, find this component's row, click Edit.
-    await page.goto('/components');
-    const row = page.locator(`[data-component-id="${componentId}"]`);
-    await expect(row).toBeVisible();
-    await row.getByRole('button', { name: /Edit component/ }).click();
-
-    // Step 4: the Wiring section's Panel select should default to the
-    // linked panel id (because the component itself has breakerId=null).
-    const panelSelect = page.getByTestId('cf-panel');
-    await expect(panelSelect).toHaveValue(seed.panelId);
-
-    // Cleanup so the test is idempotent.
-    await authedFetch(`${E2E_BACKEND_URL}/api/v1/components/${componentId}`, {
-      method: 'DELETE',
-    });
-    await authedFetch(`${E2E_BACKEND_URL}/api/v1/floors/${seed.floorId}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ panelId: null }),
-    });
-  });
+  // 2026-05 — Two tests were removed here:
+  //  1. "Linked panel select persists via PATCH" — the standalone "Linked
+  //     panel" default-wire picker was removed from FloorEditScreen (wiring a
+  //     component always picks a real breaker, so a floor-level default added
+  //     no value).
+  //  2. "Edit form pre-selects Panel from floor.panelId" — asserted on the
+  //     `cf-panel` <select>, which no longer exists: the Wiring section is now
+  //     a single BreakerComboField (no separate panel select). `floor.panelId`
+  //     remains a valid field and now drives the picker's default active panel
+  //     pill. The breaker picker itself is covered by `breaker-combo.spec.ts`.
 });

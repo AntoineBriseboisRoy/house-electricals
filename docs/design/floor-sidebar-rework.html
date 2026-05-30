@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Floor editor · properties sidebar rework — distinct directions</title>
+<style>
+  :root {
+    --color-bg-canvas:#1a1917; --color-bg-surface:#252420; --color-bg-surface-raised:#34322c;
+    --color-bg-hover:#38352f; --color-bg-input:#15140f;
+    --color-fg-default:#f0ebe6; --color-fg-muted:#9a958e; --color-fg-subtle:#6f6a64;
+    --color-accent:#7a9e8a; --color-accent-hover:#8eb29c;
+    --color-accent-subtle:rgba(122,158,138,.14); --color-accent-border:rgba(122,158,138,.4);
+    --color-danger:#c47a5a; --color-danger-subtle:rgba(196,122,90,.14); --color-danger-border:rgba(196,122,90,.4);
+    --color-border-subtle:#3a3732; --color-border-strong:#4d4942;
+    --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-6:24px; --space-8:32px;
+    --radius-sm:6px; --radius-md:12px; --radius-lg:16px; --radius-pill:999px;
+    --fam:'Plus Jakarta Sans','Inter',system-ui,sans-serif;
+    --shadow-lg:0 16px 40px -12px rgba(0,0,0,.6),0 4px 10px -4px rgba(0,0,0,.5);
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#100f0d; color:var(--color-fg-default); font-family:var(--fam); -webkit-font-smoothing:antialiased; padding:var(--space-8) var(--space-4) 80px; }
+  h1 { font-size:1.6rem; margin:0 0 8px; letter-spacing:-.01em; }
+  .lede { color:var(--color-fg-muted); max-width:80ch; line-height:1.55; margin:0 0 8px; }
+  .lede b{ color:var(--color-fg-default); } .lede code{ background:var(--color-bg-surface); padding:1px 6px; border-radius:6px; font-size:.85em; }
+
+  .toggle { display:inline-flex; margin:18px 0 6px; background:var(--color-bg-surface); border:1px solid var(--color-border-subtle); border-radius:var(--radius-pill); padding:4px; gap:4px; }
+  .toggle button { font:inherit; font-size:.85rem; font-weight:600; border:none; background:transparent; color:var(--color-fg-muted); padding:8px 16px; border-radius:var(--radius-pill); cursor:pointer; }
+  .toggle button[aria-pressed='true'] { background:var(--color-accent-subtle); color:var(--color-accent); }
+  .statehint { color:var(--color-fg-subtle); font-size:.82rem; margin:0 0 8px; }
+
+  .gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(400px,1fr)); gap:var(--space-6); margin-top:var(--space-6); align-items:start; }
+  .choice { display:flex; flex-direction:column; gap:var(--space-3); }
+  .choice__head { display:flex; align-items:baseline; gap:var(--space-3); }
+  .choice__num { flex:0 0 auto; width:30px; height:30px; border-radius:var(--radius-pill); display:grid; place-items:center; background:var(--color-accent); color:#fff; font-weight:700; }
+  .choice__title { font-size:1.12rem; font-weight:700; margin:0; }
+  .choice__tag { font-size:.8rem; color:var(--color-accent); font-weight:600; }
+  .choice__desc { color:var(--color-fg-muted); font-size:.85rem; line-height:1.5; margin:0; }
+  .choice__desc b{ color:var(--color-fg-default); }
+  .pc { display:flex; gap:var(--space-4); font-size:.78rem; }
+  .pc .pros{color:#9ec5ad;} .pc .cons{color:#d0a088;}
+  .pc ul{ margin:4px 0 0; padding-left:16px; line-height:1.45; }
+
+  /* faux editor */
+  .editor { background:var(--color-bg-canvas); border:1px solid var(--color-border-subtle); border-radius:var(--radius-lg); padding:var(--space-3); height:380px; display:flex; flex-direction:column; gap:var(--space-3); position:relative; }
+  .editor__body { flex:1; display:grid; grid-template-columns:1fr 286px; gap:var(--space-3); min-height:0; }
+  .canvas { border-radius:var(--radius-md); border:1px solid var(--color-border-subtle); background-color:var(--color-bg-canvas);
+    background-image:repeating-linear-gradient(0deg,transparent 0 27px,rgba(122,158,138,.05) 27px 28px),repeating-linear-gradient(90deg,transparent 0 27px,rgba(122,158,138,.05) 27px 28px);
+    display:grid; place-items:center; color:var(--color-fg-subtle); font-size:.78rem; position:relative; }
+  .props { overflow-y:auto; display:flex; flex-direction:column; gap:var(--space-3); scrollbar-width:thin; position:relative; }
+  .props::-webkit-scrollbar{width:6px;} .props::-webkit-scrollbar-thumb{background:var(--color-border-strong); border-radius:3px;}
+
+  svg.i { width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; vertical-align:-2px; }
+  .zap{ color:var(--color-accent); }
+  .sec-title { font-size:.7rem; text-transform:uppercase; letter-spacing:.07em; color:var(--color-fg-subtle); margin:0 0 6px; font-weight:700; }
+  .empty { color:var(--color-fg-subtle); font-size:.8rem; text-align:center; padding:24px 12px; border:1px dashed var(--color-border-subtle); border-radius:var(--radius-md); }
+
+  /* component detail (kept rich, shared) */
+  .card { background:var(--color-bg-surface); border:1px solid var(--color-border-subtle); border-radius:var(--radius-md); padding:var(--space-3); }
+  .cd-head { display:flex; align-items:center; gap:8px; } .cd-head .t{ font-size:1.02rem; font-weight:700; } .cd-head .room{ margin-left:auto; font-size:.78rem; color:var(--color-fg-muted); }
+  .cd-line { display:flex; align-items:center; gap:8px; font-size:.82rem; color:var(--color-fg-muted); margin-top:10px; } .cd-line b{color:var(--color-fg-default); font-weight:600;}
+  .minigrid { display:grid; grid-template-columns:repeat(6,1fr); gap:3px; margin-top:10px; }
+  .minigrid i { height:13px; border-radius:3px; background:var(--color-bg-input); border:1px solid var(--color-border-subtle); }
+  .minigrid i.on { background:var(--color-accent-subtle); border-color:var(--color-accent-border); }
+  .cd-actions { display:flex; gap:8px; margin-top:12px; }
+  .btn { font:inherit; font-size:.8rem; font-weight:600; border-radius:var(--radius-md); padding:8px 12px; border:1px solid var(--color-border-strong); background:var(--color-bg-input); color:var(--color-fg-default); cursor:pointer; }
+  .btn--accent { background:var(--color-accent); border-color:var(--color-accent); color:#fff; }
+  .danger { display:flex; align-items:center; gap:8px; justify-content:center; font-size:.8rem; font-weight:600; color:var(--color-danger); background:var(--color-danger-subtle); border:1px solid var(--color-danger-border); border-radius:var(--radius-md); padding:9px; cursor:pointer; }
+
+  /* ===== A: header strip ===== */
+  .strip { display:flex; align-items:center; gap:10px; font-size:.8rem; padding:8px 12px; background:var(--color-bg-surface); border:1px solid var(--color-border-subtle); border-radius:var(--radius-md); flex-wrap:wrap; }
+  .strip .lbl{ color:var(--color-fg-subtle); }
+  .strip .pill{ display:inline-flex; align-items:center; gap:5px; font-weight:600; color:var(--color-accent); background:var(--color-accent-subtle); border:1px solid var(--color-accent-border); border-radius:var(--radius-pill); padding:3px 9px; cursor:pointer; }
+  .strip .sep{ width:1px; height:16px; background:var(--color-border-subtle); }
+  .strip .ph{ color:var(--color-fg-muted); cursor:pointer; } .strip .ph b{ color:var(--color-fg-default); }
+  .strip .trash{ margin-left:auto; color:var(--color-fg-subtle); cursor:pointer; }
+
+  /* ===== B: gear popover ===== */
+  .props-top { display:flex; align-items:center; justify-content:space-between; }
+  .gear { width:30px; height:30px; border-radius:var(--radius-md); border:1px solid var(--color-border-subtle); background:var(--color-bg-surface); color:var(--color-fg-muted); display:grid; place-items:center; cursor:pointer; }
+  .gear:hover{ background:var(--color-bg-hover); color:var(--color-fg-default); }
+  .popover { position:absolute; top:40px; right:0; width:240px; background:var(--color-bg-surface-raised); border:1px solid var(--color-border-strong); border-radius:var(--radius-md); box-shadow:var(--shadow-lg); padding:12px; z-index:5; display:flex; flex-direction:column; gap:10px; }
+  .popover .arrow{ position:absolute; top:-6px; right:9px; width:10px; height:10px; background:var(--color-bg-surface-raised); border-left:1px solid var(--color-border-strong); border-top:1px solid var(--color-border-strong); transform:rotate(45deg); }
+
+  /* shared compact panel list (used inside B/C/D bodies) */
+  .rows { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+  .prow { display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:var(--radius-md); background:var(--color-bg-input); border:1px solid var(--color-border-subtle); cursor:pointer; }
+  .prow .nm{ font-size:.85rem; font-weight:600; } .prow .ct{ margin-left:auto; font-size:.72rem; color:var(--color-fg-muted); }
+  .prow .star{ background:none; border:none; color:var(--color-fg-subtle); cursor:pointer; padding:0; display:grid; place-items:center; }
+  .prow[data-default]{ border-color:var(--color-accent-border); background:var(--color-accent-subtle); } .prow[data-default] .star{ color:var(--color-accent); }
+  .mini-select { display:flex; align-items:center; gap:8px; font-size:.8rem; padding:8px 10px; border-radius:var(--radius-md); background:var(--color-bg-input); border:1px solid var(--color-border-subtle); cursor:pointer; } .mini-select .lab{color:var(--color-fg-subtle);} .mini-select .chev{margin-left:auto; color:var(--color-fg-subtle);}
+  .micro { font-size:.7rem; color:var(--color-fg-subtle); margin:6px 0 0; }
+
+  /* ===== C: segmented tabs ===== */
+  .seg { display:flex; background:var(--color-bg-input); border:1px solid var(--color-border-subtle); border-radius:var(--radius-pill); padding:3px; gap:3px; }
+  .seg button { flex:1; font:inherit; font-size:.78rem; font-weight:600; border:none; background:transparent; color:var(--color-fg-muted); padding:6px; border-radius:var(--radius-pill); cursor:pointer; position:relative; }
+  .seg button[aria-pressed='true']{ background:var(--color-accent-subtle); color:var(--color-accent); }
+  .seg .dot{ position:absolute; top:5px; right:8px; width:6px; height:6px; border-radius:50%; background:var(--color-accent); }
+
+  /* ===== D: disclosure ===== */
+  .disc { border:1px solid var(--color-border-subtle); border-radius:var(--radius-md); overflow:hidden; background:var(--color-bg-surface); }
+  .disc > summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:8px; padding:10px 12px; font-size:.83rem; }
+  .disc > summary::-webkit-details-marker{ display:none; }
+  .disc > summary .nm{font-weight:600;} .disc > summary .meta{ color:var(--color-fg-muted); margin-left:auto; font-size:.76rem; } .disc[open] .chev{ transform:rotate(180deg); }
+  .disc__body{ padding:0 12px 12px; display:flex; flex-direction:column; gap:8px; }
+
+  /* ===== E: minimal ===== */
+  .one { display:flex; align-items:center; gap:8px; font-size:.82rem; padding:9px 11px; border-radius:var(--radius-md); background:var(--color-bg-surface); border:1px solid var(--color-border-subtle); }
+  .one .lab{ color:var(--color-fg-subtle); } .one .val{ margin-left:auto; display:inline-flex; align-items:center; gap:6px; font-weight:600; color:var(--color-accent); cursor:pointer; }
+  .link { font-size:.78rem; color:var(--color-accent); cursor:pointer; display:inline-flex; align-items:center; gap:5px; }
+
+  .note { font-size:.72rem; color:var(--color-accent); margin:2px 0 0; }
+  footer { margin-top:56px; color:var(--color-fg-subtle); font-size:.8rem; }
+</style>
+</head>
+<body data-state="nosel">
+  <h1>Properties sidebar — 5 distinct directions</h1>
+  <p class="lede">Take 2 — these are <b>structurally different</b>, not reskins of one list. The real variable is <b>where the floor-level controls live</b>: in a top strip, behind a gear, in a tab, folded into one line, or mostly removed. All of them shrink "Panels here", make the default-panel control pull its weight, and stop the floor sections from stacking under a selected component.</p>
+  <p class="lede">Toggle the state to see how each behaves when a pin is selected. The <b>component detail stays rich</b> in every one.</p>
+
+  <div class="toggle" role="group" aria-label="Sidebar state">
+    <button data-set="nosel" aria-pressed="true">Nothing selected</button>
+    <button data-set="sel" aria-pressed="false">Component selected</button>
+  </div>
+  <p class="statehint" id="statehint">Showing the editor with no pin selected.</p>
+
+  <div class="gallery" id="gallery"></div>
+  <footer>Prototypes only — not wired into the app.</footer>
+
+<script>
+const ZAP='<svg class="i zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></svg>';
+const STAR=f=>`<svg class="i" viewBox="0 0 24 24" ${f?'fill="currentColor"':''}><path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/></svg>`;
+const CHEV='<svg class="i chev" viewBox="0 0 24 24" style="transition:transform .15s"><path d="m6 9 6 6 6-6"/></svg>';
+const GEAR='<svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 0 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 0 1 0-4h.1A1.6 1.6 0 0 0 2.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H7a1.6 1.6 0 0 0 1-1.5V1a2 2 0 0 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V7a1.6 1.6 0 0 0 1.5 1H23a2 2 0 0 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>';
+const PENCIL='<svg class="i" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+const TRASH='<svg class="i" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>';
+const EXT='<svg class="i" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>';
+
+const PANELS=[{name:'Garage Subpanel',count:1,def:true},{name:'Main Panel',count:14,def:false}];
+const rows = ()=>`<ul class="rows">${PANELS.map(p=>`<li class="prow" ${p.def?'data-default':''}>${ZAP}<span class="nm">${p.name}</span><span class="ct">${p.count}</span><button class="star">${STAR(p.def)}</button></li>`).join('')}</ul>`;
+
+const detail = ()=>`
+  <div class="card">
+    <div class="cd-head"><span class="t">Outlet</span><span class="room">Kitchen</span></div>
+    <div class="cd-line">${ZAP} <b>Main Panel</b> · Slot 14 · 15A</div>
+    <div class="minigrid">${Array.from({length:12},(_,i)=>`<i class="${i===7?'on':''}"></i>`).join('')}</div>
+    <div class="cd-actions"><button class="btn btn--accent">Edit details</button><button class="btn">Remove</button></div>
+  </div>`;
+const empty = ()=>`<div class="empty">Tap a pin or shape on the canvas to see its details here.</div>`;
+
+const designs = [
+  {
+    n:1, title:'Floor info → header strip', tag:'frees the sidebar',
+    desc:'Move ALL floor-level controls OUT of the sidebar into a slim strip across the top of the canvas: default-panel pill (tap to change) + the panels-here as inline links + a delete affordance. The sidebar becomes <b>selection-only</b> — empty hint, or the component detail. Floor controls are always one glance away but never compete with selection.',
+    pros:['Sidebar 100% for selection','Floor controls always visible, never stacked','Horizontal strip is naturally compact'],
+    cons:['New chrome above the canvas','Strip wraps on very narrow widths'],
+    render(state){ return `
+      <div class="strip">
+        <span class="lbl">Default</span><span class="pill">${ZAP}Garage Subpanel ${CHEV}</span>
+        <span class="sep"></span>
+        <span class="lbl">Panels</span><span class="ph">${ZAP}<b>Garage</b> 1</span><span class="ph">${ZAP}<b>Main</b> 14</span>
+        <span class="trash">${TRASH}</span>
+      </div>
+      <div class="editor__body"><div class="canvas">Floor canvas</div>
+        <div class="props">${state==='sel'?detail():empty()}</div></div>`; }
+  },
+  {
+    n:2, title:'Behind a "Floor settings" gear', tag:'out of the way',
+    desc:'The sidebar shows only selection. A single gear button (top of the sidebar) opens a <b>popover</b> with the default picker, the panel list, and Delete floor. Floor settings are rarely-changed, so they hide until summoned — the sidebar stays clean in both states.',
+    pros:['Cleanest default sidebar','Groups every floor setting in one menu','Zero floor chrome until needed'],
+    cons:['Floor info now a click away','Discoverability of the gear'],
+    render(state){ return `
+      <div class="editor__body"><div class="canvas">Floor canvas</div>
+        <div class="props">
+          <div class="props-top"><span class="sec-title" style="margin:0">${state==='sel'?'Selection':'Properties'}</span>
+            <button class="gear" title="Floor settings">${GEAR}</button></div>
+          ${state==='sel'?detail():empty()}
+          ${state==='nosel'?`<div class="popover"><div class="arrow"></div>
+            <p class="sec-title" style="margin:0">Floor settings</p>
+            <div class="mini-select"><span class="lab">Default</span>${ZAP}<b>Garage Subpanel</b><span class="chev">${CHEV}</span></div>
+            ${rows()}
+            <div class="danger">${TRASH} Delete floor</div></div>`:''}
+        </div></div>`; }
+  },
+  {
+    n:3, title:'Two-mode sidebar (tabs)', tag:'explicit modes',
+    desc:'A segmented <b>[Selection · Floor]</b> control at the top of the sidebar. "Floor" holds the default picker + panels + danger; "Selection" holds the pin detail. Selecting a pin auto-switches to Selection (a dot marks Floor if you want to go back). Two clearly separated jobs, never stacked.',
+    pros:['Clean separation of concerns','Each mode gets full height','Familiar tab pattern'],
+    cons:['A tap to reach floor settings','Two-state mental model'],
+    render(state){ const sel=state==='sel'; return `
+      <div class="editor__body"><div class="canvas">Floor canvas</div>
+        <div class="props">
+          <div class="seg"><button aria-pressed="${sel}">Selection</button><button aria-pressed="${!sel}">Floor${sel?'<span class="dot"></span>':''}</button></div>
+          ${sel?detail():`
+            <div><p class="sec-title">Default wiring</p><div class="mini-select"><span class="lab">Panel</span>${ZAP}<b>Garage Subpanel</b><span class="chev">${CHEV}</span></div></div>
+            <div><p class="sec-title">Panels here</p>${rows()}</div>
+            <div class="danger">${TRASH} Delete floor</div>`}
+        </div></div>`; }
+  },
+  {
+    n:4, title:'One folded line', tag:'minimal footprint, inline',
+    desc:'Keep it in the sidebar but collapse everything floor-level into ONE disclosure: a single summary line (default panel + panel count). Expand for the picker + list. Stays in place under a selected component but as a single closed line — not three open sections.',
+    pros:['No new surfaces — stays inline','One line at rest','Coexists fine with selection'],
+    cons:['Still lives in the sidebar','Info hidden behind a toggle'],
+    render(state){ return `
+      <div class="editor__body"><div class="canvas">Floor canvas</div>
+        <div class="props">
+          ${state==='sel'?detail():''}
+          <details class="disc" ${state==='nosel'?'open':''}>
+            <summary>${ZAP}<span class="nm">Floor wiring</span><span class="meta">Garage Subpanel · 2 panels</span>${CHEV}</summary>
+            <div class="disc__body"><div class="mini-select"><span class="lab">Default</span>${ZAP}<b>Garage Subpanel</b><span class="chev">${CHEV}</span></div>${rows()}<div class="danger">${TRASH} Delete floor</div></div>
+          </details>
+          ${state==='sel'?'<p class="note">↑ A single closed line under the selection — not three stacked sections.</p>':''}
+        </div></div>`; }
+  },
+  {
+    n:5, title:'Drop the list — one default control', tag:'most radical',
+    desc:'Question the section entirely: "Panels here" largely duplicates the Panels tab. Cut the in-sidebar list. Keep only a one-line <b>default-wiring</b> control + a "Manage panels →" link that jumps to the Panels tab. Delete-floor moves to a "⋯" menu. Smallest possible footprint.',
+    pros:['Removes the bulk wholesale','Default control is the only floor item','Forces no redundant list'],
+    cons:['Lose at-a-glance "what\'s on this floor"','Relies on the Panels tab for the list'],
+    render(state){ return `
+      <div class="editor__body"><div class="canvas">Floor canvas</div>
+        <div class="props">
+          ${state==='sel'?detail():empty()}
+          <div class="one"><span class="lab">Default wiring</span><span class="val">${ZAP}Garage Subpanel ${CHEV}</span></div>
+          <span class="link">Manage panels ${EXT}</span>
+        </div></div>`; }
+  },
+];
+
+const gallery=document.getElementById('gallery');
+function paint(){
+  const state=document.body.dataset.state;
+  gallery.innerHTML='';
+  designs.forEach(d=>{
+    const w=document.createElement('div'); w.className='choice';
+    w.innerHTML=`
+      <div class="choice__head"><div class="choice__num">${d.n}</div>
+        <div><p class="choice__title">${d.title}</p><span class="choice__tag">${d.tag}</span></div></div>
+      <p class="choice__desc">${d.desc}</p>
+      <div class="editor">${d.render(state)}</div>
+      <div class="pc"><div class="pros"><b>Pros</b><ul>${d.pros.map(x=>`<li>${x}</li>`).join('')}</ul></div>
+        <div class="cons"><b>Cons</b><ul>${d.cons.map(x=>`<li>${x}</li>`).join('')}</ul></div></div>`;
+    gallery.appendChild(w);
+  });
+}
+document.querySelectorAll('.toggle button').forEach(b=>b.addEventListener('click',()=>{
+  document.body.dataset.state=b.dataset.set;
+  document.querySelectorAll('.toggle button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
+  document.getElementById('statehint').textContent = b.dataset.set==='sel'
+    ? 'Showing the editor with a component selected — rich detail kept; floor controls stay out of the way.'
+    : 'Showing the editor with no pin selected.';
+  paint();
+}));
+paint();
+</script>
+</body>
+</html>

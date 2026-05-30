@@ -3243,6 +3243,29 @@ h2 {
   .printable-slot { padding: 4pt 6pt; }
 }
 
+/* On-SCREEN mobile fit. The paper card is a fixed 8.5in artifact; on a phone
+   viewport that overflows (and `margin: … auto` then pushes the card's left
+   edge off-screen, clipping the title). Below the canonical 959px mobile
+   breakpoint, fit the card to the viewport, soften the inch-based paper
+   padding, and stack the 2-column slot grid so dense labels stay readable.
+   Scoped to `screen` so the printed / Print-to-PDF artifact (governed by
+   `@media print` above + the `@page` letter size) is completely untouched. */
+@media screen and (max-width: 959px) {
+  .printable-page {
+    max-width: 100%;
+    margin: 12px;
+    padding: 18px;
+    min-height: 0;
+    border-radius: 8px;
+  }
+  .printable-page__header {
+    gap: 12pt;
+  }
+  .printable-slots {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ===== G41 — "Share with electrician" building PDF bundle =====
  * Building-scoped multi-page artifact (/buildings/:id/print). Reuses the G24
  * .printable-page paper contract (white card on screen + black-on-white in
@@ -3833,14 +3856,26 @@ h2 {
    the bar spans the full top row; canvas (main) + props (right) sit below. */
 .floor-edit__layout {
   display: grid;
-  grid-template-columns: 1fr;
+  /* `minmax(0, 1fr)` (NOT bare `1fr`, which is `minmax(auto, 1fr)`) so the
+     column can shrink below its content's intrinsic width — otherwise the
+     toolbar's nowrap pill track forces the column wider than the viewport
+     and the whole PAGE scrolls horizontally (pushing the properties column
+     off-screen). With minmax(0,…) the track scrolls inside the bar instead. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   margin-top: var(--space-4);
 }
 
+/* Every grid child must also allow itself to shrink below content width
+   (grid items default to `min-width: auto`). Without this the toolbar bar
+   re-introduces the page-wide horizontal scroll. */
+.floor-edit__layout > * {
+  min-width: 0;
+}
+
 @media (min-width: 960px) {
   .floor-edit__layout {
-    grid-template-columns: 1fr 320px;
+    grid-template-columns: minmax(0, 1fr) 320px;
     grid-template-rows: auto 1fr;
     align-items: start;
   }
@@ -3875,34 +3910,81 @@ h2 {
   margin-bottom: 0;
 }
 
-/* Tool carousel (2026-05) — replaces the old vertical `.tool-palette` grid
-   on BOTH breakpoints. A horizontal, scroll-snapping track of labelled tool
-   pills, flanked by prev/next paging arrows. One component, identical on
-   mobile + desktop (only the arrow + kbd-badge visibility flips on touch).
-   No new token NAMES (cycle-11/17/20 rule). */
-.tool-bar {
+/* 2026-05 — "Panels here" folded into a compact disclosure (replaces the old
+   standalone "Linked panel" picker + always-open list). One line at rest;
+   expands to the per-panel list, and auto-collapses when a selection is
+   active. No new token NAMES. */
+.floor-panels {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.floor-panels__summary {
+  list-style: none;
+  cursor: pointer;
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
+  padding: var(--space-3);
+  font-size: var(--text-size-sm);
+  color: var(--color-fg-default);
+  min-height: var(--touch-target);
+}
+.floor-panels__summary::-webkit-details-marker {
+  display: none;
+}
+.floor-panels__summary > svg:first-child {
+  color: var(--color-accent);
+}
+.floor-panels__title {
+  font-weight: var(--text-weight-semibold);
+}
+.floor-panels__meta {
+  margin-left: auto;
+  color: var(--color-fg-muted);
+  font-size: var(--text-size-xs);
+}
+.floor-panels__chev {
+  color: var(--color-fg-subtle);
+  flex: 0 0 auto;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out);
+}
+.floor-panels[open] .floor-panels__chev {
+  transform: rotate(180deg);
+}
+.floor-panels__body {
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+/* Tool carousel (2026-05) — replaces the old vertical `.tool-palette` grid
+   on BOTH breakpoints. A horizontal, scroll-snapping track of labelled tool
+   pills. Discreet gradient-fade + chevron edge affordances appear ONLY when
+   there's more to scroll that way; the fade passes pointer events through so
+   swipe/wheel scrolling always works, and only the small chevron is clickable
+   (pages ~2-3 tools). One component, identical on mobile + desktop (only the
+   kbd-badge visibility flips on touch). No new token NAMES. */
+.tool-bar {
+  position: relative; /* positioning context for the absolute edge fades */
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-lg);
   padding: var(--space-2);
+  overflow: hidden; /* clip the square edge fades to the rounded bar corners */
 }
 
 .tool-bar__track {
   list-style: none;
   margin: 0;
   padding: 0;
-  flex: 1;
   min-width: 0;
   display: flex;
   gap: var(--space-2);
   overflow-x: auto;
   scroll-snap-type: x proximity;
   scroll-padding-inline: var(--space-4);
-  /* Hide the scrollbar — paging arrows (desktop) + native swipe (touch) are
-     the affordances; a visible bar would clutter the slim strip. */
+  /* Hide the scrollbar — the edge fades + native swipe are the affordances;
+     a visible bar would clutter the slim strip. */
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
@@ -3933,20 +4015,74 @@ h2 {
   );
 }
 
-.tool-bar__arrow {
-  flex: 0 0 auto;
+/* Edge affordance — a gradient fade that dissolves the edge pill into the bar
+   surface, with a chevron centered over it. Hidden by default; faded in via
+   `data-show` only when the track can scroll that way. `pointer-events: none`
+   so swipe/wheel scrolling passes straight through the fade to the track. */
+.tool-bar__edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 56px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-duration-base) var(--motion-ease-out);
+  z-index: 2;
 }
-.tool-bar__arrow:disabled {
-  opacity: 0.35;
-  cursor: default;
+.tool-bar__edge[data-show] {
+  opacity: 1;
+}
+.tool-bar__edge--prev {
+  left: 0;
+  justify-content: start;
+  padding-left: var(--space-1);
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-surface) 35%,
+    transparent
+  );
+}
+.tool-bar__edge--next {
+  right: 0;
+  justify-content: end;
+  padding-right: var(--space-1);
+  background: linear-gradient(
+    270deg,
+    var(--color-bg-surface) 35%,
+    transparent
+  );
+}
+/* Only the chevron is interactive — so a swipe/wheel that lands on the fade
+   still scrolls the track; tapping the chevron pages by ~2-3 tools. Gated on
+   the parent `data-show` so the hidden (opacity:0) edge can't be clicked. */
+.tool-bar__edge-btn {
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-fg-default);
+  cursor: pointer;
+}
+.tool-bar__edge[data-show] .tool-bar__edge-btn {
+  pointer-events: auto;
+}
+.tool-bar__edge-btn:hover {
+  background: var(--color-bg-hover);
+}
+.tool-bar__edge-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }
 
 @media (max-width: 959px) {
-  /* Touch users swipe the track natively, so the paging arrows + the kbd
-     hint badges (no physical keyboard) only add clutter — hide both. */
-  .tool-bar__arrow {
-    display: none;
-  }
+  /* No physical keyboard on touch — the kbd hint badges only add clutter. */
   .tool-bar__pill .kbd-badge {
     display: none;
   }
@@ -4744,6 +4880,279 @@ h2 {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+.component-form__wiring-hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-size-xs);
+  color: var(--color-fg-muted);
+  line-height: var(--text-leading-snug);
+}
+.component-form__wiring-hint strong {
+  color: var(--color-accent);
+  font-weight: var(--text-weight-semibold);
+}
+
+/* 2026-05 — BreakerComboField: panel pills + searchable rich rows + inline
+   "+ New breaker" mini-form. Token-only; popover is portal-mounted. */
+.breaker-combo {
+  position: relative;
+}
+.breaker-combo__trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--touch-target);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-fg-default);
+  font: inherit;
+  font-size: var(--text-size-sm);
+  cursor: pointer;
+  text-align: left;
+}
+.breaker-combo__trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+.breaker-combo__zap {
+  color: var(--color-accent);
+  flex: 0 0 auto;
+}
+.breaker-combo__slot {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  height: 22px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent-border);
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-bold);
+  flex: 0 0 auto;
+}
+.breaker-combo__trigger-label {
+  font-weight: var(--text-weight-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.breaker-combo__trigger-sub {
+  color: var(--color-fg-muted);
+  flex: 0 0 auto;
+}
+.breaker-combo__placeholder {
+  color: var(--color-fg-muted);
+}
+.breaker-combo__trigger-icons {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+}
+.breaker-combo__clear {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  color: var(--color-fg-subtle);
+  cursor: pointer;
+}
+.breaker-combo__clear:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-fg-default);
+}
+.breaker-combo__chevron {
+  color: var(--color-fg-subtle);
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out);
+}
+.breaker-combo__chevron--open {
+  transform: rotate(180deg);
+}
+
+.breaker-combo__popover {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.breaker-combo__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.breaker-combo__pill {
+  font: inherit;
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-semibold);
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-fg-muted);
+  cursor: pointer;
+}
+.breaker-combo__pill[aria-selected='true'] {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent);
+}
+.breaker-combo__search-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-subtle);
+  color: var(--color-fg-subtle);
+}
+.breaker-combo__search {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--color-fg-default);
+  font: inherit;
+  font-size: var(--text-size-sm);
+  outline: none;
+}
+.breaker-combo__list {
+  overflow-y: auto;
+  padding: var(--space-1);
+}
+.breaker-combo__empty {
+  margin: 0;
+  padding: var(--space-4) var(--space-3);
+  text-align: center;
+  color: var(--color-fg-muted);
+  font-size: var(--text-size-sm);
+}
+.breaker-combo__option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  min-height: var(--touch-target);
+  border: none;
+  background: none;
+  color: var(--color-fg-default);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.breaker-combo__option:hover {
+  background: var(--color-bg-hover);
+}
+.breaker-combo__option--selected {
+  background: var(--color-accent-subtle);
+}
+.breaker-combo__opt-slot {
+  display: inline-grid;
+  place-items: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-fg-default);
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-bold);
+  flex: 0 0 auto;
+}
+.breaker-combo__option--selected .breaker-combo__opt-slot {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-fg-on-accent);
+}
+.breaker-combo__opt-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.breaker-combo__opt-label {
+  font-weight: var(--text-weight-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.breaker-combo__opt-sub {
+  font-size: var(--text-size-xs);
+  color: var(--color-fg-muted);
+}
+.breaker-combo__opt-prot {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: var(--text-size-xs);
+  font-weight: var(--text-weight-bold);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-warning-subtle);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning-border);
+}
+.breaker-combo__add {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3);
+  min-height: var(--touch-target);
+  border: none;
+  border-top: 1px solid var(--color-border-subtle);
+  background: color-mix(in srgb, var(--color-accent-subtle) 55%, transparent);
+  color: var(--color-accent);
+  font: inherit;
+  font-size: var(--text-size-sm);
+  font-weight: var(--text-weight-semibold);
+  cursor: pointer;
+}
+.breaker-combo__add:hover {
+  background: var(--color-accent-subtle);
+}
+
+/* inline mini-form */
+.breaker-combo__mini {
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.breaker-combo__mini-title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-accent);
+  font-weight: var(--text-weight-bold);
+}
+.breaker-combo__mini-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+.breaker-combo__mini-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+/* The Create button takes the remaining width; Cancel hugs its content. */
+.breaker-combo__mini-actions .btn:first-child {
+  flex: 1;
+}
 
 /* Cycle-65 P1 — at narrow widths the 2-col Panel + Breaker pickers in the
    Wiring section split the modal in half — both <select> placeholders
@@ -5297,19 +5706,41 @@ h2 {
   font-size: var(--text-size-sm);
   flex: 0 0 auto;
 }
+/* Secondary footer link — deliberately NOT a card surface like the
+ * .test-home__row panel rows. It's a "view the log" navigation, not a
+ * panel to walk through, so it reads as a muted footer link separated
+ * from the list by a divider. */
 .test-home__audit-link {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: var(--space-2);
   text-decoration: none;
-  color: var(--color-fg-default);
+  color: var(--color-fg-muted);
   font-size: var(--text-size-sm);
   min-height: var(--touch-target);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-1) 0;
+  border-top: 1px solid var(--color-border-subtle);
 }
 .test-home__audit-link svg {
-  color: var(--color-accent);
+  color: var(--color-fg-muted);
+  flex: 0 0 auto;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
 }
-.test-home__audit-link:hover {
+.test-home__audit-link-label {
+  font-weight: var(--text-weight-medium);
+}
+.test-home__audit-link-hint {
+  color: var(--color-fg-subtle);
+  font-size: var(--text-size-xs);
+}
+.test-home__audit-link:hover,
+.test-home__audit-link:focus-visible {
+  color: var(--color-accent);
+  outline: none;
+}
+.test-home__audit-link:hover svg,
+.test-home__audit-link:focus-visible svg {
   color: var(--color-accent);
 }
 

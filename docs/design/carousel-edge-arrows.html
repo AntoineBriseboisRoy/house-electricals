@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tool carousel · discreet edge arrows — 5 design choices</title>
+<style>
+  :root {
+    --color-bg-canvas: #1a1917;
+    --color-bg-surface: #252420;
+    --color-bg-surface-raised: #34322c;
+    --color-bg-hover: #38352f;
+    --color-bg-input: #15140f;
+    --color-fg-default: #f0ebe6;
+    --color-fg-muted: #9a958e;
+    --color-fg-subtle: #6f6a64;
+    --color-accent: #7a9e8a;
+    --color-accent-hover: #8eb29c;
+    --color-accent-subtle: rgba(122, 158, 138, 0.14);
+    --color-accent-border: rgba(122, 158, 138, 0.4);
+    --color-border-subtle: #3a3732;
+    --color-border-strong: #4d4942;
+    --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+    --space-6: 24px; --space-8: 32px;
+    --radius-sm: 6px; --radius-md: 12px; --radius-lg: 16px; --radius-pill: 999px;
+    --touch-target: 44px;
+    --text-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --shadow-md: 0 6px 18px -6px rgba(0,0,0,.5), 0 2px 6px -2px rgba(0,0,0,.4);
+    --shadow-sm: 0 2px 6px -2px rgba(0,0,0,.5);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #100f0d; color: var(--color-fg-default);
+    font-family: var(--text-family); -webkit-font-smoothing: antialiased;
+    padding: var(--space-8) var(--space-4) 80px;
+  }
+  h1 { font-size: 1.6rem; margin: 0 0 var(--space-2); letter-spacing: -.01em; }
+  .lede { color: var(--color-fg-muted); max-width: 76ch; line-height: 1.55; margin: 0 0 var(--space-2); }
+  .lede code { background: var(--color-bg-surface); padding: 1px 6px; border-radius: var(--radius-sm); font-size: .85em; }
+  .lede b { color: var(--color-fg-default); }
+  .hint { color: var(--color-accent); font-size: .85rem; margin-top: var(--space-3); }
+
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: var(--space-6); margin-top: var(--space-8); align-items: start; }
+  .choice { display: flex; flex-direction: column; gap: var(--space-3); }
+  .choice__head { display: flex; align-items: baseline; gap: var(--space-3); }
+  .choice__num { flex: 0 0 auto; width: 30px; height: 30px; border-radius: var(--radius-pill); display: grid; place-items: center; background: var(--color-accent); color: #fff; font-weight: 700; }
+  .choice__title { font-size: 1.12rem; font-weight: 700; margin: 0; }
+  .choice__tag { font-size: .8rem; color: var(--color-accent); font-weight: 600; }
+  .choice__desc { color: var(--color-fg-muted); font-size: .85rem; line-height: 1.5; margin: 0; }
+  .choice__desc b { color: var(--color-fg-default); font-weight: 600; }
+  .pc { display: flex; gap: var(--space-4); font-size: .78rem; }
+  .pc .pros { color: #9ec5ad; } .pc .cons { color: #d0a088; }
+  .pc ul { margin: 4px 0 0; padding-left: 16px; line-height: 1.45; }
+
+  /* a single editor "row" the bar sits in, fixed width so the track always overflows */
+  .stage { background: var(--color-bg-canvas); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); padding: var(--space-3); }
+
+  /* shared bar */
+  .bar { background: var(--color-bg-surface); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); padding: var(--space-2); }
+  .carousel { position: relative; }
+  .track {
+    list-style: none; margin: 0; padding: 0; display: flex; gap: var(--space-2);
+    overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none;
+  }
+  .track::-webkit-scrollbar { display: none; }
+  .track > li { flex: 0 0 auto; scroll-snap-align: center; }
+  .pill {
+    display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap;
+    height: var(--touch-target); padding: 0 var(--space-3); border-radius: var(--radius-pill);
+    background: transparent; border: 1px solid transparent; color: var(--color-fg-muted);
+    font: inherit; font-size: .9rem; font-weight: 600; cursor: pointer;
+  }
+  .pill:hover { background: var(--color-bg-hover); color: var(--color-fg-default); }
+  .pill[data-active] { background: var(--color-accent-subtle); color: var(--color-accent); border-color: var(--color-accent-border); }
+  .pill svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .chev { stroke: currentColor; fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ===== edge indicator base: hidden by default, shown when there's overflow that way ===== */
+  .edge { position: absolute; top: 0; bottom: 0; display: grid; place-items: center; pointer-events: none;
+    opacity: 0; transition: opacity .2s ease; z-index: 2; }
+  .edge--left { left: 0; }
+  .edge--right { right: 0; }
+  .carousel[data-can-prev='true'] .edge--left { opacity: 1; }
+  .carousel[data-can-next='true'] .edge--right { opacity: 1; }
+  .edge .chev { width: 18px; height: 18px; }
+
+  /* ---- V1: gradient fade + centered chevron ---- */
+  .v1 .edge { width: 52px; }
+  .v1 .edge--left  { background: linear-gradient(90deg, var(--color-bg-surface) 30%, transparent); justify-content: start; padding-left: 4px; }
+  .v1 .edge--right { background: linear-gradient(270deg, var(--color-bg-surface) 30%, transparent); justify-content: end; padding-right: 4px; }
+  .v1 .edge .chev { color: var(--color-fg-default); }
+
+  /* ---- V2: floating ghost circle button ---- */
+  .v2 .edge { width: 40px; }
+  .v2 .edge .btn { pointer-events: auto; width: 28px; height: 28px; border-radius: 50%;
+    background: var(--color-bg-surface-raised); border: 1px solid var(--color-border-strong);
+    box-shadow: var(--shadow-sm); display: grid; place-items: center; color: var(--color-fg-default); cursor: pointer; }
+  .v2 .edge .btn:hover { background: var(--color-bg-hover); }
+  .v2 .edge--left { justify-content: start; } .v2 .edge--right { justify-content: end; }
+
+  /* ---- V3: minimal caret tick (no chrome) ---- */
+  .v3 .edge { width: 26px; }
+  .v3 .edge .chev { width: 14px; height: 14px; color: var(--color-fg-subtle); }
+  .v3 .edge--left { justify-content: start; padding-left: 2px; }
+  .v3 .edge--right { justify-content: end; padding-right: 2px; }
+
+  /* ---- V4: blurred pill with chevron ---- */
+  .v4 .edge { width: 44px; }
+  .v4 .edge .cap { display: grid; place-items: center; height: 26px; min-width: 22px; padding: 0 2px;
+    border-radius: var(--radius-pill); background: color-mix(in srgb, var(--color-bg-surface) 70%, transparent);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); border: 1px solid var(--color-border-subtle); color: var(--color-fg-default); }
+  .v4 .edge--left { justify-content: start; padding-left: 4px; } .v4 .edge--right { justify-content: end; padding-right: 4px; }
+
+  /* ---- V5: gradient fade + gently nudging chevron (animated hint) ---- */
+  .v5 .edge { width: 50px; }
+  .v5 .edge--left  { background: linear-gradient(90deg, var(--color-bg-surface) 30%, transparent); justify-content: start; padding-left: 4px; }
+  .v5 .edge--right { background: linear-gradient(270deg, var(--color-bg-surface) 30%, transparent); justify-content: end; padding-right: 4px; }
+  .v5 .edge .chev { color: var(--color-accent); }
+  @keyframes nudge-right { 0%,100%{ transform: translateX(0); } 50%{ transform: translateX(4px); } }
+  @keyframes nudge-left  { 0%,100%{ transform: translateX(0); } 50%{ transform: translateX(-4px); } }
+  .carousel[data-can-next='true'] .v5-skip {}
+  .v5 .edge--right .chev { animation: nudge-right 1.4s ease-in-out infinite; }
+  .v5 .edge--left  .chev { animation: nudge-left 1.4s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .v5 .edge .chev { animation: none; } }
+
+  footer { margin-top: 64px; color: var(--color-fg-subtle); font-size: .8rem; }
+</style>
+</head>
+<body>
+  <h1>Carousel edge arrows — 5 design choices</h1>
+  <p class="lede">A <b>discreet directional indicator</b> for the floor-editor tool carousel: it appears at the left/right edge <b>only when there are more tools to scroll that way</b>, and fades out once you reach that end. Each example below is a <b>live, scrollable</b> bar (deliberately narrowed so the track always overflows). Scroll inside each one — watch the indicators fade in/out at the edges.</p>
+  <p class="hint">Scroll each bar left ↔ right to see the arrows toggle. They sit on top of the same scroll-snap track already shipped.</p>
+
+  <div class="gallery" id="gallery"></div>
+  <footer>Prototype only — not wired into the app. Generated for design review.</footer>
+
+<script>
+const ICONS = {
+  pointer: '<path d="M4.04 4.69a.5.5 0 0 1 .65-.65l16 6.5a.5.5 0 0 1-.06.95l-6.12 1.58a2 2 0 0 0-1.44 1.43l-1.58 6.13a.5.5 0 0 1-.95.06z"/>',
+  wall: '<path d="M21.17 6.81a1 1 0 0 0-3.98-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="m15 5 4 4"/>',
+  room: '<rect width="18" height="18" x="3" y="3" rx="2"/>',
+  outlet: '<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>',
+  light: '<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>',
+  switch: '<rect width="20" height="12" x="2" y="6" rx="6"/><circle cx="16" cy="12" r="2"/>',
+  appliance: '<rect width="20" height="15" x="2" y="4" rx="2"/><rect width="9" height="7" x="5" y="8" rx="1"/><path d="M18 8v7"/>',
+  junction_box: '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',
+  smoke_detector: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="1.5"/>',
+  other: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
+};
+const TOOLS = [
+  ['pointer','Pointer'],['wall','Wall'],['room','Room'],['outlet','Outlet'],['light','Light'],
+  ['switch','Switch'],['appliance','Appliance'],['junction_box','Junction box'],['smoke_detector','Smoke detector'],['other','Other'],
+];
+const ico = id => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[id]}</svg>`;
+const CHEV_L = '<svg class="chev" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>';
+const CHEV_R = '<svg class="chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>';
+
+const variants = [
+  {
+    n:1, title:'Fade + centered chevron', tag:'recommended',
+    desc:'A soft gradient fade dissolves the last pill into the bar, with a small chevron floating over it. The fade signals "there\'s more"; the chevron says which way. Most polished, reads instantly.',
+    pros:['Clear "more content" cue (fade + arrow)','Chevron shows direction','No hard chrome, very calm'],
+    cons:['Gradient must match the bar bg exactly'],
+    left:`<div class="edge edge--left">${CHEV_L}</div>`,
+    right:`<div class="edge edge--right">${CHEV_R}</div>`,
+    cls:'v1', clickable:false,
+  },
+  {
+    n:2, title:'Ghost circle button', tag:'tappable',
+    desc:'A small translucent circular button hugs each edge, appearing only when scrollable that way. Doubles as a CLICK target — tap to page the track (great for desktop mouse users who can\'t swipe).',
+    pros:['Also a click affordance (paging)','Obvious, familiar','Works for mouse + touch'],
+    cons:['More chrome than a bare chevron','Slightly covers the edge pill'],
+    left:`<div class="edge edge--left"><button class="btn" aria-label="Scroll left">${CHEV_L}</button></div>`,
+    right:`<div class="edge edge--right"><button class="btn" aria-label="Scroll right">${CHEV_R}</button></div>`,
+    cls:'v2', clickable:true,
+  },
+  {
+    n:3, title:'Minimal caret tick', tag:'most discreet',
+    desc:'Just a tiny muted caret at the vertical centre of the edge — no background, no fade. The lightest possible hint that the row continues.',
+    pros:['Absolute minimum visual weight','Zero chance of bg mismatch','Cheapest to build'],
+    cons:['Easy to miss','No "fade" depth cue','Last pill can sit flush behind it'],
+    left:`<div class="edge edge--left">${CHEV_L}</div>`,
+    right:`<div class="edge edge--right">${CHEV_R}</div>`,
+    cls:'v3', clickable:false,
+  },
+  {
+    n:4, title:'Blurred pill chevron', tag:'glassy',
+    desc:'A little frosted-glass pill carries the chevron, floating just inside the edge. Sits cleanly over any pill colour underneath thanks to the backdrop blur — no gradient-matching needed.',
+    pros:['Reads on any underlying pill','Distinct, modern','Self-contained (no bg match)'],
+    cons:['backdrop-filter cost on low-end phones','A touch more decorative'],
+    left:`<div class="edge edge--left"><span class="cap">${CHEV_L}</span></div>`,
+    right:`<div class="edge edge--right"><span class="cap">${CHEV_R}</span></div>`,
+    cls:'v4', clickable:false,
+  },
+  {
+    n:5, title:'Fade + nudging chevron', tag:'animated hint',
+    desc:'Like #1, but the chevron gently nudges toward its edge on a slow loop — an "I\'m swipeable" wink for first-time users. Accent-coloured. Respects reduced-motion (animation off).',
+    pros:['Highest discoverability','Teaches the swipe gesture','Still calm (slow, subtle)'],
+    cons:['Motion can distract','Needs reduced-motion fallback (included)'],
+    left:`<div class="edge edge--left">${CHEV_L}</div>`,
+    right:`<div class="edge edge--right">${CHEV_R}</div>`,
+    cls:'v5', clickable:false,
+  },
+];
+
+const pills = TOOLS.map(([id,label],i)=>`<li><button class="pill" ${i===0?'data-active':''}>${ico(id)}${label}</button></li>`).join('');
+
+function wire(carousel) {
+  const track = carousel.querySelector('.track');
+  const update = () => {
+    const canPrev = track.scrollLeft > 2;
+    const canNext = track.scrollLeft + track.clientWidth < track.scrollWidth - 2;
+    carousel.dataset.canPrev = String(canPrev);
+    carousel.dataset.canNext = String(canNext);
+  };
+  track.addEventListener('scroll', () => requestAnimationFrame(update), { passive: true });
+  window.addEventListener('resize', update);
+  // click-to-page for the tappable variant
+  carousel.querySelectorAll('.edge .btn').forEach(btn => {
+    const dir = btn.closest('.edge--left') ? -1 : 1;
+    btn.addEventListener('click', () => track.scrollBy({ left: dir * track.clientWidth * 0.8, behavior: 'smooth' }));
+  });
+  // active toggle on pills
+  carousel.querySelectorAll('.pill').forEach(p => p.addEventListener('click', () => {
+    carousel.querySelectorAll('.pill').forEach(x => x.removeAttribute('data-active'));
+    p.setAttribute('data-active','');
+  }));
+  requestAnimationFrame(update);
+}
+
+const gallery = document.getElementById('gallery');
+variants.forEach(v => {
+  const wrap = document.createElement('div');
+  wrap.className = 'choice';
+  wrap.innerHTML = `
+    <div class="choice__head"><div class="choice__num">${v.n}</div>
+      <div><p class="choice__title">${v.title}</p><span class="choice__tag">${v.tag}</span></div></div>
+    <p class="choice__desc">${v.desc}</p>
+    <div class="stage">
+      <div class="bar">
+        <div class="carousel ${v.cls}" data-can-prev="false" data-can-next="true">
+          ${v.left}
+          <ul class="track">${pills}</ul>
+          ${v.right}
+        </div>
+      </div>
+    </div>
+    <div class="pc">
+      <div class="pros"><b>Pros</b><ul>${v.pros.map(p=>`<li>${p}</li>`).join('')}</ul></div>
+      <div class="cons"><b>Cons</b><ul>${v.cons.map(p=>`<li>${p}</li>`).join('')}</ul></div>
+    </div>`;
+  gallery.appendChild(wrap);
+  wire(wrap.querySelector('.carousel'));
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Component form · breaker picker — design choices</title>
+<style>
+  :root {
+    --color-bg-canvas:#1a1917; --color-bg-surface:#252420; --color-bg-surface-raised:#34322c;
+    --color-bg-hover:#38352f; --color-bg-input:#15140f;
+    --color-fg-default:#f0ebe6; --color-fg-muted:#9a958e; --color-fg-subtle:#6f6a64;
+    --color-accent:#7a9e8a; --color-accent-hover:#8eb29c;
+    --color-accent-subtle:rgba(122,158,138,.14); --color-accent-border:rgba(122,158,138,.4);
+    --color-warning:#d97706; --color-warning-subtle:rgba(217,119,6,.16); --color-warning-border:rgba(217,119,6,.45);
+    --color-border-subtle:#3a3732; --color-border-strong:#4d4942;
+    --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-6:24px; --space-8:32px;
+    --radius-sm:6px; --radius-md:12px; --radius-lg:16px; --radius-pill:999px;
+    --fam:'Plus Jakarta Sans','Inter',system-ui,sans-serif;
+    --shadow-lg:0 16px 40px -12px rgba(0,0,0,.6),0 4px 10px -4px rgba(0,0,0,.5);
+    --touch:44px;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#100f0d; color:var(--color-fg-default); font-family:var(--fam); -webkit-font-smoothing:antialiased; padding:var(--space-8) var(--space-4) 80px; }
+  h1 { font-size:1.6rem; margin:0 0 8px; letter-spacing:-.01em; }
+  .lede { color:var(--color-fg-muted); max-width:80ch; line-height:1.55; margin:0 0 8px; }
+  .lede b{ color:var(--color-fg-default); } .lede code{ background:var(--color-bg-surface); padding:1px 6px; border-radius:6px; font-size:.85em; }
+
+  .gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(420px,1fr)); gap:var(--space-6); margin-top:var(--space-6); align-items:start; }
+  .choice { display:flex; flex-direction:column; gap:var(--space-3); }
+  .choice__head { display:flex; align-items:baseline; gap:var(--space-3); }
+  .choice__num { flex:0 0 auto; width:30px; height:30px; border-radius:var(--radius-pill); display:grid; place-items:center; background:var(--color-accent); color:#fff; font-weight:700; }
+  .choice__title { font-size:1.12rem; font-weight:700; margin:0; }
+  .choice__tag { font-size:.8rem; color:var(--color-accent); font-weight:600; }
+  .choice__desc { color:var(--color-fg-muted); font-size:.85rem; line-height:1.5; margin:0; }
+  .choice__desc b{ color:var(--color-fg-default); }
+  .pc { display:flex; gap:var(--space-4); font-size:.78rem; }
+  .pc .pros{color:#9ec5ad;} .pc .cons{color:#d0a088;}
+  .pc ul{ margin:4px 0 0; padding-left:16px; line-height:1.45; }
+
+  /* the form context the picker lives in */
+  .formctx { background:var(--color-bg-surface); border:1px solid var(--color-border-subtle); border-radius:var(--radius-lg); padding:var(--space-4); }
+  .flabel { font-size:.78rem; font-weight:600; color:var(--color-fg-default); margin:0 0 6px; display:flex; align-items:center; gap:6px; }
+  .switchtoggle { margin-left:auto; display:inline-flex; background:var(--color-bg-input); border:1px solid var(--color-border-subtle); border-radius:var(--radius-pill); padding:2px; gap:2px; }
+  .switchtoggle button { font:inherit; font-size:.68rem; font-weight:600; border:none; background:transparent; color:var(--color-fg-muted); padding:3px 8px; border-radius:var(--radius-pill); cursor:pointer; }
+  .switchtoggle button[aria-pressed='true'] { background:var(--color-accent-subtle); color:var(--color-accent); }
+
+  svg.i { width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; vertical-align:-2px; }
+  .zap{ color:var(--color-accent); }
+
+  /* picker trigger */
+  .trigger { width:100%; display:flex; align-items:center; gap:8px; min-height:var(--touch); padding:0 12px; border-radius:var(--radius-md); background:var(--color-bg-input); border:1px solid var(--color-border-strong); color:var(--color-fg-default); font:inherit; font-size:.9rem; cursor:pointer; }
+  .trigger .chev{ margin-left:auto; color:var(--color-fg-subtle); }
+  .trigger .slot{ display:inline-grid; place-items:center; min-width:22px; height:20px; padding:0 5px; border-radius:var(--radius-sm); background:var(--color-accent-subtle); color:var(--color-accent); font-size:.72rem; font-weight:700; }
+
+  /* dropdown panel */
+  .panel { margin-top:6px; border:1px solid var(--color-border-strong); border-radius:var(--radius-md); background:var(--color-bg-surface-raised); box-shadow:var(--shadow-lg); overflow:hidden; }
+  .search { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--color-border-subtle); color:var(--color-fg-subtle); font-size:.85rem; }
+  .search input{ flex:1; background:none; border:none; color:var(--color-fg-default); font:inherit; font-size:.85rem; outline:none; }
+  .grouphdr { font-size:.68rem; text-transform:uppercase; letter-spacing:.07em; color:var(--color-fg-subtle); padding:8px 12px 4px; font-weight:700; }
+  .opt { display:flex; align-items:center; gap:10px; padding:9px 12px; cursor:pointer; min-height:var(--touch); }
+  .opt:hover { background:var(--color-bg-hover); }
+  .opt[data-sel] { background:var(--color-accent-subtle); }
+  .opt .slot { display:inline-grid; place-items:center; min-width:26px; height:24px; padding:0 6px; border-radius:var(--radius-sm); background:var(--color-bg-input); border:1px solid var(--color-border-subtle); color:var(--color-fg-default); font-size:.78rem; font-weight:700; }
+  .opt[data-sel] .slot{ background:var(--color-accent); color:#fff; border-color:var(--color-accent); }
+  .opt .lab { font-size:.86rem; font-weight:600; } .opt .sub { font-size:.74rem; color:var(--color-fg-muted); }
+  .opt .col{ display:flex; flex-direction:column; gap:1px; } .opt .badges{ margin-left:auto; display:flex; gap:4px; }
+  .pbadge{ font-size:.62rem; font-weight:700; padding:1px 6px; border-radius:var(--radius-pill); background:var(--color-warning-subtle); color:var(--color-warning); border:1px solid var(--color-warning-border); }
+  .addrow { display:flex; align-items:center; gap:8px; padding:11px 12px; cursor:pointer; color:var(--color-accent); font-weight:600; font-size:.85rem; border-top:1px solid var(--color-border-subtle); background:color-mix(in srgb, var(--color-accent-subtle) 50%, transparent); }
+  .addrow:hover{ background:var(--color-accent-subtle); }
+
+  /* inline mini-form (the chosen add path) */
+  .mini { padding:12px; border-top:1px solid var(--color-border-subtle); display:flex; flex-direction:column; gap:10px; background:var(--color-bg-input); }
+  .mini h4 { margin:0; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; color:var(--color-accent); font-weight:700; display:flex; align-items:center; gap:6px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .field { display:flex; flex-direction:column; gap:3px; }
+  .field label { font-size:.68rem; color:var(--color-fg-subtle); font-weight:600; }
+  .field .inp { min-height:38px; display:flex; align-items:center; padding:0 10px; border-radius:var(--radius-sm); background:var(--color-bg-surface); border:1px solid var(--color-border-strong); font-size:.84rem; color:var(--color-fg-default); }
+  .field .inp .chev{ margin-left:auto; color:var(--color-fg-subtle); }
+  .mini-actions { display:flex; gap:8px; }
+  .btn { font:inherit; font-size:.82rem; font-weight:600; border-radius:var(--radius-md); padding:9px 12px; border:1px solid var(--color-border-strong); background:var(--color-bg-surface); color:var(--color-fg-default); cursor:pointer; }
+  .btn--accent { background:var(--color-accent); border-color:var(--color-accent); color:#fff; flex:1; }
+
+  /* D2 slot grid */
+  .slotgrid { display:grid; grid-template-columns:repeat(6,1fr); gap:5px; padding:12px; }
+  .cell { aspect-ratio:1; border-radius:var(--radius-sm); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; font-size:.7rem; cursor:pointer; border:1px solid var(--color-border-subtle); background:var(--color-bg-input); color:var(--color-fg-muted); }
+  .cell .n{ font-weight:700; color:var(--color-fg-default); font-size:.78rem; }
+  .cell.filled{ background:var(--color-bg-surface); }
+  .cell.sel{ background:var(--color-accent-subtle); border-color:var(--color-accent-border); color:var(--color-accent); } .cell.sel .n{ color:var(--color-accent); }
+  .cell.empty{ border-style:dashed; color:var(--color-fg-subtle); } .cell.empty:hover{ border-color:var(--color-accent-border); color:var(--color-accent); }
+  .gridhint { padding:0 12px 10px; font-size:.72rem; color:var(--color-fg-subtle); }
+  .panelchips { display:flex; gap:6px; padding:12px 12px 0; flex-wrap:wrap; }
+  .pchip { font-size:.78rem; font-weight:600; padding:6px 11px; border-radius:var(--radius-pill); background:var(--color-bg-input); border:1px solid var(--color-border-subtle); color:var(--color-fg-default); cursor:pointer; }
+  .pchip[aria-pressed='true']{ background:var(--color-accent-subtle); border-color:var(--color-accent-border); color:var(--color-accent); }
+
+  /* D4 tabs */
+  .ptabs { display:flex; border-bottom:1px solid var(--color-border-subtle); }
+  .ptabs button { flex:1; font:inherit; font-size:.82rem; font-weight:600; border:none; background:transparent; color:var(--color-fg-muted); padding:11px; cursor:pointer; border-bottom:2px solid transparent; }
+  .ptabs button[aria-pressed='true']{ color:var(--color-accent); border-bottom-color:var(--color-accent); }
+
+  footer { margin-top:56px; color:var(--color-fg-subtle); font-size:.8rem; }
+</style>
+</head>
+<body>
+  <h1>Breaker picker — 4 design choices</h1>
+  <p class="lede">Reworks the <b>"Breaker" field</b> in the component form (the Edit-details modal + the Library) — today a plain grouped <code>&lt;select&gt;</code> of "Slot · amperage · label". Goals: make it <b>nicer / richer</b>, and let you <b>create a breaker for a new circuit without leaving the form</b>. Per your call, the add path is an <b>inline mini-form</b> — shown in every option via the <b>List / + New breaker</b> toggle on each field.</p>
+  <p class="lede">Each picker is rendered <b>open</b> so you can see it. Click <b>+ New breaker</b> (or an empty slot in #2) to reveal the inline create form.</p>
+
+  <div class="gallery" id="gallery"></div>
+  <footer>Prototypes only — not wired into the app.</footer>
+
+<script>
+const CHEV='<svg class="i chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>';
+const ZAP='<svg class="i zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></svg>';
+const SEARCH='<svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg>';
+const PLUS='<svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>';
+
+const PANELS = [
+  { name:'Main Panel', breakers:[
+    {slot:'1', amp:15, label:'Kitchen lights'},
+    {slot:'3', amp:20, label:'Fridge', prot:'GFCI'},
+    {slot:'14', amp:15, label:'Kitchen outlets', sel:true},
+    {slot:'15', amp:30, label:'Dryer (2-pole)'},
+  ]},
+  { name:'Garage Subpanel', breakers:[
+    {slot:'2', amp:20, label:'Garage door'},
+  ]},
+];
+const FILLED = new Set(['1','2','3','14','15','16']); // slot 15 is 2-pole → 15+16
+
+const field = (label, val, chev=true) => `<div class="field"><label>${label}</label><div class="inp">${val}${chev?'<span class="chev">'+CHEV+'</span>':''}</div></div>`;
+const miniForm = (panelName) => `
+  <div class="mini">
+    <h4>${PLUS} New breaker on ${panelName}</h4>
+    <div class="grid2">
+      ${field('Panel', panelName)}
+      ${field('Slot', 'Next free: 4')}
+      ${field('Amperage', '15 A')}
+      ${field('Poles', 'Single')}
+    </div>
+    ${field('Label (optional)', '<span style="color:var(--color-fg-subtle)">e.g. Dishwasher</span>', false)}
+    <div class="mini-actions"><button class="btn btn--accent">${PLUS} Create &amp; select</button><button class="btn js-cancel">Cancel</button></div>
+  </div>`;
+
+const opt = b => `<div class="opt" ${b.sel?'data-sel':''}><span class="slot">${b.slot}</span>
+  <span class="col"><span class="lab">${b.label}</span><span class="sub">${b.amp} A</span></span>
+  ${b.prot?`<span class="badges"><span class="pbadge">${b.prot}</span></span>`:''}</div>`;
+
+const designs = [
+  {
+    n:1, title:'Searchable combobox', tag:'recommended',
+    desc:'A typeahead popover: search box on top, breakers grouped by panel, each row shows a <b>slot badge + label + amperage</b> (and a protection chip). A persistent <b>+ New breaker</b> footer expands the inline mini-form. Scales when you have lots of circuits.',
+    pros:['Search = fast even with 40 breakers','Rich rows (slot, label, amps, GFCI)','Add path always one tap away'],
+    cons:['Popover needs portal + keyboard nav','Most to build'],
+    body(host){ return `
+      <button class="trigger">${ZAP}<span class="slot">14</span> Kitchen outlets · 15A ${CHEV}</button>
+      <div class="panel">
+        <div class="search">${SEARCH}<input placeholder="Search breakers…" /></div>
+        <div class="js-list">
+          ${PANELS.map(p=>`<div class="grouphdr">${p.name}</div>${p.breakers.map(opt).join('')}`).join('')}
+        </div>
+        <div class="addrow js-add">${PLUS} New breaker on Main Panel</div>
+      </div>`; }
+  },
+  {
+    n:2, title:'Visual slot-map', tag:'most spatial',
+    desc:'Mirrors the real panel: pick a panel (chips), then a <b>numbered slot grid</b> — filled slots are existing breakers (tap to select), <b>empty slots are dashed</b> (tap to create a breaker pre-filled to that slot). Wiring maps to the physical panel you\'re looking at.',
+    pros:['Matches the physical panel layout','Empty slot = obvious "add here"','Great for finding a free slot'],
+    cons:['Heavier UI for a single field','Labels hidden until hover/select'],
+    body(host){ const cells=[]; for(let i=1;i<=12;i++){ const b=PANELS[0].breakers.find(x=>+x.slot===i); const filled=FILLED.has(String(i));
+        cells.push(filled?`<div class="cell filled ${b&&b.sel?'sel':''}"><span class="n">${i}</span><span>${b?b.amp+'A':''}</span></div>`:`<div class="cell empty js-add"><span class="n">${i}</span><span>${PLUS}</span></div>`); }
+      return `
+      <button class="trigger">${ZAP}<span class="slot">14</span> Kitchen outlets · 15A ${CHEV}</button>
+      <div class="panel">
+        <div class="panelchips"><span class="pchip" aria-pressed="true">Main Panel</span><span class="pchip">Garage Subpanel</span></div>
+        <div class="js-list"><div class="slotgrid">${cells.join('')}</div><p class="gridhint">Tap a filled slot to wire to it · tap a dashed empty slot to add a breaker there.</p></div>
+      </div>`; }
+  },
+  {
+    n:3, title:'Rich card rows (no search)', tag:'simplest upgrade',
+    desc:'Keep a plain dropdown but make each option a <b>richer row</b> (slot badge, label, amps, protection) instead of cramped text. A <b>+ New breaker</b> row at the bottom opens the inline form. Closest to today, just nicer — no search machinery.',
+    pros:['Small change from current select','Much more legible than text options','Cheapest to ship'],
+    cons:['No search (long lists scroll)','Less of a "wow"'],
+    body(host){ return `
+      <button class="trigger">${ZAP}<span class="slot">14</span> Kitchen outlets · 15A ${CHEV}</button>
+      <div class="panel">
+        <div class="js-list">${PANELS.map(p=>`<div class="grouphdr">${p.name}</div>${p.breakers.map(opt).join('')}`).join('')}</div>
+        <div class="addrow js-add">${PLUS} New breaker on Main Panel</div>
+      </div>`; }
+  },
+  {
+    n:4, title:'Two tabs: Pick / New', tag:'clearest split',
+    desc:'The popover has two tabs — <b>Existing</b> (the breaker list) and <b>New breaker</b> (the mini-form is the entire second tab, roomy). No cramped footer; creating a circuit is a deliberate, full-width step.',
+    pros:['Add form gets full space','No accidental taps on "+ New"','Obvious where to create'],
+    cons:['A tab to reach the list/add','Two-mode model for one field'],
+    body(host){ return `
+      <button class="trigger">${ZAP}<span class="slot">14</span> Kitchen outlets · 15A ${CHEV}</button>
+      <div class="panel">
+        <div class="ptabs"><button aria-pressed="true" class="js-tab-existing">Existing</button><button class="js-tab-new">+ New breaker</button></div>
+        <div class="js-list">${PANELS.map(p=>`<div class="grouphdr">${p.name}</div>${p.breakers.map(opt).join('')}`).join('')}</div>
+      </div>`; }
+  },
+];
+
+const gallery=document.getElementById('gallery');
+designs.forEach(d=>{
+  const w=document.createElement('div'); w.className='choice';
+  w.innerHTML=`
+    <div class="choice__head"><div class="choice__num">${d.n}</div>
+      <div><p class="choice__title">${d.title}</p><span class="choice__tag">${d.tag}</span></div></div>
+    <p class="choice__desc">${d.desc}</p>
+    <div class="formctx">
+      <p class="flabel">${ZAP} Breaker</p>
+      <div class="picker"></div>
+    </div>
+    <div class="pc"><div class="pros"><b>Pros</b><ul>${d.pros.map(x=>`<li>${x}</li>`).join('')}</ul></div>
+      <div class="cons"><b>Cons</b><ul>${d.cons.map(x=>`<li>${x}</li>`).join('')}</ul></div></div>`;
+  gallery.appendChild(w);
+  const host=w.querySelector('.picker');
+  host.innerHTML=d.body(host);
+  const panel=host.querySelector('.panel');
+  const list=panel.querySelector('.js-list');
+  const showMini=(panelName)=>{ // replace list (or add below) with mini-form
+    if(panel.querySelector('.mini')) return;
+    const wrap=document.createElement('div'); wrap.innerHTML=miniForm(panelName);
+    const mini=wrap.firstElementChild;
+    panel.appendChild(mini);
+    mini.querySelector('.js-cancel').addEventListener('click',()=>mini.remove());
+  };
+  panel.querySelectorAll('.js-add').forEach(el=>el.addEventListener('click',()=>showMini('Main Panel')));
+  // D4 tabs
+  const tabE=panel.querySelector('.js-tab-existing'), tabN=panel.querySelector('.js-tab-new');
+  if(tabE&&tabN){
+    tabN.addEventListener('click',()=>{ tabN.setAttribute('aria-pressed','true'); tabE.setAttribute('aria-pressed','false'); list.style.display='none'; showMini('Main Panel'); });
+    tabE.addEventListener('click',()=>{ tabE.setAttribute('aria-pressed','true'); tabN.setAttribute('aria-pressed','false'); list.style.display=''; panel.querySelector('.mini')?.remove(); });
+  }
+  // D2 panel chips
+  panel.querySelectorAll('.pchip').forEach(c=>c.addEventListener('click',()=>{ panel.querySelectorAll('.pchip').forEach(x=>x.setAttribute('aria-pressed','false')); c.setAttribute('aria-pressed','true'); }));
+});
+</script>
+</body>
+</html>

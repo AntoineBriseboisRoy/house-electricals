@@ -11,6 +11,9 @@ import { Link, useLocation, useRoute } from 'wouter';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CornerDownRight,
   GitFork,
   Lightbulb,
@@ -93,7 +96,6 @@ import {
   MoveToBuildingButton,
   PanelVisualization,
   ScreenHeader,
-  Select,
   Skeleton,
   toast,
   Tooltip,
@@ -107,7 +109,6 @@ import {
   type Corner,
 } from '../hooks/useRoomEditor.js';
 import { useModal } from '../hooks/useModal.js';
-import { useBuilding } from '../contexts/BuildingContext.js';
 import { useUndoableDelete } from '../hooks/useUndoableDelete.js';
 import { findRoomForPoint, findPointsInRect } from '../lib/roomLookup.js';
 import { snapPoint } from '../lib/snap.js';
@@ -163,6 +164,189 @@ const QUICK_CREATE_TYPES: readonly ComponentType[] = [
 
 const QUICK_CREATE_TOOLS: ReadonlySet<Tool> = new Set<Tool>(QUICK_CREATE_TYPES);
 
+/** Keyboard shortcut letters per quick-create tool — mirrors the global
+ *  shortcut handler so the toolbar pill can surface its hint badge. */
+const COMPONENT_TOOL_KBD: Record<ComponentType, string> = {
+  outlet: 'O',
+  light: 'L',
+  switch: 'S',
+  appliance: 'A',
+  junction_box: 'J',
+  smoke_detector: 'D',
+  other: 'X',
+};
+
+type ToolBarItem = {
+  tool: Tool;
+  label: string;
+  kbd: string;
+  icon: JSX.Element;
+};
+
+/** Single ordered list of every selectable tool. Drives the horizontal
+ *  toolbar carousel (one component, same on mobile + desktop). The first
+ *  three are the geometry/edit tools; the rest are the quick-create
+ *  component types (rendered with the canonical ComponentTypeIcon). */
+const TOOL_BAR_ITEMS: readonly ToolBarItem[] = [
+  {
+    tool: 'pointer',
+    label: 'Pointer',
+    kbd: 'V',
+    icon: <MousePointer2 size={18} strokeWidth={2.25} />,
+  },
+  {
+    tool: 'wall',
+    label: 'Wall',
+    kbd: 'W',
+    icon: <Pencil size={18} strokeWidth={2.25} />,
+  },
+  {
+    tool: 'room',
+    label: 'Room',
+    kbd: 'R',
+    icon: <Square size={18} strokeWidth={2.25} />,
+  },
+  ...QUICK_CREATE_TYPES.map(
+    (type): ToolBarItem => ({
+      tool: type,
+      label: componentTypeLabel(type),
+      kbd: COMPONENT_TOOL_KBD[type],
+      icon: <ComponentTypeIcon type={type} size={18} />,
+    })
+  ),
+];
+
+/**
+ * Horizontal, scrollable tool carousel — replaces the old vertical
+ * `.tool-palette` grid on BOTH mobile and desktop. Every tool is a labelled
+ * pill in a single horizontally-scrolling track, so no tool is ever reduced
+ * to an unlabelled icon (the previous orphaned-icon-row problem). Prev/next
+ * arrows page the track on desktop (pointer users can't swipe horizontally);
+ * touch users swipe natively, so the arrows are CSS-hidden ≤959px. The active
+ * pill auto-scrolls into view when the tool changes via keyboard shortcut.
+ */
+const ToolBar = ({
+  tool,
+  onSelect,
+}: {
+  tool: Tool;
+  onSelect: (next: Tool) => void;
+}): JSX.Element => {
+  const trackRef = useRef<HTMLUListElement>(null);
+  const [edges, setEdges] = useState({ start: false, end: false });
+
+  const updateEdges = useCallback(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    setEdges({
+      start: el.scrollLeft > 1,
+      end: el.scrollLeft + el.clientWidth < el.scrollWidth - 1,
+    });
+  }, []);
+
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    updateEdges();
+    el.addEventListener('scroll', updateEdges, { passive: true });
+    window.addEventListener('resize', updateEdges);
+    return () => {
+      el.removeEventListener('scroll', updateEdges);
+      window.removeEventListener('resize', updateEdges);
+    };
+  }, [updateEdges]);
+
+  // Keep the selected pill visible when the tool changes (e.g. via a keyboard
+  // shortcut for a tool currently scrolled off-screen). `block: 'nearest'`
+  // avoids any vertical page jump.
+  useEffect(() => {
+    const active = trackRef.current?.querySelector<HTMLElement>('[data-active]');
+    active?.scrollIntoView({
+      inline: 'center',
+      block: 'nearest',
+      behavior: 'smooth',
+    });
+  }, [tool]);
+
+  // Page the track by ~2-3 tool pills per click (measured from the first
+  // pill + gap so it's consistent across pill widths / viewports), while
+  // native scroll + swipe still work for free.
+  const page = (dir: -1 | 1): void => {
+    const el = trackRef.current;
+    if (!el) return;
+    const firstLi = el.querySelector('li');
+    const pillW = firstLi ? firstLi.getBoundingClientRect().width : 96;
+    const GAP = 8; // var(--space-2)
+    const step = (pillW + GAP) * 2.5;
+    el.scrollBy({ left: dir * step, behavior: 'smooth' });
+  };
+
+  return (
+    <div
+      className="tool-bar"
+      role="toolbar"
+      aria-label="Tools"
+      aria-orientation="horizontal"
+    >
+      <ul className="tool-bar__track" ref={trackRef}>
+        {TOOL_BAR_ITEMS.map((item) => (
+          <li key={item.tool}>
+            <Button
+              variant="ghost"
+              className="tool-bar__pill"
+              data-active={tool === item.tool || undefined}
+              aria-pressed={tool === item.tool}
+              leadingIcon={item.icon}
+              onClick={() => onSelect(item.tool)}
+              data-testid={`tool-${item.tool}`}
+            >
+              {item.label}
+              <span className="kbd-badge" aria-hidden="true">
+                {item.kbd}
+              </span>
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {/* Discreet edge affordances — a gradient fade + chevron that appear
+          ONLY when there's more to scroll that way (on both mobile + desktop).
+          The fade is pointer-events:none so swipes/wheel pass straight through
+          to the track; only the small chevron is clickable, paging ~2-3 tools.
+          See styles.css `.tool-bar__edge`. */}
+      <div
+        className="tool-bar__edge tool-bar__edge--prev"
+        data-show={edges.start || undefined}
+        aria-hidden={!edges.start}
+      >
+        <button
+          type="button"
+          className="tool-bar__edge-btn"
+          aria-label="Scroll tools left"
+          tabIndex={-1}
+          onClick={() => page(-1)}
+        >
+          <ChevronLeft size={18} />
+        </button>
+      </div>
+      <div
+        className="tool-bar__edge tool-bar__edge--next"
+        data-show={edges.end || undefined}
+        aria-hidden={!edges.end}
+      >
+        <button
+          type="button"
+          className="tool-bar__edge-btn"
+          aria-label="Scroll tools right"
+          tabIndex={-1}
+          onClick={() => page(1)}
+        >
+          <ChevronRight size={18} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
 /** Pointer travel (client px) before a pin pointerdown counts as a drag-move
  *  rather than a tap-select. Small enough to feel responsive, large enough to
  *  absorb the jitter of a deliberate tap. */
@@ -198,6 +382,11 @@ export const FloorEditScreen = (): JSX.Element => {
   const [selectedWallId, setSelectedWallId] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
+  /** "Panels here" disclosure — open while browsing the floor, auto-collapsed
+   *  to a single line whenever a wall/room/component is selected so the
+   *  selection detail isn't pushed down. User can still toggle it within a
+   *  given selection state. */
+  const [panelsHereOpen, setPanelsHereOpen] = useState(true);
   const [switchControls, setSwitchControls] = useState<ResolvedSwitchControl[]>([]);
   /** G38 cycle-64 — flat list of every switch-control row whose switch OR
    *  controlled component lives on this floor. Powers (a) the "3-way"
@@ -269,7 +458,6 @@ export const FloorEditScreen = (): JSX.Element => {
   const viewport = useViewport();
   const { confirm, prompt, pick, modalNode } = useModal();
   const { deleteWithUndo } = useUndoableDelete();
-  const { currentBuilding } = useBuilding();
 
   const refresh = useCallback(async (): Promise<void> => {
     if (!floorId) return;
@@ -386,6 +574,16 @@ export const FloorEditScreen = (): JSX.Element => {
         toast.error(e instanceof Error ? e.message : 'Failed to load controls.');
       });
   }, [componentsOnFloor, selectedComponentId]);
+
+  // Auto-collapse "Panels here" when a selection becomes active (and reopen
+  // when cleared) so the floor list never stacks under the selection detail.
+  useEffect(() => {
+    const selectionActive =
+      selectedWallId !== null ||
+      selectedRoomId !== null ||
+      selectedComponentId !== null;
+    setPanelsHereOpen(!selectionActive);
+  }, [selectedWallId, selectedRoomId, selectedComponentId]);
 
   // === G38 cycle-64 — co-controlled / three-way memos =====================
   //
@@ -1570,37 +1768,6 @@ export const FloorEditScreen = (): JSX.Element => {
    *
    *  Optimistic update: flip local floor state first so the picker reflects
    *  the change immediately; revert on PATCH failure. */
-  const handleSetLinkedPanel = useCallback(
-    async (nextPanelId: string | null): Promise<void> => {
-      if (floor === null || acting) return;
-      // Short-circuit no-op (e.g. user re-picked the same option).
-      if (floor.panelId === nextPanelId) return;
-      const before = floor;
-      setFloor({ ...floor, panelId: nextPanelId });
-      setActing(true);
-      try {
-        const updated = await updateFloor(floor.id, { panelId: nextPanelId });
-        if (aliveRef.current) {
-          setFloor(updated);
-          if (nextPanelId === null) {
-            toast.success('Unlinked panel');
-          } else {
-            const p = panels.find((x) => x.id === nextPanelId);
-            toast.success(`Linked floor to ${p?.name ?? 'panel'}`);
-          }
-        }
-      } catch (err) {
-        if (aliveRef.current) setFloor(before);
-        toast.error(
-          err instanceof Error ? err.message : 'Failed to update floor.'
-        );
-      } finally {
-        if (aliveRef.current) setActing(false);
-      }
-    },
-    [floor, acting, panels]
-  );
-
   const handleDeleteFloor = async (): Promise<void> => {
     if (floor === null || acting) return;
     const count = componentsOnFloor.length;
@@ -2015,9 +2182,6 @@ export const FloorEditScreen = (): JSX.Element => {
               subtitle={subtitle}
               back="/map"
               breadcrumbs={[
-                ...(currentBuilding !== null
-                  ? [{ label: currentBuilding.name }]
-                  : []),
                 { label: 'Map', href: '/map' },
                 { label: floor.name },
               ]}
@@ -2039,123 +2203,8 @@ export const FloorEditScreen = (): JSX.Element => {
         })()}
 
         <div className="floor-edit__layout">
-          {/* === Tools sidebar (left) === */}
-          <aside className="floor-edit__tools" aria-label="Tools">
-            <ul className="tool-palette">
-              <li>
-                {/* Cycle-84 (P2 #8) — active state now styled via data-active
-                    attribute on the .btn--ghost (NOT a new variant) — see
-                    .tool-palette > li .btn[data-active] rules in styles.css. */}
-                <Button
-                  variant="ghost"
-                  data-active={tool === 'pointer' || undefined}
-                  block
-                  leadingIcon={<MousePointer2 size={18} strokeWidth={2.25} />}
-                  onClick={() => setTool('pointer')}
-                >
-                  Pointer
-                  <span className="kbd-badge" aria-hidden="true">V</span>
-                </Button>
-              </li>
-              <li>
-                <Button
-                  variant="ghost"
-                  data-active={tool === 'wall' || undefined}
-                  block
-                  leadingIcon={<Pencil size={18} strokeWidth={2.25} />}
-                  onClick={() => setTool('wall')}
-                >
-                  Wall
-                  <span className="kbd-badge" aria-hidden="true">W</span>
-                </Button>
-              </li>
-              <li>
-                <Button
-                  variant="ghost"
-                  data-active={tool === 'room' || undefined}
-                  block
-                  leadingIcon={<Square size={18} strokeWidth={2.25} />}
-                  onClick={() => setTool('room')}
-                >
-                  Room
-                  <span className="kbd-badge" aria-hidden="true">R</span>
-                </Button>
-              </li>
-              <li className="tool-palette__divider" aria-hidden="true" />
-              {/* G19 quick-create tools — tap on canvas to drop a component. */}
-              <li>
-                <Button
-                  variant="ghost"
-                  data-active={tool === 'outlet' || undefined}
-                  block
-                  leadingIcon={<Power size={18} strokeWidth={2.25} />}
-                  onClick={() => setTool('outlet')}
-                >
-                  Outlet
-                  <span className="kbd-badge" aria-hidden="true">O</span>
-                </Button>
-              </li>
-              <li>
-                <Button
-                  variant="ghost"
-                  data-active={tool === 'light' || undefined}
-                  block
-                  leadingIcon={<Lightbulb size={18} strokeWidth={2.25} />}
-                  onClick={() => setTool('light')}
-                >
-                  Light
-                  <span className="kbd-badge" aria-hidden="true">L</span>
-                </Button>
-              </li>
-              <li>
-                <Button
-                  variant="ghost"
-                  data-active={tool === 'switch' || undefined}
-                  block
-                  leadingIcon={<ToggleRight size={18} strokeWidth={2.25} />}
-                  onClick={() => setTool('switch')}
-                >
-                  Switch
-                  <span className="kbd-badge" aria-hidden="true">S</span>
-                </Button>
-              </li>
-              {/* The 4 less-common component types as a compact icon row so
-                  every catalog type is placeable from the canvas without
-                  giving each a full-width button (which would dominate the
-                  sidebar + risk mobile overflow). Glyphs reuse the canonical
-                  ComponentTypeIcon; the title carries the kbd hint. */}
-              <li>
-                <div
-                  className="tool-palette__component-extras"
-                  role="group"
-                  aria-label="More component types"
-                >
-                  {(
-                    [
-                      { type: 'appliance', key: 'A' },
-                      { type: 'junction_box', key: 'J' },
-                      { type: 'smoke_detector', key: 'D' },
-                      { type: 'other', key: 'X' },
-                    ] as const
-                  ).map(({ type, key }) => (
-                    <IconButton
-                      key={type}
-                      icon={<ComponentTypeIcon type={type} size={18} />}
-                      variant="ghost"
-                      data-active={tool === type || undefined}
-                      aria-label={`${componentTypeLabel(type)} (${key})`}
-                      onClick={() => setTool(type)}
-                      data-testid={`tool-${type}`}
-                    />
-                  ))}
-                </div>
-              </li>
-              {/* Fit-to-view lives ONLY in the floating on-canvas zoom
-                 controls (grouped with zoom in/out) — a duplicate here was
-                 semantically out of place among the tool/component buttons
-                 and ate palette space. Keyboard shortcut "0" still fits. */}
-            </ul>
-          </aside>
+          {/* === Tools (horizontal carousel, spans the top on desktop) === */}
+          <ToolBar tool={tool} onSelect={setTool} />
 
           {/* === Canvas (center) === */}
           <section className="floor-edit__canvas" aria-label="Floor canvas">
@@ -3368,56 +3417,64 @@ export const FloorEditScreen = (): JSX.Element => {
               />
             )}
 
-            {/* Cycle-85 — "Linked panel" picker. Setting a panel here
-                makes ComponentForm pre-select that panel for any component
-                placed on this floor (still overridable per-component). */}
-            <section className="section">
-              <h3 className="section-title">Linked panel</h3>
-              <Select<string>
-                id="floor-linked-panel"
-                label={null}
-                aria-label="Linked panel for default wiring"
-                data-testid="floor-linked-panel"
-                value={floor.panelId}
-                onChange={(next) => {
-                  void handleSetLinkedPanel(next);
-                }}
-                placeholder="None (no default panel)"
-                options={panels.map((p) => ({ value: p.id, label: p.name }))}
-                disabled={acting || panels.length === 0}
-                hint={
-                  panels.length === 0
-                    ? 'Create a panel first to link it to this floor.'
-                    : 'Components placed on this floor default-wire to this panel. You can override per-component.'
-                }
-              />
-            </section>
-
-            <section className="section">
-              <h3 className="section-title">Panels here</h3>
-              {componentsByPanel.length === 0 ? (
-                <p className="muted">No components placed on this floor yet.</p>
-              ) : (
-                <ul className="panel-list__ul">
-                  {componentsByPanel.map((g) => (
-                    <li key={g.panel.id} className="panel-list__item">
-                      <Link
-                        href={`/panels/${g.panel.id}`}
-                        className="panel-list__link"
-                      >
-                        <span className="panel-list__name">
-                          <Zap size={14} strokeWidth={2.25} aria-hidden="true" />{' '}
-                          {g.panel.name}
-                        </span>
-                        <span className="panel-list__meta">
-                          {g.components.length}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+            {/* 2026-05 — "Panels here" folded into a single disclosure line
+                (the old standalone "Linked panel" default-wire picker was
+                removed — wiring a component always picks a real breaker, so a
+                floor-level default added no value). Open while browsing the
+                floor; auto-collapses to one line when a selection is active so
+                it never stacks under the selection detail. */}
+            <details
+              className="floor-panels"
+              open={panelsHereOpen}
+              onToggle={(e) => setPanelsHereOpen(e.currentTarget.open)}
+            >
+              <summary className="floor-panels__summary">
+                <Zap size={14} strokeWidth={2.25} aria-hidden="true" />
+                <span className="floor-panels__title">Panels here</span>
+                <span className="floor-panels__meta">
+                  {componentsByPanel.length === 0
+                    ? 'none'
+                    : `${componentsByPanel.length} ${
+                        componentsByPanel.length === 1 ? 'panel' : 'panels'
+                      }`}
+                </span>
+                <ChevronDown
+                  className="floor-panels__chev"
+                  size={16}
+                  aria-hidden="true"
+                />
+              </summary>
+              <div className="floor-panels__body">
+                {componentsByPanel.length === 0 ? (
+                  <p className="muted">
+                    No components placed on this floor yet.
+                  </p>
+                ) : (
+                  <ul className="panel-list__ul">
+                    {componentsByPanel.map((g) => (
+                      <li key={g.panel.id} className="panel-list__item">
+                        <Link
+                          href={`/panels/${g.panel.id}`}
+                          className="panel-list__link"
+                        >
+                          <span className="panel-list__name">
+                            <Zap
+                              size={14}
+                              strokeWidth={2.25}
+                              aria-hidden="true"
+                            />{' '}
+                            {g.panel.name}
+                          </span>
+                          <span className="panel-list__meta">
+                            {g.components.length}
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </details>
 
             <section className="section section--danger">
               <h3 className="section-title">Danger zone</h3>

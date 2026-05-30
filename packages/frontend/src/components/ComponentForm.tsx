@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import type { UseFormReturn } from 'react-hook-form';
 import type {
   ComponentInput,
@@ -7,6 +6,7 @@ import type {
 } from '@he/shared';
 import type { PanelWithBreakers } from '../api.js';
 import { componentTypeLabel } from './ComponentTypeIcon.js';
+import { BreakerComboField } from './BreakerComboField.js';
 import { Button, Checkbox, Combobox, Input, Select } from '../ui/index.js';
 import { TYPICAL_LOAD_WATTS } from '../lib/load.js';
 
@@ -52,15 +52,6 @@ const PROTECTION_OPTIONS: { value: ProtectionKind; label: string }[] = [
   { value: 'dual', label: 'GFCI + AFCI (dual)' },
 ];
 
-const formatBreaker = (
-  b: PanelWithBreakers['breakers'][number]
-): string => {
-  const pos = b.slotPosition !== null ? `#${b.slotPosition} ` : '';
-  // G34: tandem halves render as "slot 6a" so the user can distinguish.
-  const half = b.poles === 'tandem' && b.tandemHalf !== null ? b.tandemHalf : '';
-  return `slot ${b.slot}${half} · ${pos}${b.label} · ${b.amperage}A`;
-};
-
 export const ComponentForm = ({
   form,
   onSubmit,
@@ -89,28 +80,6 @@ export const ComponentForm = ({
   const handleBreakerChange = (next: string | null): void => {
     setValue('breakerId', next, { shouldDirty: true, shouldValidate: true });
   };
-
-  // Build the grouped breaker options. When the component sits on a floor
-  // linked to a panel (Cycle-85 context), sort that panel's group FIRST so
-  // its breakers are the easiest to reach — the floorPanelId still earns its
-  // keep without forcing a separate panel selection step.
-  const breakerOptGroups = useMemo(() => {
-    const groups = breakerGroups.filter((g) => g.breakers.length > 0);
-    const ordered =
-      floorPanelId === null
-        ? groups
-        : [...groups].sort((a, b) =>
-            a.panel.id === floorPanelId
-              ? -1
-              : b.panel.id === floorPanelId
-                ? 1
-                : 0
-          );
-    return ordered.map((g) => ({
-      label: g.panel.name,
-      options: g.breakers.map((b) => ({ value: b.id, label: formatBreaker(b) })),
-    }));
-  }, [breakerGroups, floorPanelId]);
 
   // 2026-05 — typical continuous-load default OFFERED for the current type.
   const typicalLoad =
@@ -207,6 +176,31 @@ export const ComponentForm = ({
           />
         </div>
 
+        {/* Wiring — elevated near the top (2026-05): which breaker powers this
+            component is the most important relationship to capture, so it sits
+            right under the identity fields, above the optional details below.
+            Single breaker picker (panel derived from the breaker; create a new
+            circuit inline). Hidden when there are no panels (early setup). */}
+        {breakerGroups.length > 0 && (
+          <div className="form-grid--wide component-form__wiring">
+            <h3 className="component-form__wiring-heading">Wiring</h3>
+            <label className="input__label" htmlFor="cf-breaker-trigger">
+              Breaker
+            </label>
+            <BreakerComboField
+              panels={breakerGroups}
+              value={currentBreakerId}
+              onChange={handleBreakerChange}
+              floorPanelId={floorPanelId}
+              testId="cf-breaker"
+            />
+            <p className="component-form__wiring-hint">
+              Pick the breaker — the panel it’s on is set automatically. New
+              circuit? Use <strong>+ New breaker</strong> in the picker.
+            </p>
+          </div>
+        )}
+
         <div className="form-grid--wide">
           <Input
             label="Notes"
@@ -302,25 +296,6 @@ export const ComponentForm = ({
             devices, etc. so they’re flagged in the Impact view.
           </p>
         </div>
-
-        {/* Wiring — ONE step (2026-05). Single breaker picker grouped by
-            panel; the panel is derived from the breaker automatically.
-            Hidden when there are no panels (early setup). */}
-        {breakerGroups.length > 0 && (
-          <div className="form-grid--wide component-form__wiring">
-            <h3 className="component-form__wiring-heading">Wiring</h3>
-            <Select<string>
-              id="cf-breaker"
-              label="Breaker"
-              data-testid="cf-breaker"
-              value={currentBreakerId}
-              onChange={handleBreakerChange}
-              placeholder="Unassigned (not wired)"
-              optGroups={breakerOptGroups}
-              hint="Pick the breaker — the panel it’s on is set automatically."
-            />
-          </div>
-        )}
       </div>
 
       <div className="form-actions">
