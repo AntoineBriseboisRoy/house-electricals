@@ -135,7 +135,8 @@ jobs:
       - name: Classify the release channel
         id: channel
         # Three channels, decided purely by the git ref shape:
-        #   - push to main/master         → nightly  (also keeps :latest moving)
+        #   - push to main/master         → nightly  (:latest does NOT move —
+        #                                   it tracks stable releases only)
         #   - tag vX.Y.Z-rc.N / -beta / -alpha (a pre-release) → beta
         #   - tag vX.Y.Z (clean, no suffix)                    → stable
         # The boolean outputs gate the channel tags in the metadata step so
