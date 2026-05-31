@@ -63,6 +63,7 @@ import {
   EmptyState,
   FilterPopover,
   FilterTriggerButton,
+  IconButton,
   Input,
   Modal,
   NoComponents,
@@ -1174,6 +1175,39 @@ export const ComponentsScreen = (): JSX.Element => {
         />
       </Modal>
 
+      {/* 2026-05 — Edit a component in a bottom-sheet Modal (matches the Add
+          modal + ServiceLogModal), replacing the old inline EditingRow swap.
+          handleUpdate clears editingId on success → the modal closes. */}
+      <Modal
+        open={editingId !== null}
+        onClose={() => setEditingId(null)}
+        title="Edit component"
+        testId="edit-component-modal"
+        presentation="sheet"
+      >
+        {(() => {
+          const c =
+            editingId !== null
+              ? components.find((x) => x.id === editingId) ?? null
+              : null;
+          if (c === null) return null;
+          return (
+            <EditingRow
+              component={c}
+              breakerGroups={breakerGroups}
+              roomSuggestions={roomSuggestions}
+              floorPanelId={
+                c.floorId !== null
+                  ? floorPanelByFloorId.get(c.floorId) ?? null
+                  : null
+              }
+              onCancel={() => setEditingId(null)}
+              onSave={(patch) => handleUpdate(c.id, patch)}
+            />
+          );
+        })()}
+      </Modal>
+
       <section aria-labelledby="components-heading" className="section">
         <h2 id="components-heading" className="section-title">
           All components
@@ -1224,21 +1258,6 @@ export const ComponentsScreen = (): JSX.Element => {
               )}
               <ul className="component-list">
                 {group.items.map((c) =>
-                  editingId === c.id ? (
-                <EditingRow
-                  key={c.id}
-                  component={c}
-                  breakerGroups={breakerGroups}
-                  roomSuggestions={roomSuggestions}
-                  floorPanelId={
-                    c.floorId !== null
-                      ? floorPanelByFloorId.get(c.floorId) ?? null
-                      : null
-                  }
-                  onCancel={() => setEditingId(null)}
-                  onSave={(patch) => handleUpdate(c.id, patch)}
-                />
-              ) : (
                 /* 2026-05 — compact, expandable card (matches the breaker
                    design-1 language). The COLLAPSED row is a dense one-liner:
                    checkbox + icon + name (+ critical/off/unassigned) + "Type ·
@@ -1341,6 +1360,52 @@ export const ComponentsScreen = (): JSX.Element => {
                                 </Link>
                               </Tooltip>
                             )}
+                          {/* 2026-05 — photos/edit/delete on the always-visible
+                              row, but DESKTOP ONLY (≥720px). On mobile this
+                              `__quick-extra` group is hidden and the actions
+                              live in the expanded detail below (compact rows).
+                              stopPropagation so they don't toggle the row. */}
+                          <span className="component-row__quick-extra">
+                            <Tooltip content="Photos">
+                              <IconButton
+                                variant="ghost"
+                                icon={<Camera size={16} strokeWidth={2.25} />}
+                                aria-label={`Photos for ${c.name}`}
+                                data-testid="component-row-photos"
+                                data-target-component-id={c.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPhotosComponentId(c.id);
+                                }}
+                              />
+                            </Tooltip>
+                            <Tooltip content="Edit">
+                              <IconButton
+                                variant="ghost"
+                                icon={<Pencil size={16} strokeWidth={2.25} />}
+                                aria-label={`Edit component ${c.name}`}
+                                data-testid="component-row-edit"
+                                data-target-component-id={c.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingId(c.id);
+                                }}
+                              />
+                            </Tooltip>
+                            <Tooltip content="Delete">
+                              <IconButton
+                                variant="danger"
+                                icon={<Trash2 size={16} strokeWidth={2.25} />}
+                                aria-label={`Delete component ${c.name}`}
+                                data-testid="component-row-delete"
+                                data-target-component-id={c.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDelete(c.id);
+                                }}
+                              />
+                            </Tooltip>
+                          </span>
                           <button
                             type="button"
                             className="component-row__expand"
@@ -1391,8 +1456,7 @@ export const ComponentsScreen = (): JSX.Element => {
                             Not wired to any breaker
                           </span>
                         )}
-                        {(c.protection !== null || logCount !== undefined) && (
-                          <div className="component-row__detail-row">
+                        <div className="component-row__detail-row">
                             {c.protection !== null && (
                               <ProtectionBadge kind={c.protection} />
                             )}
@@ -1431,47 +1495,40 @@ export const ComponentsScreen = (): JSX.Element => {
                                 </span>
                               </button>
                             )}
+                            {/* Mobile (<720px) — quick actions on the Log row,
+                                icon-only, pushed to the right. Desktop uses the
+                                header `__quick-extra` group instead (this span is
+                                display:none ≥720). No testids — the canonical
+                                component-row-* testids stay on the header
+                                buttons; these share the aria-labels. */}
+                            <span className="component-row__detail-actions">
+                              <IconButton
+                                variant="ghost"
+                                icon={<Camera size={18} strokeWidth={2.25} />}
+                                aria-label={`Photos for ${c.name}`}
+                                onClick={() => setPhotosComponentId(c.id)}
+                              />
+                              <IconButton
+                                variant="ghost"
+                                icon={<Pencil size={18} strokeWidth={2.25} />}
+                                aria-label={`Edit component ${c.name}`}
+                                onClick={() => setEditingId(c.id)}
+                              />
+                              <IconButton
+                                variant="danger"
+                                icon={<Trash2 size={18} strokeWidth={2.25} />}
+                                aria-label={`Delete component ${c.name}`}
+                                onClick={() => handleDelete(c.id)}
+                              />
+                            </span>
                           </div>
-                        )}
                         {c.notes !== null && c.notes.trim().length > 0 && (
                           <p className="component-row__notes">{c.notes}</p>
                         )}
-                        <div className="component-row__detail-actions">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            leadingIcon={<Camera size={15} strokeWidth={2.25} />}
-                            onClick={() => setPhotosComponentId(c.id)}
-                            aria-label={`Photos for ${c.name}`}
-                            data-testid="component-row-photos"
-                            data-target-component-id={c.id}
-                          >
-                            Photos
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            leadingIcon={<Pencil size={15} strokeWidth={2.25} />}
-                            onClick={() => setEditingId(c.id)}
-                            aria-label={`Edit component ${c.name}`}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            leadingIcon={<Trash2 size={15} strokeWidth={2.25} />}
-                            onClick={() => handleDelete(c.id)}
-                            aria-label={`Delete component ${c.name}`}
-                          >
-                            Delete
-                          </Button>
-                        </div>
                       </div>
                     </li>
                   );
                 })()
-                  )
                 )}
               </ul>
             </div>
@@ -1564,16 +1621,14 @@ const EditingRow = ({
   });
 
   return (
-    <li className="component-row component-row--editing">
-      <ComponentForm
-        form={form}
-        onSubmit={(values) => onSave(values)}
-        onCancel={onCancel}
-        submitLabel="Save"
-        breakerGroups={breakerGroups}
-        roomSuggestions={roomSuggestions}
-        floorPanelId={floorPanelId}
-      />
-    </li>
+    <ComponentForm
+      form={form}
+      onSubmit={(values) => onSave(values)}
+      onCancel={onCancel}
+      submitLabel="Save"
+      breakerGroups={breakerGroups}
+      roomSuggestions={roomSuggestions}
+      floorPanelId={floorPanelId}
+    />
   );
 };

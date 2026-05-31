@@ -1,17 +1,18 @@
 /**
  * Cycle-39 / G31 — wire a component to a breaker from the edit form.
  *
- * 2026-05: the wiring picker collapsed from a cascading Panel → Breaker
- * pair into a SINGLE breaker `<select>` grouped by panel (`<optgroup>`).
- * The panel a component lives on is DERIVED from its breaker, never picked
- * separately — so wiring is one step. These specs assert that single-picker
- * contract (no more `cf-panel`, no disabled-until-panel gate).
+ * 2026-05 updates this spec to the current UX:
+ *  - Editing a component opens a bottom-sheet **Modal** (`edit-component-modal`)
+ *    — no longer an inline `li.component-row--editing` swap.
+ *  - The breaker field is the **BreakerComboField** (searchable popover with
+ *    panel pills + rich rows), NOT a `<select>`. The panel is still derived
+ *    from the chosen breaker (one-step wiring).
  *
  * Hard rules from cycle-21:
  *  - No page.waitForTimeout.
  *  - Both Playwright projects (mobile + desktop) must pass.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page, type Locator } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,8 +24,7 @@ mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 
 import { authedFetch, E2E_BACKEND_URL } from './authed-fetch.js';
 
-/** POST a fresh unwired component so each test has its own clean slate
- *  (the seed's Ceiling Junction would otherwise drift between tests). */
+/** POST a fresh unwired component so each test has its own clean slate. */
 const createUnwiredComponent = async (name: string): Promise<string> => {
   const res = await authedFetch(`${E2E_BACKEND_URL}/api/v1/components`, {
     method: 'POST',
@@ -41,13 +41,26 @@ const createUnwiredComponent = async (name: string): Promise<string> => {
   return body.data.id;
 };
 
+/** Open the edit modal for a row. The Edit control is on the always-visible
+ *  row on desktop (icon, ≥720px) and in the expanded detail on mobile, so try
+ *  the header icon first and fall back to expand → detail Edit. */
+const openEditModal = async (page: Page, row: Locator): Promise<Locator> => {
+  const headerEdit = row.getByTestId('component-row-edit');
+  if (await headerEdit.isVisible().catch(() => false)) {
+    await headerEdit.click();
+  } else {
+    await row.getByTestId('component-row-expand').click();
+    await row.getByRole('button', { name: /Edit component/i }).click();
+  }
+  const modal = page.getByTestId('edit-component-modal');
+  await expect(modal).toBeVisible();
+  return modal;
+};
+
 test.describe('G31 component-edit wiring @cycle-39', () => {
-  test('Wiring section shows a single (enabled) breaker picker', async ({
+  test('Edit opens a modal with a single breaker picker (combo)', async ({
     page,
   }, info) => {
-    // Create a fresh unwired component for this test (avoids cross-test
-    // state leak — the seeded Ceiling Junction can be mutated by other
-    // tests that wire it).
     const targetName = `cycle39-unwired-${Date.now()}`;
     await createUnwiredComponent(targetName);
 
@@ -56,33 +69,26 @@ test.describe('G31 component-edit wiring @cycle-39', () => {
       page.getByRole('heading', { name: 'Library', exact: true })
     ).toBeVisible();
 
-    // Find the row by the unique name we just created.
     const row = page.locator('li.component-row', { hasText: targetName });
     await expect(row).toBeVisible();
 
-    // Click its Edit button.
-    // 2026-05 — Edit lives in the row's expandable detail; open it first.
-    await row.getByTestId('component-row-expand').click();
-    await row.getByRole('button', { name: /Edit component/i }).click();
+    const modal = await openEditModal(page, row);
 
-    // Two ComponentForms render on this page (create + edit). Scope to
-    // the .component-row--editing row so we only see the edit form.
-    const editingRow = page.locator('li.component-row--editing');
-    await expect(editingRow).toBeVisible();
+    // ONE breaker picker (panel auto-derived). It's the combo, not a <select>.
+    const trigger = modal.getByTestId('cf-breaker-trigger');
+    await expect(trigger).toBeVisible();
+    await expect(modal.locator('select[data-testid="cf-breaker"]')).toHaveCount(0);
+    // Unwired → the trigger reads the placeholder.
+    await expect(trigger).toContainText(/Unassigned/i);
 
-    // 2026-05 — ONE breaker picker (panel auto-derived). No cf-panel.
-    const breakerSel = editingRow.getByTestId('cf-breaker');
-    await expect(breakerSel).toBeVisible();
-    // Enabled from the start (no panel-first gate) + grouped by panel.
-    await expect(breakerSel).toBeEnabled();
-    await expect(breakerSel).toHaveValue(''); // unwired → placeholder
-    await expect(breakerSel.locator('optgroup')).not.toHaveCount(0);
+    // Open it → rich breaker rows are listed (grouped by panel pills).
+    await trigger.click();
+    const popover = page.getByTestId('cf-breaker-popover');
+    await expect(popover).toBeVisible();
+    await expect(page.getByTestId('breaker-combo-option').first()).toBeVisible();
 
     await page.screenshot({
-      path: join(
-        SCREENSHOTS_DIR,
-        `cycle39-wiring-section-${info.project.name}.png`
-      ),
+      path: join(SCREENSHOTS_DIR, `cycle39-wiring-${info.project.name}.png`),
       fullPage: false,
       clip: { x: 0, y: 0, width: page.viewportSize()!.width, height: 800 },
     });
@@ -91,9 +97,8 @@ test.describe('G31 component-edit wiring @cycle-39', () => {
   test('Picking a breaker in one step saves the wiring (panel derived)', async ({
     page,
   }) => {
-    // Fresh unwired component just for this test.
     const targetName = `cycle39-wire-${Date.now()}`;
-    await createUnwiredComponent(targetName);
+    const componentId = await createUnwiredComponent(targetName);
 
     await page.goto('/library');
     await expect(
@@ -101,29 +106,30 @@ test.describe('G31 component-edit wiring @cycle-39', () => {
     ).toBeVisible();
 
     const row = page.locator('li.component-row', { hasText: targetName });
-    // 2026-05 — Edit lives in the row's expandable detail; open it first.
-    await row.getByTestId('component-row-expand').click();
-    await row.getByRole('button', { name: /Edit component/i }).click();
-    const editingRow = page.locator('li.component-row--editing');
+    const modal = await openEditModal(page, row);
 
-    // Single grouped picker — pick the first real breaker directly (no
-    // panel step). option[0] is the placeholder; option[1] is the first
-    // breaker of the first panel group (Kitchen lights, slot 1).
-    const breakerSel = editingRow.getByTestId('cf-breaker');
-    const options = await breakerSel.locator('option').all();
-    const firstRealBreakerValue = await options[1].getAttribute('value');
-    expect(firstRealBreakerValue).not.toBeNull();
-    expect(firstRealBreakerValue).not.toBe('');
-    await breakerSel.selectOption(firstRealBreakerValue!);
+    // Pick the first real breaker directly (no panel step).
+    await modal.getByTestId('cf-breaker-trigger').click();
+    const firstOption = page.getByTestId('breaker-combo-option').first();
+    await expect(firstOption).toBeVisible();
+    await firstOption.click();
+    // The trigger now reflects a real breaker (not the placeholder).
+    await expect(modal.getByTestId('cf-breaker-trigger')).not.toContainText(
+      /Unassigned/i
+    );
 
-    // Save the form.
-    await editingRow.getByRole('button', { name: 'Save' }).click();
+    // Save → the modal closes.
+    await modal.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByTestId('edit-component-modal')).toBeHidden();
 
-    // Row should re-render with a wired breaker chip.
-    const updatedRow = page.locator('li.component-row', { hasText: targetName });
-    await expect(updatedRow).toBeVisible();
-    await expect(updatedRow.getByText(/slot 1/i).first()).toBeVisible();
-    await expect(updatedRow.getByText('Unassigned')).not.toBeVisible();
+    // The wiring persisted (breakpoint-independent check via the API).
+    await expect(async () => {
+      const res = await authedFetch(
+        `${E2E_BACKEND_URL}/api/v1/components/${componentId}`
+      );
+      const body = (await res.json()) as { data: { breakerId: string | null } };
+      expect(body.data.breakerId).not.toBeNull();
+    }).toPass();
   });
 
   test('Already-wired component opens with its breaker pre-selected', async ({
@@ -131,18 +137,17 @@ test.describe('G31 component-edit wiring @cycle-39', () => {
   }) => {
     await page.goto('/library');
 
-    // "Kitchen Outlet 1" is seeded as wired to a breaker. Open its edit form.
+    // "Kitchen Outlet 1" is seeded wired to a breaker.
     const row = page.locator('li.component-row', {
       hasText: 'Kitchen Outlet 1',
     });
     await expect(row).toBeVisible();
-    // 2026-05 — Edit lives in the row's expandable detail; open it first.
-    await row.getByTestId('component-row-expand').click();
-    await row.getByRole('button', { name: /Edit component/i }).click();
-    const editingRow = page.locator('li.component-row--editing');
 
-    // The single breaker picker should have a non-empty value.
-    const breakerVal = await editingRow.getByTestId('cf-breaker').inputValue();
-    expect(breakerVal).not.toBe('');
+    const modal = await openEditModal(page, row);
+
+    // The picker trigger shows the wired breaker, not the placeholder.
+    await expect(modal.getByTestId('cf-breaker-trigger')).not.toContainText(
+      /Unassigned/i
+    );
   });
 });

@@ -2218,6 +2218,19 @@ h2 {
   width: 36px;
   height: 36px;
 }
+/* 2026-05 — photos/edit/delete on the always-visible row are DESKTOP-ONLY.
+   On mobile (<720px) they'd crowd the row + truncate the name (the cards are
+   meant to stay compact there), so the group is hidden and the actions live
+   in the expanded detail instead. `display: contents` lets the buttons flex
+   as direct children of `.component-row__quick` on desktop. */
+.component-row__quick-extra {
+  display: contents;
+}
+@media (max-width: 719px) {
+  .component-row__quick-extra {
+    display: none;
+  }
+}
 .component-row__expand {
   width: 36px;
   height: 36px;
@@ -2266,11 +2279,20 @@ h2 {
   color: var(--color-fg-muted);
   line-height: var(--text-leading-normal);
 }
+/* Mobile (<720px) — icon-only quick actions pushed to the right of the Log
+   row inside the expanded detail. Desktop gets the same actions as icons on
+   the always-visible header row (`.component-row__quick-extra`), so this
+   in-detail set is mobile-only to avoid duplicate controls. */
 .component-row__detail-actions {
+  margin-left: auto;
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-top: var(--space-1);
+  align-items: center;
+  gap: var(--space-1);
+}
+@media (min-width: 720px) {
+  .component-row__detail-actions {
+    display: none;
+  }
 }
 
 .component-row__breaker-chip {
