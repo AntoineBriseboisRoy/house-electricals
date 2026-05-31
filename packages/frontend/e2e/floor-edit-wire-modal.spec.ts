@@ -101,12 +101,18 @@ test.describe('cycle-86 wire components from FloorEditScreen via Modal', () => {
     const modal = page.getByTestId('floor-edit-component-modal');
     await expect(modal).toBeVisible();
 
-    // 7) 2026-05 — single grouped breaker picker (panel auto-derived). The
-    //    floor's linked panel group sorts first; pick the breaker in one step.
-    const breakerSelect = modal.getByTestId('cf-breaker');
-    await expect(breakerSelect).toBeEnabled();
-    await breakerSelect.selectOption(seed.breakerIds[0]);
-    await expect(breakerSelect).toHaveValue(seed.breakerIds[0]);
+    // 7) 2026-05 — single grouped breaker picker (BreakerComboField — a
+    //    themed popover, not a <select>). Open it and pick the seeded
+    //    breaker in one step (panel auto-derived).
+    const breakerTrigger = modal.getByTestId('cf-breaker-trigger');
+    await expect(breakerTrigger).toBeVisible();
+    await breakerTrigger.click();
+    await page
+      .locator(
+        `[data-testid="breaker-combo-option"][data-breaker-id="${seed.breakerIds[0]}"]`
+      )
+      .click();
+    await expect(breakerTrigger).not.toContainText(/Unassigned/i);
 
     // 9) Submit. Save closes the Modal.
     await modal.getByRole('button', { name: 'Save' }).click();

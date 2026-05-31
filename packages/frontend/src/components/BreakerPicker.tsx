@@ -1,5 +1,5 @@
 import type { PanelWithBreakers } from '../api.js';
-import { Select } from '../ui/index.js';
+import { Combobox } from '../ui/index.js';
 
 type Props = {
   value: string | null;
@@ -17,9 +17,10 @@ const formatBreaker = (b: PanelWithBreakers['breakers'][number]): string => {
 };
 
 /**
- * Breaker picker — cycle-71: ported to the shared `<Select>` primitive
- * using its optGroups prop (panel → breakers). The "Unassigned" row maps
- * to null via the primitive's placeholder semantics.
+ * Breaker picker — 2026-05: ported to the shared `<Combobox>` primitive
+ * (themed popover, grouped via `optGroups`) so every dropdown in the app
+ * shares one styled component. The "Unassigned" placeholder maps to null;
+ * search auto-appears once there are enough breakers to warrant it.
  */
 export const BreakerPicker = ({
   value,
@@ -29,11 +30,11 @@ export const BreakerPicker = ({
   ariaLabel = 'Assign to breaker',
 }: Props): JSX.Element => {
   return (
-    <Select<string>
+    <Combobox<string>
       value={value}
       onChange={onChange}
       disabled={disabled}
-      aria-label={ariaLabel}
+      ariaLabel={ariaLabel}
       placeholder="Unassigned"
       optGroups={groups.map(({ panel, breakers }) => ({
         label: panel.name,

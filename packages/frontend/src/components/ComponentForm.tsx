@@ -7,7 +7,7 @@ import type {
 import type { PanelWithBreakers } from '../api.js';
 import { componentTypeLabel } from './ComponentTypeIcon.js';
 import { BreakerComboField } from './BreakerComboField.js';
-import { Button, Checkbox, Combobox, Input, Select } from '../ui/index.js';
+import { Button, Checkbox, Combobox, Input } from '../ui/index.js';
 import { TYPICAL_LOAD_WATTS } from '../lib/load.js';
 
 type Props = {
@@ -44,8 +44,8 @@ const TYPES: ComponentType[] = [
   'other',
 ];
 
-/** G37 cycle-68 — same closed enum as BreakerForm. The "None" placeholder
- *  is rendered by the cycle-71 Select primitive (maps to null on select). */
+/** G37 cycle-68 — same closed enum as BreakerForm. "None" is a first-class
+ *  Combobox `noneLabel` row (2026-05) that resolves to null on select. */
 const PROTECTION_OPTIONS: { value: ProtectionKind; label: string }[] = [
   { value: 'gfci', label: 'GFCI' },
   { value: 'afci', label: 'AFCI' },
@@ -88,7 +88,11 @@ export const ComponentForm = ({
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="component-form" noValidate>
       <div className="form-grid">
-        <Select<ComponentType>
+        {/* Dropdown style unified to the themed Combobox (2026-05) so every
+            dropdown in the app shares one styled component. Small fixed enum →
+            Combobox auto-hides its search box (a plain "normal dropdown" that
+            still uses the app's themed popover). */}
+        <Combobox<ComponentType>
           id="cf-type"
           label="Type"
           value={(watch('type') as ComponentType | null | undefined) ?? 'outlet'}
@@ -100,7 +104,12 @@ export const ComponentForm = ({
               shouldValidate: true,
             });
           }}
-          options={TYPES.map((t) => ({ value: t, label: componentTypeLabel(t) }))}
+          options={TYPES.map((t) => ({
+            value: t,
+            label: componentTypeLabel(t),
+          }))}
+          ariaLabel="Type"
+          allowClear={false}
           error={errors.type?.message ?? null}
         />
 
@@ -259,11 +268,13 @@ export const ComponentForm = ({
         </div>
 
         {/* G37 cycle-68 — GFCI/AFCI protection picker. Same closed enum as
-            BreakerForm. Cycle-71 Select primitive maps placeholder → null. */}
-        <Select<ProtectionKind>
+            BreakerForm. 2026-05 — unified to the themed Combobox so it matches
+            Room + the breaker picker in this form (was a native Select whose
+            OS dropdown clashed). Small enum → search auto-hidden; clearing the
+            selection maps to `null` (= "None"). */}
+        <Combobox<ProtectionKind>
           id="cf-protection"
           label="Protection"
-          data-testid="cf-protection"
           value={
             (watch('protection') as ProtectionKind | null | undefined) ?? null
           }
@@ -273,8 +284,9 @@ export const ComponentForm = ({
               shouldValidate: true,
             });
           }}
-          placeholder="None"
           options={PROTECTION_OPTIONS}
+          noneLabel="None"
+          ariaLabel="Protection"
           error={errors.protection?.message ?? null}
         />
 

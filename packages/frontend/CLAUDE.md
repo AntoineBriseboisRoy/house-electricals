@@ -15,16 +15,25 @@ not hand-roll markup that one already covers.**
    - `Button` (variants: primary/secondary/danger/ghost; `block`, `busy`,
      `leadingIcon`) and `IconButton` — never a styled raw `<button>` for
      actions.
-   - `Input`, `Textarea` (register-spread compatible) and `Select`
-     (controlled `value`/`onChange`, `options`/`optGroups`, placeholder→null)
-     and `Checkbox` (controlled) — never a raw `<input>`/`<select>`/
-     `<textarea>` in a form. They carry the label/error/hint slots, the 44px
-     touch target, the focus ring, and a11y wiring for free. Surface server/
-     validation errors through the primitive's `error` prop.
-   - `Combobox` for typeahead single-select; `Modal` (+ `useModal` for
-     imperative confirm/prompt/pick) for dialogs; `Card`/`CardHeader`/… for
-     surfaces; `Tooltip` for informational tooltips; `EmptyState` for empty
-     lists; `Spinner` for inline loading.
+   - `Input`, `Textarea` (register-spread compatible) and `Checkbox`
+     (controlled) — never a raw `<input>`/`<textarea>` in a form. They carry
+     the label/error/hint slots, the 44px touch target, the focus ring, and
+     a11y wiring for free. Surface server/validation errors through the
+     primitive's `error` prop.
+   - **Every dropdown is `Combobox`** (2026-05) — there is NO native
+     `<select>` / `Select` primitive any more (it was removed so the app has
+     ONE styled dropdown). `Combobox` is controlled (`value`/`onChange`),
+     takes flat `options` OR grouped `optGroups`, carries `label`/`error`/
+     `hint` chrome, and auto-decides search: the typeahead box appears only
+     when there are > 7 options (override with `searchable`). For optional
+     enums where the empty state is a real value, pass `noneLabel` (e.g.
+     `noneLabel="None"`) — it renders the null state as a normal-weight value
+     + a "None" list row (NOT a muted placeholder + `×`), so optional and
+     required dropdowns look identical. Use `placeholder` only for a
+     required-but-unfilled field (muted hint until picked).
+   - `Modal` (+ `useModal` for imperative confirm/prompt/pick) for dialogs;
+     `Card`/`CardHeader`/… for surfaces; `Tooltip` for informational
+     tooltips; `EmptyState` for empty lists; `Spinner` for inline loading.
    - Icons: `lucide-react` only. Toasts: `ui/toast` only (never import
      `sonner` directly outside `ui/toast.tsx`).
 

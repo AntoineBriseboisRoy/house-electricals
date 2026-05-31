@@ -35,13 +35,17 @@ const loadSeeded = (): NonNullable<SeededState['seeded']> => {
 const openAddBreakerForm = async (page: import('@playwright/test').Page, panelId: string): Promise<void> => {
   await page.goto(`/panels/${panelId}`);
   // The Add-a-breaker section is collapsed by default once a panel has
-  // any breakers (cycle 29). Click the toggle if present, otherwise the
-  // form is already open (empty-panel state).
+  // any breakers (cycle 29). Wait (deterministically) for the panel to
+  // settle — either the toggle (collapsed) or the Slot field (already open)
+  // — THEN open it if needed. Using `await toggle.count()` here was racy:
+  // it resolves before the panel data renders, skipping the click.
+  const slot = page.getByLabel('Slot', { exact: true });
   const toggle = page.getByTestId('open-add-breaker');
-  if (await toggle.count()) {
+  await expect(toggle.or(slot).first()).toBeVisible();
+  if (!(await slot.isVisible().catch(() => false))) {
     await toggle.click();
   }
-  await expect(page.getByLabel('Slot', { exact: true })).toBeVisible();
+  await expect(slot).toBeVisible();
 };
 
 test.describe('G33 breaker slot validation @cycle-41', () => {
@@ -95,7 +99,11 @@ test.describe('G33 breaker slot validation @cycle-41', () => {
     const { panelId } = loadSeeded();
     await openAddBreakerForm(page, panelId);
     await page.getByLabel('Slot', { exact: true }).fill('24');
-    await page.getByLabel('Poles').selectOption('double');
+    // Poles is now the themed Combobox (2026-05) — open + click the option.
+    await page.getByTestId('bf-poles-trigger').click();
+    await page
+      .locator('[data-testid="combobox-option"][data-value="double"]')
+      .click();
     await page.getByLabel('Label', { exact: true }).fill('overflows');
     await page.getByRole('button', { name: 'Add breaker' }).click();
     await expect(

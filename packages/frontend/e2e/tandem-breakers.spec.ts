@@ -37,16 +37,34 @@ const loadSeeded = (): NonNullable<SeededState['seeded']> => {
   return state.seeded;
 };
 
+/** Pick an option from a styled Combobox (2026-05 — every dropdown is the
+ *  themed popover now, not a native <select>). Opens via the `<testId>-trigger`
+ *  button, then clicks the option carrying `data-value`. */
+const pickCombo = async (
+  page: import('@playwright/test').Page,
+  testId: string,
+  value: string
+): Promise<void> => {
+  await page.getByTestId(`${testId}-trigger`).click();
+  await page
+    .locator(`[data-testid="combobox-option"][data-value="${value}"]`)
+    .click();
+};
+
 const openAddBreakerForm = async (
   page: import('@playwright/test').Page,
   panelId: string
 ): Promise<void> => {
   await page.goto(`/panels/${panelId}`);
+  // Deterministic open: wait for the toggle (collapsed) OR the Slot field
+  // (already open), then expand if needed. `await toggle.count()` was racy.
+  const slot = page.getByLabel('Slot', { exact: true });
   const toggle = page.getByTestId('open-add-breaker');
-  if (await toggle.count()) {
+  await expect(toggle.or(slot).first()).toBeVisible();
+  if (!(await slot.isVisible().catch(() => false))) {
     await toggle.click();
   }
-  await expect(page.getByLabel('Slot', { exact: true })).toBeVisible();
+  await expect(slot).toBeVisible();
 };
 
 const fillBreakerBasics = async (
@@ -56,7 +74,7 @@ const fillBreakerBasics = async (
   await page.getByLabel('Slot', { exact: true }).fill(opts.slot);
   await page.getByLabel('Label', { exact: true }).fill(opts.label);
   if (opts.poles) {
-    await page.getByLabel('Poles').selectOption(opts.poles);
+    await pickCombo(page, 'bf-poles', opts.poles);
   }
 };
 
@@ -67,10 +85,10 @@ test.describe('G34 tandem breakers as 6a/6b @cycle-42', () => {
     // Default poles='single' → no half picker.
     await expect(page.getByTestId('bf-tandem-half')).toHaveCount(0);
     // Switch to tandem → picker appears.
-    await page.getByLabel('Poles').selectOption('tandem');
+    await pickCombo(page, 'bf-poles', 'tandem');
     await expect(page.getByTestId('bf-tandem-half')).toBeVisible();
     // Switch back to single → picker hides again.
-    await page.getByLabel('Poles').selectOption('single');
+    await pickCombo(page, 'bf-poles', 'single');
     await expect(page.getByTestId('bf-tandem-half')).toHaveCount(0);
   });
 
@@ -100,7 +118,7 @@ test.describe('G34 tandem breakers as 6a/6b @cycle-42', () => {
       label: 'tandem collide',
       poles: 'tandem',
     });
-    await page.getByTestId('bf-tandem-half').selectOption('a');
+    await pickCombo(page, 'bf-tandem-half', 'a');
     await page.getByRole('button', { name: 'Add breaker' }).click();
     await expect(
       page.getByText(/Slot 1 is already taken/i).first()
@@ -118,7 +136,7 @@ test.describe('G34 tandem breakers as 6a/6b @cycle-42', () => {
       label: 'tandem A',
       poles: 'tandem',
     });
-    await page.getByTestId('bf-tandem-half').selectOption('a');
+    await pickCombo(page, 'bf-tandem-half', 'a');
     await page.getByRole('button', { name: 'Add breaker' }).click();
 
     // Form should reset (Add panel is collapsed again post-success on some
@@ -129,7 +147,7 @@ test.describe('G34 tandem breakers as 6a/6b @cycle-42', () => {
       label: 'tandem B',
       poles: 'tandem',
     });
-    await page.getByTestId('bf-tandem-half').selectOption('b');
+    await pickCombo(page, 'bf-tandem-half', 'b');
     await page.getByRole('button', { name: 'Add breaker' }).click();
 
     // Default view is 'viz' — each tandem half is a button whose
@@ -194,9 +212,12 @@ test.describe('G34 tandem breakers as 6a/6b @cycle-42', () => {
     // The Add-a-breaker form should now be visible (auto-opened) with the
     // slot + poles + half pre-filled.
     await expect(page.getByLabel('Slot', { exact: true })).toHaveValue('14');
-    await expect(page.getByLabel('Poles')).toHaveValue('tandem');
+    // Poles combobox trigger reflects the pre-filled "Tandem" selection.
+    await expect(page.getByTestId('bf-poles-trigger')).toContainText('Tandem');
     // Half picker is visible because poles=tandem, and 'b' is selected.
-    await expect(page.getByTestId('bf-tandem-half')).toHaveValue('b');
+    await expect(page.getByTestId('bf-tandem-half-trigger')).toContainText(
+      'b (second half)'
+    );
   });
 
   test('rejects a second tandem-a on a slot already holding a tandem-a', async ({

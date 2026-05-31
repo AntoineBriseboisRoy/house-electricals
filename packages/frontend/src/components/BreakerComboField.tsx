@@ -9,7 +9,7 @@ import type {
   TandemHalf,
 } from '@he/shared';
 import { createBreaker, type PanelWithBreakers } from '../api.js';
-import { Button, Input, Select, toast } from '../ui/index.js';
+import { Button, Combobox, Input, toast } from '../ui/index.js';
 import { usePopoverPosition } from '../hooks/usePopoverPosition.js';
 
 /**
@@ -468,20 +468,24 @@ const BreakerMiniForm = ({
           error={error}
           onChange={(e) => setSlot(e.target.value)}
         />
-        <Select<string>
+        <Combobox<string>
           label="Amperage"
+          ariaLabel="Amperage"
+          testId="breaker-combo-mini-amperage"
+          allowClear={false}
           value={String(amperage)}
-          data-testid="breaker-combo-mini-amperage"
           options={AMPERAGE_OPTIONS.map((a) => ({
             value: String(a),
             label: `${a} A`,
           }))}
           onChange={(next) => setAmperage(Number(next ?? 15))}
         />
-        <Select<Poles>
+        <Combobox<Poles>
           label="Poles"
+          ariaLabel="Poles"
+          testId="breaker-combo-mini-poles"
+          allowClear={false}
           value={poles}
-          data-testid="breaker-combo-mini-poles"
           options={POLES_OPTIONS}
           onChange={(next) => {
             const p = next ?? 'single';
@@ -492,20 +496,22 @@ const BreakerMiniForm = ({
           }}
         />
         {poles === 'tandem' && (
-          <Select<TandemHalf>
+          <Combobox<TandemHalf>
             label="Tandem half"
-            data-testid="breaker-combo-mini-tandem-half"
+            ariaLabel="Tandem half"
+            testId="breaker-combo-mini-tandem-half"
             value={tandemHalf}
             placeholder="— pick a half —"
             options={TANDEM_HALF_OPTIONS}
             onChange={(next) => setTandemHalf(next)}
           />
         )}
-        <Select<ProtectionKind>
+        <Combobox<ProtectionKind>
           label="Protection"
-          data-testid="breaker-combo-mini-protection"
+          ariaLabel="Protection"
+          testId="breaker-combo-mini-protection"
           value={protection}
-          placeholder="None"
+          noneLabel="None"
           options={PROTECTION_OPTIONS}
           onChange={(next) => setProtection(next)}
         />

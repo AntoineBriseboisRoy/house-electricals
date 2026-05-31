@@ -27,12 +27,6 @@ export { IconButton, type IconButtonProps, type IconButtonVariant } from './Icon
 export { Badge, type BadgeProps, type BadgeTone } from './Badge.js';
 export { Input, type InputProps } from './Input.js';
 export { Textarea, type TextareaProps } from './Textarea.js';
-export {
-  Select,
-  type SelectProps,
-  type SelectOption,
-  type SelectOptGroup,
-} from './Select.js';
 export { EmptyState, type EmptyStateProps } from './EmptyState.js';
 export { Skeleton, type SkeletonProps } from './Skeleton.js';
 export { Spinner, type SpinnerProps } from './Spinner.js';
@@ -67,6 +61,7 @@ export {
 export {
   Combobox,
   type ComboboxOption,
+  type ComboboxOptGroup,
   type ComboboxProps,
 } from './Combobox.js';
 export {

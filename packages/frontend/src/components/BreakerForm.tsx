@@ -8,7 +8,7 @@ import type {
   ProtectionKind,
   TandemHalf,
 } from '@he/shared';
-import { Button, Input, Select } from '../ui/index.js';
+import { Button, Combobox, Input } from '../ui/index.js';
 
 type Props = {
   form: UseFormReturn<BreakerInput>;
@@ -48,9 +48,8 @@ const POLES_OPTIONS: { value: Poles; label: string }[] = [
 ];
 
 /** G37 cycle-68 — GFCI/AFCI/dual protection picker. Values map to the
- *  closed ProtectionKind enum on the breaker. The placeholder "None" row
- *  is rendered by the Select primitive (cycle-71) — selecting it resolves
- *  to null on the form. */
+ *  closed ProtectionKind enum on the breaker. "None" is a first-class
+ *  Combobox `noneLabel` row (2026-05) — selecting it resolves to null. */
 const PROTECTION_OPTIONS: { value: ProtectionKind; label: string }[] = [
   { value: 'gfci', label: 'GFCI' },
   { value: 'afci', label: 'AFCI' },
@@ -281,9 +280,12 @@ export const BreakerForm = ({
           {...register('amperage', { valueAsNumber: true })}
         />
 
-        <Select<Poles>
+        <Combobox<Poles>
           id="bf-poles"
           label="Poles"
+          ariaLabel="Poles"
+          testId="bf-poles"
+          allowClear={false}
           value={(watch('poles') as Poles | null | undefined) ?? 'single'}
           onChange={(next) => {
             // poles is required (non-null) — fall back to 'single' when
@@ -300,13 +302,14 @@ export const BreakerForm = ({
         {/* G34 cycle-42 — tandem half picker, visible only when
             poles === 'tandem'. Two tandem breakers share one slot;
             this picks which half (the top or bottom stab) this is.
-            Cycle-71: Select primitive hoists the setValueAs mapping
-            (empty string → null) into onChange. */}
+            2026-05: themed Combobox (every dropdown shares one styled
+            component); a half is required, so it keeps a placeholder. */}
         {polesValue === 'tandem' && (
-          <Select<TandemHalf>
+          <Combobox<TandemHalf>
             id="bf-tandem-half"
             label="Tandem half"
-            data-testid="bf-tandem-half"
+            ariaLabel="Tandem half"
+            testId="bf-tandem-half"
             value={tandemHalfValue ?? null}
             onChange={(next) => {
               setValue('tandemHalf', next, {
@@ -324,12 +327,13 @@ export const BreakerForm = ({
         )}
 
         {/* G37 cycle-68 — GFCI/AFCI protection picker. Single-select below
-            Poles. Writes a ProtectionKind | null; cycle-71 Select primitive
-            maps placeholder → null in onChange. */}
-        <Select<ProtectionKind>
+            Poles. Writes a ProtectionKind | null; the Combobox `noneLabel`
+            row resolves "None" → null. */}
+        <Combobox<ProtectionKind>
           id="bf-protection"
           label="Protection"
-          data-testid="bf-protection"
+          ariaLabel="Protection"
+          testId="bf-protection"
           value={
             (watch('protection') as ProtectionKind | null | undefined) ?? null
           }
@@ -339,7 +343,7 @@ export const BreakerForm = ({
               shouldValidate: true,
             });
           }}
-          placeholder="None"
+          noneLabel="None"
           options={PROTECTION_OPTIONS}
           error={errors.protection?.message ?? null}
         />
@@ -374,16 +378,17 @@ export const BreakerForm = ({
             the option list; server is the final guard. */}
         {feedsPickerEnabled && (
           <div className="form-grid--wide">
-            <Select<string>
+            <Combobox<string>
               id="bf-feeds-subpanel"
               label="Feeds subpanel"
-              data-testid="bf-feeds-subpanel"
+              ariaLabel="Feeds subpanel"
+              testId="bf-feeds-subpanel"
               disabled={feedsDisabledByTandem}
               value={currentSubpanelId ?? null}
               onChange={(next) => {
                 void handleSubpanelChange(next);
               }}
-              placeholder="(no subpanel)"
+              noneLabel="(no subpanel)"
               options={subpanelChoices.map((p) => ({
                 value: p.id,
                 label: p.name,
