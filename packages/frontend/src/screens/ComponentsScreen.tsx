@@ -118,8 +118,9 @@ type GroupBy =
   | 'panel'
   | 'status';
 
-const GROUP_OPTIONS: readonly { key: GroupBy; label: string }[] = [
-  { key: 'none', label: 'None' },
+/** Selectable groupings shown in the popover. `none` (flat list) is NOT a
+ *  chip — it's reached via the × clear on the active pill. */
+const GROUP_OPTIONS: readonly { key: Exclude<GroupBy, 'none'>; label: string }[] = [
   { key: 'type', label: 'Type' },
   { key: 'room', label: 'Room' },
   { key: 'protection', label: 'Protection' },
@@ -958,6 +959,8 @@ export const ComponentsScreen = (): JSX.Element => {
               FilterPopover with the grouping options as chips (same look as
               the Type filter). Buckets the list by Type / Room / Protection /
               Breaker / Panel / Status. */}
+          {/* 2026-05 — when grouped, the pill shows an inline × to clear back
+              to a flat list (there's no "None" chip in the popover). */}
           <FilterTriggerButton
             ref={groupPopover.buttonRef}
             icon={Layers}
@@ -966,6 +969,11 @@ export const ComponentsScreen = (): JSX.Element => {
             onClick={groupPopover.toggle}
             testId="components-group-trigger"
             ariaLabel="Group components"
+            onClear={() =>
+              setFilterState((prev) => ({ ...prev, groupBy: 'none' }))
+            }
+            clearAriaLabel="Clear grouping"
+            clearTestId="components-group-clear"
           />
           {activeFilterCount > 0 && (
             // Cycle-70 polish-pass-2 P2 #14 — was variant="ghost" (bare

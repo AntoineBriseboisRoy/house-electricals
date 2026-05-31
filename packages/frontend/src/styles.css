@@ -6212,6 +6212,46 @@ h2 {
   border-color: var(--color-accent-border);
 }
 
+/* 2026-05 — clearable pill: the wrapper keeps the pill chrome; the open part
+   and the inline × are two sibling buttons (no nested interactive elements).
+   Horizontal padding moves to the children so the × hugs the right edge. */
+.filter-trigger-btn--clearable {
+  padding: 0;
+  gap: 0;
+  cursor: default;
+}
+.filter-trigger-btn__open,
+.filter-trigger-btn__clear {
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.filter-trigger-btn__open {
+  gap: var(--space-1);
+  padding: 0 var(--space-1) 0 var(--space-3);
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+.filter-trigger-btn__clear {
+  justify-content: center;
+  padding: 0 var(--space-2);
+  opacity: 0.75;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+.filter-trigger-btn__clear:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+.filter-trigger-btn__open:focus-visible,
+.filter-trigger-btn__clear:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
 .filter-trigger-btn__icon {
   display: inline-flex;
   align-items: center;
