@@ -5041,6 +5041,10 @@ h2 {
 .floor-plan__pin--inert {
   cursor: default;
   opacity: 0.7;
+  /* Applied while a room is being translated: the contained pins ride along
+     visually but must not eat pointer events mid-drag. (In a quick-create
+     tool mode pins are NOT inert — they're clickable to open their details.) */
+  pointer-events: none;
 }
 
 .floor-plan__pin--ghost {

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Button } from './Button.js';
 import { Input } from './Input.js';
-import { Modal } from './Modal.js';
+import { Modal, type ModalPresentation } from './Modal.js';
 
 export type PromptModalProps = {
   open: boolean;
@@ -16,6 +16,8 @@ export type PromptModalProps = {
   placeholder?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** Cycle-73 presentation — 'sheet' pivots to a mobile bottom-sheet. */
+  presentation?: ModalPresentation;
   /** Called when the user submits a non-empty trimmed string. */
   onSubmit: (value: string) => void;
   onCancel: () => void;
@@ -31,6 +33,7 @@ export const PromptModal = ({
   placeholder,
   confirmLabel = 'Save',
   cancelLabel = 'Cancel',
+  presentation = 'centered',
   onSubmit,
   onCancel,
 }: PromptModalProps): JSX.Element | null => {
@@ -54,6 +57,7 @@ export const PromptModal = ({
       onClose={onCancel}
       title={title}
       testId="prompt-modal"
+      presentation={presentation}
       footer={
         <>
           <Button

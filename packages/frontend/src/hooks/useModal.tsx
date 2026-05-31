@@ -2,6 +2,7 @@ import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { ConfirmModal } from '../ui/ConfirmModal.js';
 import { PickerModal, type PickerOption } from '../ui/PickerModal.js';
 import { PromptModal } from '../ui/PromptModal.js';
+import type { ModalPresentation } from '../ui/Modal.js';
 import type { ButtonVariant } from '../ui/Button.js';
 
 /**
@@ -39,6 +40,8 @@ type PromptOpts = {
   placeholder?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** 'sheet' makes the prompt a mobile bottom-sheet (cycle-73). */
+  presentation?: ModalPresentation;
 };
 
 type PickOpts<T> = {
@@ -150,6 +153,7 @@ export const useModal = (): UseModalResult => {
           placeholder={active.opts.placeholder}
           confirmLabel={active.opts.confirmLabel}
           cancelLabel={active.opts.cancelLabel}
+          presentation={active.opts.presentation}
           onSubmit={(v) => {
             active.resolve(v);
             close();

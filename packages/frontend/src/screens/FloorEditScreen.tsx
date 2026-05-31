@@ -74,7 +74,7 @@ import {
   updateWall,
   type PanelWithBreakers,
 } from '../api.js';
-import { BreakerPicker } from '../components/BreakerPicker.js';
+import { BreakerComboField } from '../components/BreakerComboField.js';
 import { ComponentForm } from '../components/ComponentForm.js';
 import {
   ComponentTypeIcon,
@@ -168,6 +168,35 @@ const QUICK_CREATE_TYPES: readonly ComponentType[] = [
 ];
 
 const QUICK_CREATE_TOOLS: ReadonlySet<Tool> = new Set<Tool>(QUICK_CREATE_TYPES);
+
+/** Synthesize a ResolvedBreakerSummary for a breakerId from the already-
+ *  loaded panel→breaker groups. Lets the optimistic in-place updates widen a
+ *  plain `Component` back to `ResolvedComponent` without a refetch (shared by
+ *  the drawer reassign + the edit-Modal save). Returns null when unwired or
+ *  the breaker isn't in the loaded groups. */
+const breakerSummaryById = (
+  groups: PanelWithBreakers[],
+  breakerId: string | null
+): ResolvedComponent['breaker'] => {
+  if (breakerId === null) return null;
+  for (const g of groups) {
+    const b = g.breakers.find((br) => br.id === breakerId);
+    if (b !== undefined) {
+      return {
+        id: b.id,
+        panelId: g.panel.id,
+        panelName: g.panel.name,
+        slot: b.slot,
+        slotPosition: b.slotPosition,
+        label: b.label,
+        amperage: b.amperage,
+        poles: b.poles,
+        tandemHalf: b.tandemHalf,
+      };
+    }
+  }
+  return null;
+};
 
 /** Keyboard shortcut letters per quick-create tool — mirrors the global
  *  shortcut handler so the toolbar pill can surface its hint badge. */
@@ -446,6 +475,66 @@ export const FloorEditScreen = (): JSX.Element => {
   } | null>(null);
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
+
+  // ── One-finger canvas pan (2026-05) ──────────────────────────────────
+  // The viewport only shipped 2-finger pinch-zoom + wheel-pan, so on a
+  // phone a single-finger swipe did nothing (the canvas has
+  // `touch-action: none`, so it doesn't scroll either) — the user was
+  // "stuck on the same view". This adds one-finger drag-to-pan on empty
+  // canvas in pointer mode. It composes with `viewport.pinchHandlers`: a
+  // second finger cancels the pan and pinch-zoom takes over. Pointerdowns
+  // that land on an interactive element (pin, handle, gang button, wall/
+  // room shape, link target) are left alone so select/drag/link still work.
+  const panRef = useRef<{ id: number; lastX: number; lastY: number } | null>(
+    null
+  );
+  const INTERACTIVE_SELECTOR =
+    '[data-pin-id], .floor-plan__handle, .gang-link-handle-group, [data-link-target], [data-gang-index], .floor-plan__wall, .floor-plan__wall-hit, .floor-plan__room, .floor-plan__room-hit, button, a, input, select, [role="button"]';
+
+  const canvasPointerDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    viewport.pinchHandlers.onPointerDown(e);
+    // A second active pointer → abandon pan; let pinch-zoom run.
+    if (panRef.current !== null) {
+      panRef.current = null;
+      return;
+    }
+    if (e.pointerType !== 'touch' || tool !== 'pointer') return;
+    const el = e.target as Element | null;
+    if (el !== null && el.closest(INTERACTIVE_SELECTOR) !== null) return;
+    panRef.current = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* capture is best-effort */
+    }
+  };
+
+  const canvasPointerMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    viewport.pinchHandlers.onPointerMove(e);
+    const p = panRef.current;
+    if (p === null || p.id !== e.pointerId) return;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (rect === undefined) return;
+    // Pan content WITH the finger: px delta → viewbox units (0-10000).
+    const dx = ((e.clientX - p.lastX) / rect.width) * 10000;
+    const dy = ((e.clientY - p.lastY) / rect.height) * 10000;
+    viewport.pan(dx, dy);
+    p.lastX = e.clientX;
+    p.lastY = e.clientY;
+  };
+
+  const canvasPointerUp = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    viewport.pinchHandlers.onPointerUp(e);
+    if (panRef.current?.id === e.pointerId) {
+      panRef.current = null;
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+
   /** Track unmount so post-async setState doesn't fire on a disposed tree.
    *  Important: under React StrictMode (Vite dev default), effects run
    *  setup → cleanup → setup. The cleanup sets aliveRef.current = false;
@@ -464,9 +553,12 @@ export const FloorEditScreen = (): JSX.Element => {
   const { confirm, prompt, pick, modalNode } = useModal();
   const { deleteWithUndo } = useUndoableDelete();
 
-  const refresh = useCallback(async (): Promise<void> => {
+  const refresh = useCallback(async (opts?: { silent?: boolean }): Promise<void> => {
     if (!floorId) return;
-    setLoading(true);
+    // `silent` skips the loading state so a post-mutation refetch doesn't
+    // blank the canvas (the "screen flash" bug). Only the initial load (and
+    // explicit reloads) show the skeleton.
+    if (!opts?.silent) setLoading(true);
     try {
       const [f, w, r, comps, ps, scs, groups, rms] = await Promise.all([
         getFloor(floorId),
@@ -495,7 +587,7 @@ export const FloorEditScreen = (): JSX.Element => {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load floor.');
     } finally {
-      if (aliveRef.current) setLoading(false);
+      if (aliveRef.current && !opts?.silent) setLoading(false);
     }
   }, [floorId]);
 
@@ -749,9 +841,14 @@ export const FloorEditScreen = (): JSX.Element => {
         // breaker yet).
         const placed: ResolvedComponent = { ...created, breaker: null };
         setComponentsOnFloor((prev) => [...prev, placed]);
-        setSelectedComponentId(created.id);
-        // Drop back to pointer so the next tap selects rather than creates.
-        setTool('pointer');
+        // 2026-05 — STAY on the active component tool so the user can drop
+        // several of the same type in a row (the previous `setTool('pointer')`
+        // forced a tool re-pick after every single placement). Switch to the
+        // pointer tool (V / the toolbar) when done placing.
+        // …and open the just-placed component's details so it can be named/
+        // wired right away (even though we're in a tool, not pointer). Closing
+        // the sheet drops back to the active tool to place the next one.
+        setEditingComponentId(created.id);
         toast.success(
           containingRoom ? `Created ${name} in ${containingRoom.name}` : `Created ${name}`
         );
@@ -841,26 +938,38 @@ export const FloorEditScreen = (): JSX.Element => {
       if (before === undefined) return;
       if ((before.breakerId ?? null) === nextBreakerId) return;
       try {
-        await updateComponent(selectedComponentId, {
+        const updated = await updateComponent(selectedComponentId, {
           breakerId: nextBreakerId,
         });
-        if (before.type === 'switch') {
-          toast.success(
-            nextBreakerId === null
+        // Optimistic in-place update — synthesize the ResolvedBreakerSummary
+        // from the already-loaded breakerGroups (no full refetch, so the pin
+        // never blinks out). Mirrors the edit-Modal save path.
+        const summary = breakerSummaryById(breakerGroups, updated.breakerId);
+        setComponentsOnFloor((prev) =>
+          prev.map((c) =>
+            c.id === updated.id ? { ...c, ...updated, breaker: summary } : c
+          )
+        );
+        toast.success(
+          before.type === 'switch'
+            ? nextBreakerId === null
               ? 'Switch + its controlled components unwired'
               : 'Switch + its controlled components wired'
-          );
-        } else {
-          toast.success(
-            nextBreakerId === null ? 'Component unwired' : 'Component wired'
-          );
-        }
-        void refresh();
+            : nextBreakerId === null
+              ? 'Component unwired'
+              : 'Component wired'
+        );
+        // SILENT reconcile (no loading flash): pulls the switch→controlled
+        // breakerId propagation AND resolves the breaker summary for a
+        // breaker that was just created inline (not yet in breakerGroups).
+        // NetworkFirst means this read is always fresh — the pin never
+        // vanishes behind a stale cache.
+        void refresh({ silent: true });
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Failed to wire.');
       }
     },
-    [componentsOnFloor, selectedComponentId, refresh]
+    [componentsOnFloor, selectedComponentId, breakerGroups, refresh]
   );
 
   const handleAddControl = useCallback(
@@ -909,9 +1018,10 @@ export const FloorEditScreen = (): JSX.Element => {
                 { switchId: sw.id, gangIndex, controlledId: target.id },
               ];
         });
-        // Refactor 2026-05 follow-up — refresh so the controlled
-        // component's just-propagated breakerId shows in the drawer.
-        void refresh();
+        // Refactor 2026-05 follow-up — SILENT refresh so the controlled
+        // component's just-propagated breakerId shows in the drawer without
+        // the loading flash (and never serving a stale list).
+        void refresh({ silent: true });
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Failed to link.');
       }
@@ -1046,11 +1156,12 @@ export const FloorEditScreen = (): JSX.Element => {
                   ];
             });
             toast.success(`Linked Gang ${drag.gangIndex + 1}`);
-            // Refactor 2026-05 follow-up — refresh so the controlled
+            // Refactor 2026-05 follow-up — SILENT refresh so the controlled
             // component's just-propagated breakerId (matching the switch)
-            // is reflected in the drawer + pin tooltips. Backend POST
-            // /controls also patches the controlled.breakerId = sw.breakerId.
-            void refresh();
+            // is reflected in the drawer + pin tooltips without the loading
+            // flash. Backend POST /controls also patches the
+            // controlled.breakerId = sw.breakerId.
+            void refresh({ silent: true });
           } catch (err) {
             toast.error(err instanceof Error ? err.message : 'Failed to link.');
           }
@@ -1302,6 +1413,7 @@ export const FloorEditScreen = (): JSX.Element => {
         label: 'These walls enclose a room — name it',
         defaultValue: 'Room',
         placeholder: 'e.g. Kitchen',
+        presentation: 'sheet',
       });
       if (name === null) return;
       const points: RoomVertex[] = loop.map((p) => ({ x: p.x, y: p.y }));
@@ -1323,6 +1435,7 @@ export const FloorEditScreen = (): JSX.Element => {
               title: 'Pick a different name',
               label: 'Name',
               defaultValue: suggested,
+              presentation: 'sheet',
             });
             if (retry === null) return;
             await attempt(retry);
@@ -1454,6 +1567,7 @@ export const FloorEditScreen = (): JSX.Element => {
         label: 'Name',
         defaultValue: 'Room',
         placeholder: 'e.g. Kitchen',
+        presentation: 'sheet',
       });
       if (trimmed === null) return;
       // G42(a) cycle-49 — recursive create-with-409-retry. The geometry
@@ -1491,6 +1605,7 @@ export const FloorEditScreen = (): JSX.Element => {
               title: 'Pick a different name',
               label: 'Name',
               defaultValue: suggested,
+              presentation: 'sheet',
             });
             if (retry === null) return;
             await attemptCreateRoom(retry);
@@ -2248,7 +2363,10 @@ export const FloorEditScreen = (): JSX.Element => {
               }
               style={planAspectStyle}
               onWheel={viewport.onWheel}
-              {...viewport.pinchHandlers}
+              onPointerDown={canvasPointerDown}
+              onPointerMove={canvasPointerMove}
+              onPointerUp={canvasPointerUp}
+              onPointerCancel={canvasPointerUp}
             >
               {floor.floorPlan !== null && (
                 // The underlay image tracks the viewport transform so it
@@ -2646,19 +2764,35 @@ export const FloorEditScreen = (): JSX.Element => {
                  rendered above the SVG so they're tappable in pointer mode.
                  Each pin carries `data-link-target` + `data-pin-id` so the
                  G20 gang-link drag can hit-test via elementFromPoint.
-                 G26 — also rendered (non-interactive, dimmed) during a room
-                 translate so the user sees contained pins move with the room. */}
+                 2026-05:
+                  - In a quick-create tool mode we show ONLY pins of that type
+                    (the carousel doubles as a per-type filter), and those pins
+                    are clickable to open their details for editing (so an
+                    existing outlet can be tweaked while the Outlet tool is up).
+                    Clicking empty canvas still places a new one (capture layer).
+                  - During a room translate the pins render inert + dimmed so
+                    the user sees the contained pins move with the room. */}
               {(tool === 'pointer' ||
+                QUICK_CREATE_TOOLS.has(tool) ||
                 (tool === 'room' && roomEditor.translateDrag !== null)) &&
                 displayedComponentsOnFloor
                   .filter((c) => c.posX !== null && c.posY !== null)
+                  // Tool carousel = per-type filter: only show the active type.
+                  .filter(
+                    (c) => !QUICK_CREATE_TOOLS.has(tool) || c.type === tool
+                  )
                   .map((c) => {
                     const left = vbToPctX(c.posX ?? 0);
                     const top = vbToPctY(c.posY ?? 0);
                     const isSel = selectedComponentId === c.id;
                     const isHoverTarget =
                       linkDrag !== null && linkDrag.hoverPinId === c.id;
-                    const isInert = tool !== 'pointer';
+                    const inPointer = tool === 'pointer';
+                    const inToolMode = QUICK_CREATE_TOOLS.has(tool);
+                    // Inert (no pointer events, dimmed) only during a room
+                    // translate. In pointer mode pins drag+select; in a
+                    // quick-create tool they're clickable to open details.
+                    const isInert = !inPointer && !inToolMode;
                     const isOff = isComponentOff(offState, c);
                     return (
                       <button
@@ -2677,12 +2811,11 @@ export const FloorEditScreen = (): JSX.Element => {
                         data-off={isOff ? 'true' : undefined}
                         style={{ left: `${left}%`, top: `${top}%` } as CSSProperties}
                         onPointerDown={
-                          isInert ? undefined : (e) => startComponentDrag(c.id, e)
+                          inPointer ? (e) => startComponentDrag(c.id, e) : undefined
                         }
                         onClick={
-                          isInert
-                            ? undefined
-                            : () => {
+                          inPointer
+                            ? () => {
                                 // Swallow the click the browser fires after a
                                 // real drag so a move doesn't also re-select.
                                 if (componentDragMovedRef.current) {
@@ -2691,6 +2824,9 @@ export const FloorEditScreen = (): JSX.Element => {
                                 }
                                 handleSelectComponent(c.id);
                               }
+                            : inToolMode
+                              ? () => setEditingComponentId(c.id)
+                              : undefined
                         }
                         aria-label={`${c.name} (${c.type})`}
                         title={c.name}
@@ -3251,13 +3387,17 @@ export const FloorEditScreen = (): JSX.Element => {
                           <span className="component-breaker-context__picker-label">
                             Reassign
                           </span>
-                          <BreakerPicker
+                          {/* 2026-05 — same searchable picker as the edit form,
+                              incl. inline "+ New breaker" (was a plain
+                              BreakerPicker with no create). */}
+                          <BreakerComboField
+                            panels={breakerGroups}
                             value={sel.breaker.id}
-                            groups={breakerGroups}
                             onChange={(next) => {
                               void handleAssignBreaker(next);
                             }}
-                            ariaLabel="Reassign breaker"
+                            floorPanelId={floor?.panelId ?? null}
+                            testId="floor-reassign-breaker"
                           />
                         </div>
                       </section>
@@ -3280,13 +3420,16 @@ export const FloorEditScreen = (): JSX.Element => {
                           <span className="component-breaker-context__picker-label">
                             Wire to a breaker
                           </span>
-                          <BreakerPicker
+                          {/* 2026-05 — searchable picker w/ inline "+ New
+                              breaker" so a new circuit can be created here. */}
+                          <BreakerComboField
+                            panels={breakerGroups}
                             value={null}
-                            groups={breakerGroups}
                             onChange={(next) => {
                               void handleAssignBreaker(next);
                             }}
-                            ariaLabel="Wire to a breaker"
+                            floorPanelId={floor?.panelId ?? null}
+                            testId="floor-reassign-breaker"
                           />
                         </div>
                       </section>
@@ -3558,28 +3701,10 @@ export const FloorEditScreen = (): JSX.Element => {
                 // owning panel + summary fields. breakerGroups carries
                 // both the panel + its breakers, so we can synthesize the
                 // ResolvedBreakerSummary shape without a refetch.
-                let newBreakerSummary: ResolvedComponent['breaker'] = null;
-                if (updated.breakerId !== null) {
-                  for (const g of breakerGroups) {
-                    const b = g.breakers.find(
-                      (br) => br.id === updated.breakerId
-                    );
-                    if (b !== undefined) {
-                      newBreakerSummary = {
-                        id: b.id,
-                        panelId: g.panel.id,
-                        panelName: g.panel.name,
-                        slot: b.slot,
-                        slotPosition: b.slotPosition,
-                        label: b.label,
-                        amperage: b.amperage,
-                        poles: b.poles,
-                        tandemHalf: b.tandemHalf,
-                      };
-                      break;
-                    }
-                  }
-                }
+                const newBreakerSummary = breakerSummaryById(
+                  breakerGroups,
+                  updated.breakerId
+                );
                 setComponentsOnFloor((prev) =>
                   prev.map((c) =>
                     c.id === updated.id

@@ -107,26 +107,17 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
-        // SW runtime cache allow-list. Rule (see CLAUDE.md):
-        //   SWR only for panel/component/breaker GETs that are safe to render
-        //   stale for a short while; mutations (POST/PATCH/DELETE) are not
-        //   cached. Adding a new entry here requires updating CLAUDE.md.
+        // SW runtime cache allow-list. ALL /api/ GETs are NetworkFirst
+        // (2026-05). The previous StaleWhileRevalidate entry for panel/
+        // component/breaker GETs caused a data-integrity bug: the floor
+        // editor (and other screens) mutate optimistically then call a
+        // full refetch; with SWR that refetch resolved to a STALE cached
+        // list that predated the just-created/edited row, so the row
+        // visibly vanished and a manual refresh kept serving the stale
+        // cache (only a fresh navigation recovered it). NetworkFirst always
+        // prefers the live server (5s timeout → cache fallback offline), so
+        // a read after a write is always fresh. Mutations are never cached.
         runtimeCaching: [
-          {
-            urlPattern: ({ url, request }) =>
-              request.method === 'GET' &&
-              (url.pathname === '/api/v1/panels' ||
-                /^\/api\/v1\/panels\/[^/]+$/.test(url.pathname) ||
-                /^\/api\/v1\/panels\/[^/]+\/breakers$/.test(url.pathname) ||
-                /^\/api\/v1\/breakers\/[^/]+$/.test(url.pathname) ||
-                url.pathname === '/api/v1/components' ||
-                /^\/api\/v1\/components\/[^/]+$/.test(url.pathname)),
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'he-api-swr',
-              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 },
-            },
-          },
           {
             urlPattern: ({ url, request }) =>
               request.method === 'GET' && url.pathname.startsWith('/api/'),
@@ -134,7 +125,7 @@ export default defineConfig({
             options: {
               cacheName: 'he-api',
               networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 },
+              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 },
             },
           },
         ],
