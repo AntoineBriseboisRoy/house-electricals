@@ -18,6 +18,12 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["docs/design/serve.mjs"],
       "port": 4191
+    },
+    {
+      "name": "vite",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@he/frontend", "dev"],
+      "port": 5173
     }
   ]
 }
