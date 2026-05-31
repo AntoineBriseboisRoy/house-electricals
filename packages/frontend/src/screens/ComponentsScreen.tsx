@@ -1346,26 +1346,28 @@ export const ComponentsScreen = (): JSX.Element => {
                           </div>
                         </div>
                         <div className="component-row__quick">
-                          {c.floorId !== null &&
-                            c.posX !== null &&
-                            c.posY !== null && (
-                              <Tooltip content="View on floor plan">
-                                <Link
-                                  href={`/floors/${c.floorId}/edit#pin-${c.id}`}
-                                  className="component-row__map-link"
-                                  aria-label={`View ${c.name} on the floor plan`}
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <MapIcon size={16} strokeWidth={2.25} aria-hidden="true" />
-                                </Link>
-                              </Tooltip>
-                            )}
-                          {/* 2026-05 — photos/edit/delete on the always-visible
-                              row, but DESKTOP ONLY (≥720px). On mobile this
-                              `__quick-extra` group is hidden and the actions
-                              live in the expanded detail below (compact rows).
-                              stopPropagation so they don't toggle the row. */}
+                          {/* 2026-05 — map/photos/edit/delete on the always-
+                              visible row, but DESKTOP ONLY (≥720px). On mobile
+                              this `__quick-extra` group is hidden so the
+                              collapsed row keeps all its width for the name +
+                              meta; the actions (incl. map) live in the expanded
+                              detail instead. stopPropagation so the buttons
+                              don't toggle the row. */}
                           <span className="component-row__quick-extra">
+                            {c.floorId !== null &&
+                              c.posX !== null &&
+                              c.posY !== null && (
+                                <Tooltip content="View on floor plan">
+                                  <Link
+                                    href={`/floors/${c.floorId}/edit#pin-${c.id}`}
+                                    className="component-row__map-link"
+                                    aria-label={`View ${c.name} on the floor plan`}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <MapIcon size={16} strokeWidth={2.25} aria-hidden="true" />
+                                  </Link>
+                                </Tooltip>
+                              )}
                             <Tooltip content="Photos">
                               <IconButton
                                 variant="ghost"
@@ -1502,6 +1504,21 @@ export const ComponentsScreen = (): JSX.Element => {
                                 component-row-* testids stay on the header
                                 buttons; these share the aria-labels. */}
                             <span className="component-row__detail-actions">
+                              {c.floorId !== null &&
+                                c.posX !== null &&
+                                c.posY !== null && (
+                                  <Link
+                                    href={`/floors/${c.floorId}/edit#pin-${c.id}`}
+                                    className="component-row__map-link"
+                                    aria-label={`View ${c.name} on the floor plan`}
+                                  >
+                                    <MapIcon
+                                      size={18}
+                                      strokeWidth={2.25}
+                                      aria-hidden="true"
+                                    />
+                                  </Link>
+                                )}
                               <IconButton
                                 variant="ghost"
                                 icon={<Camera size={18} strokeWidth={2.25} />}

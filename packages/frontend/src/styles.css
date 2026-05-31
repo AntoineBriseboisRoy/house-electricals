@@ -2289,6 +2289,12 @@ h2 {
   align-items: center;
   gap: var(--space-1);
 }
+/* Uniform 40px hit targets for every action (map link + icon buttons). */
+.component-row__detail-actions .icon-btn,
+.component-row__detail-actions .component-row__map-link {
+  width: 40px;
+  height: 40px;
+}
 @media (min-width: 720px) {
   .component-row__detail-actions {
     display: none;
