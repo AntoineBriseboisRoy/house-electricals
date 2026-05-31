@@ -6,7 +6,6 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
@@ -209,8 +208,18 @@ export const Modal = ({
     [onClose]
   );
 
-  const handleOverlayClick = useCallback(
-    (e: ReactMouseEvent<HTMLDivElement>): void => {
+  // Close on a pointerdown that STARTS on the overlay backdrop. Keying on
+  // pointerdown (not mousedown) is deliberate: when a modal is opened by a
+  // touch tap (e.g. placing a component on the floor canvas, which awaits a
+  // POST then opens the details sheet), the browser fires a COMPATIBILITY
+  // `mousedown` ~after touchend at the tap coords — which would land on the
+  // just-mounted overlay and instantly dismiss it. A compat mousedown is not
+  // a pointer event, and the opening gesture's real pointerdown was on the
+  // canvas (not the overlay), so this can't be triggered by the tap that
+  // opened the modal. Real overlay taps/clicks (touch or mouse) still fire a
+  // pointerdown on the overlay and close as expected.
+  const handleOverlayClose = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>): void => {
       if (!closeOnOverlay) return;
       if (e.target === e.currentTarget) {
         onClose();
@@ -235,7 +244,7 @@ export const Modal = ({
     <div
       className={overlayClassName}
       role="presentation"
-      onMouseDown={handleOverlayClick}
+      onPointerDown={handleOverlayClose}
       onKeyDown={handleKeyDown}
     >
       <div
@@ -247,8 +256,9 @@ export const Modal = ({
         data-testid={testId ?? 'modal'}
         className={modalClassName}
         style={dialogStyle}
-        // Click inside the modal must not bubble to the overlay's close handler.
-        onMouseDown={(e) => e.stopPropagation()}
+        // A pointerdown inside the modal must not bubble to the overlay's
+        // close handler (which now listens on pointerdown).
+        onPointerDown={(e) => e.stopPropagation()}
       >
         {/* Bottom-sheet drag-handle — swipe down to dismiss (2026-05). The
             visible bar is the ::before; the element itself is a taller touch

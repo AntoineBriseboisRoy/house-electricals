@@ -140,6 +140,35 @@ test.describe('Floor editor interactions @floor-edit-fixes', () => {
     await expect(modal).toHaveClass(/modal--sheet/);
   });
 
+  test('#6 mobile: placing keeps the details sheet open (no ghost-tap dismiss)', async ({
+    page,
+  }, info) => {
+    test.skip(
+      info.project.name === 'desktop-1440x900',
+      'Ghost compat-mouse events only follow touch taps.'
+    );
+    const state = loadState();
+    await page.goto(`/floors/${state.floorId}/edit`);
+
+    // "Other" has no seeded pins → the canvas is empty of its type, so a tap
+    // places (rather than selecting an existing pin).
+    await page.getByTestId('tool-other').click();
+    const capture = page.locator('.floor-plan__edit-capture');
+    await expect(capture).toBeVisible();
+
+    // Touch-tap to place → the details sheet opens.
+    await capture.tap();
+    const modal = page.getByTestId('floor-edit-component-modal');
+    await expect(modal).toBeVisible();
+
+    // The browser fires a compatibility `mousedown` at the tap point shortly
+    // after a touch tap; before the fix that landed on the freshly-mounted
+    // overlay and instantly dismissed the sheet. The overlay now closes on
+    // pointerdown only, so this mousedown must be a no-op.
+    await page.locator('.modal-overlay').dispatchEvent('mousedown');
+    await expect(modal).toBeVisible();
+  });
+
   test('#4 one-finger swipe pans the canvas (mobile)', async ({
     page,
   }, info) => {
