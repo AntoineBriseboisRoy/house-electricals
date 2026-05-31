@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Plus, Search, X, Zap } from 'lucide-react';
-import type { Breaker, BreakerInput, Poles } from '@he/shared';
+import type {
+  Breaker,
+  BreakerInput,
+  Poles,
+  ProtectionKind,
+  TandemHalf,
+} from '@he/shared';
 import { createBreaker, type PanelWithBreakers } from '../api.js';
 import { Button, Input, Select, toast } from '../ui/index.js';
 import { usePopoverPosition } from '../hooks/usePopoverPosition.js';
@@ -27,8 +33,19 @@ import { usePopoverPosition } from '../hooks/usePopoverPosition.js';
 
 const AMPERAGE_OPTIONS = [15, 20, 30, 40, 50, 60] as const;
 const POLES_OPTIONS: { value: Poles; label: string }[] = [
-  { value: 'single', label: 'Single-pole' },
-  { value: 'double', label: 'Double-pole (240V)' },
+  { value: 'single', label: 'Single (120V)' },
+  { value: 'double', label: 'Double (240V)' },
+  { value: 'tandem', label: 'Tandem' },
+];
+const TANDEM_HALF_OPTIONS: { value: TandemHalf; label: string }[] = [
+  { value: 'a', label: 'a (first half)' },
+  { value: 'b', label: 'b (second half)' },
+];
+/** G37 — same closed enum as BreakerForm. Placeholder "None" → null. */
+const PROTECTION_OPTIONS: { value: ProtectionKind; label: string }[] = [
+  { value: 'gfci', label: 'GFCI' },
+  { value: 'afci', label: 'AFCI' },
+  { value: 'dual', label: 'GFCI + AFCI (dual)' },
 ];
 
 type Props = {
@@ -396,6 +413,8 @@ const BreakerMiniForm = ({
   const [slot, setSlot] = useState(suggestedSlot);
   const [amperage, setAmperage] = useState(15);
   const [poles, setPoles] = useState<Poles>('single');
+  const [tandemHalf, setTandemHalf] = useState<TandemHalf | null>(null);
+  const [protection, setProtection] = useState<ProtectionKind | null>(null);
   const [label, setLabel] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -404,6 +423,11 @@ const BreakerMiniForm = ({
     const trimmedSlot = slot.trim();
     if (trimmedSlot === '') {
       setError('Slot is required.');
+      return;
+    }
+    // G34 cross-field rule (mirrors BreakerForm): tandem ⇒ must pick a half.
+    if (poles === 'tandem' && tandemHalf === null) {
+      setError('Tandem breakers must pick a half (a or b).');
       return;
     }
     setBusy(true);
@@ -415,8 +439,9 @@ const BreakerMiniForm = ({
       amperage,
       poles,
       label: label.trim() === '' ? `Slot ${trimmedSlot}` : label.trim(),
-      tandemHalf: null,
-      protection: null,
+      // Non-tandem breakers always carry tandemHalf = null (server enforces).
+      tandemHalf: poles === 'tandem' ? tandemHalf : null,
+      protection,
     };
     try {
       await onCreate(input);
@@ -458,7 +483,31 @@ const BreakerMiniForm = ({
           value={poles}
           data-testid="breaker-combo-mini-poles"
           options={POLES_OPTIONS}
-          onChange={(next) => setPoles(next ?? 'single')}
+          onChange={(next) => {
+            const p = next ?? 'single';
+            setPoles(p);
+            // Switching to tandem defaults to half 'a'; away clears it
+            // (the server rejects a half on a non-tandem breaker).
+            setTandemHalf(p === 'tandem' ? (tandemHalf ?? 'a') : null);
+          }}
+        />
+        {poles === 'tandem' && (
+          <Select<TandemHalf>
+            label="Tandem half"
+            data-testid="breaker-combo-mini-tandem-half"
+            value={tandemHalf}
+            placeholder="— pick a half —"
+            options={TANDEM_HALF_OPTIONS}
+            onChange={(next) => setTandemHalf(next)}
+          />
+        )}
+        <Select<ProtectionKind>
+          label="Protection"
+          data-testid="breaker-combo-mini-protection"
+          value={protection}
+          placeholder="None"
+          options={PROTECTION_OPTIONS}
+          onChange={(next) => setProtection(next)}
         />
         <Input
           label="Label (optional)"
