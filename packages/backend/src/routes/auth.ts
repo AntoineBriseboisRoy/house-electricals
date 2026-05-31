@@ -34,12 +34,15 @@ const issueSessionCookie = async (
     { sub: username, iat: nowSec, exp: nowSec + AUTH_TOKEN_MAX_AGE_SECONDS },
     cfg.secret
   );
-  // httpOnly + SameSite=Lax + Path=/. NO Secure flag — the operator's
+  // httpOnly + SameSite=Strict + Path=/. SameSite=Strict (2026-05 CSRF
+  // hardening) means the cookie is NEVER attached to a cross-site request,
+  // which closes classic form/fetch CSRF; the SPA is same-origin with the
+  // API so its own requests still carry it. NO Secure flag — the operator's
   // reverse proxy handles TLS termination; the cookie still works over
   // plain HTTP on localhost / LAN.
   setCookie(c, AUTH_COOKIE_NAME, token, {
     httpOnly: true,
-    sameSite: 'Lax',
+    sameSite: 'Strict',
     path: '/',
     maxAge: AUTH_TOKEN_MAX_AGE_SECONDS,
   });

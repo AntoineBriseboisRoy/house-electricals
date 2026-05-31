@@ -119,6 +119,31 @@ export const buildApp = (deps: AppDeps): Hono => {
     })
   );
 
+  // ── CSRF DEFENSE-IN-DEPTH ────────────────────────────────────────────
+  // The session cookie is SameSite=Strict (auth.ts), which already blocks
+  // classic cross-site CSRF. This guard adds a second layer for clients that
+  // under-enforce SameSite: reject any state-changing /api/v1/* request that
+  // the browser explicitly labels `cross-site` or `same-site` via the
+  // `Sec-Fetch-Site` fetch-metadata header. Safe methods, genuine
+  // same-origin requests, direct navigations (`none`), and non-browser
+  // clients that omit the header (curl, server-to-server, the e2e harness)
+  // pass through. We intentionally key on Sec-Fetch-Site rather than the
+  // Origin/Host pair, which a reverse proxy can rewrite (causing false 403s).
+  // Mounted before the auth routes so it also covers login/signup/logout.
+  app.use('/api/v1/*', async (c, next) => {
+    const method = c.req.method;
+    if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+      const site = c.req.header('sec-fetch-site');
+      if (site === 'cross-site' || site === 'same-site') {
+        const body: ApiError = {
+          error: { message: 'Cross-site request blocked.' },
+        };
+        return c.json(body, 403);
+      }
+    }
+    return next();
+  });
+
   // ── PUBLIC ROUTES ────────────────────────────────────────────────────
   // Health stays open so reverse-proxy / monitoring probes work without
   // credentials.

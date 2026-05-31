@@ -8,6 +8,7 @@ import type { Building, Floor } from '@he/shared';
 import { buildingExportSchema } from '@he/shared';
 import { assertInsideDir, isSafeFilename, SAFE_FILENAME_RE } from './safe-path.js';
 import { PgFloorRepository } from './repository.js';
+import { csvCell } from './routes/export.js';
 import { buildTestApp, createTestDb } from './test-helpers.js';
 
 /**
@@ -232,5 +233,80 @@ describe('security headers + import hardening (G46)', () => {
     assert.equal(floors.length, 1);
     assert.notEqual(floors[0]!.floorPlan, null);
     assert.equal(floors[0]!.floorPlan!.filename, 'f_old-deadbeef.png');
+  });
+});
+
+// ── CSV formula-injection guard (2026-05) ──────────────────────────────────
+describe('csvCell formula-injection guard', () => {
+  for (const evil of ['=1+1', '+1', '-1', '@SUM(A1)', '=HYPERLINK("http://x")']) {
+    it(`prefixes a leading formula trigger: ${JSON.stringify(evil)}`, () => {
+      const out = csvCell(evil);
+      // The neutralized value starts with a single quote (inside quoting if
+      // the cell also needs RFC-4180 escaping).
+      const inner = out.startsWith('"') ? out.slice(1) : out;
+      assert.ok(inner.startsWith("'"), `expected leading quote, got: ${out}`);
+    });
+  }
+
+  it('leaves a benign value untouched', () => {
+    assert.equal(csvCell('Kitchen counter'), 'Kitchen counter');
+  });
+
+  it('still RFC-4180 quotes a value containing a comma', () => {
+    assert.equal(csvCell('a,b'), '"a,b"');
+  });
+
+  it('both neutralizes AND quotes a formula-with-comma', () => {
+    // Leading '=' triggers the quote-prefix; the comma triggers RFC-4180.
+    assert.equal(csvCell('=a,b'), `"'=a,b"`);
+  });
+});
+
+// ── CSRF same-origin guard (2026-05) ───────────────────────────────────────
+describe('CSRF Sec-Fetch-Site guard', () => {
+  let cleanup: () => Promise<void>;
+  let app: Hono;
+
+  beforeEach(async () => {
+    const t = await createTestDb();
+    cleanup = t.cleanup;
+    app = buildTestApp(t.db);
+  });
+  afterEach(async () => {
+    await cleanup();
+  });
+
+  const post = (headers: Record<string, string>) =>
+    app.request('/api/v1/buildings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ name: `CSRF ${Date.now()}-${Math.random()}` }),
+    });
+
+  it('blocks a non-GET request labelled Sec-Fetch-Site: cross-site (403)', async () => {
+    const res = await post({ 'sec-fetch-site': 'cross-site' });
+    assert.equal(res.status, 403);
+  });
+
+  it('blocks Sec-Fetch-Site: same-site too (403)', async () => {
+    const res = await post({ 'sec-fetch-site': 'same-site' });
+    assert.equal(res.status, 403);
+  });
+
+  it('allows a genuine same-origin request', async () => {
+    const res = await post({ 'sec-fetch-site': 'same-origin' });
+    assert.notEqual(res.status, 403);
+  });
+
+  it('allows a non-browser client that omits Sec-Fetch-Site', async () => {
+    const res = await post({});
+    assert.notEqual(res.status, 403);
+  });
+
+  it('never blocks a safe GET even if labelled cross-site', async () => {
+    const res = await app.request('/api/v1/health', {
+      headers: { 'sec-fetch-site': 'cross-site' },
+    });
+    assert.equal(res.status, 200);
   });
 });

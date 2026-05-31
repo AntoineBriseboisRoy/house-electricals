@@ -125,7 +125,9 @@ describe('auth gate (feat/auth-gate + sign-up flow)', () => {
       const setCookie = r.headers.get('set-cookie') ?? '';
       assert.ok(setCookie.includes('he_auth='));
       assert.ok(setCookie.toLowerCase().includes('httponly'));
-      assert.ok(setCookie.toLowerCase().includes('samesite=lax'));
+      // SameSite=Strict (2026-05 CSRF hardening) — the cookie is never
+      // attached to a cross-site request.
+      assert.ok(setCookie.toLowerCase().includes('samesite=strict'));
     });
 
     it('rejects wrong password with 401', async () => {

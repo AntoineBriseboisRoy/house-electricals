@@ -183,8 +183,14 @@ const safeName = (name: string, id: string): string => {
   return slug.length > 0 ? slug : id;
 };
 
-const csvCell = (v: string | number | null | undefined): string => {
-  const s = v === null || v === undefined ? '' : String(v);
+export const csvCell = (v: string | number | null | undefined): string => {
+  let s = v === null || v === undefined ? '' : String(v);
+  // CSV formula-injection guard: a cell beginning with =, +, -, @, or a
+  // leading tab/CR is interpreted as a formula by Excel/Sheets/LibreOffice
+  // (and DDE in older Excel). The exported circuit directory is meant to be
+  // shared, and component/breaker names are arbitrary user (or import) text,
+  // so neutralize the trigger by prefixing a single quote before quoting.
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
