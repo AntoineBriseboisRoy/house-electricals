@@ -4,7 +4,6 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   ArrowUpFromLine,
-  ChevronUp,
   Map as MapIcon,
   Plus,
   Printer,
@@ -46,10 +45,8 @@ import { PhotosModal } from '../components/PhotosModal.js';
 import {
   Button,
   Card,
-  CardActions,
-  CardHeader,
-  CardTitle,
   EmptyState,
+  Modal,
   MoveToBuildingButton,
   NoBreakers,
   NoComponents,
@@ -471,6 +468,9 @@ export const PanelDetailScreen = (): JSX.Element => {
         label: '',
         slotPosition: null,
       });
+      // Close the bottom-sheet on success (matches the other Add-→-Modal
+      // surfaces). Re-open the trigger to add the next breaker.
+      setAddBreakerOpen(false);
       toast.success('Breaker added');
       await refresh();
     } catch (e) {
@@ -879,49 +879,43 @@ export const PanelDetailScreen = (): JSX.Element => {
           })()}
       </ScreenHeader>
 
-      {/* G25 cycle-29 — Collapsible Add-a-breaker form. Collapsed by
-         default once the panel has any breakers, so this 400px+ form
-         doesn't dominate every revisit. Auto-opens on empty-panel state
-         to guide first-time setup. */}
-      {addBreakerOpen ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Add a breaker</CardTitle>
-            {breakers.length > 0 && (
-              <CardActions>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setAddBreakerOpen(false)}
-                  aria-label="Hide add-breaker form"
-                  leadingIcon={<ChevronUp size={16} strokeWidth={2.25} />}
-                >
-                  Done
-                </Button>
-              </CardActions>
-            )}
-          </CardHeader>
-          <BreakerForm
-            form={formApi}
-            onSubmit={handleCreate}
-            submitLabel="Add breaker"
-            slotCount={panel?.slotCount ?? 24}
-            existingBreakers={breakers}
-          />
-        </Card>
-      ) : (
-        !loading && (
-          <Button
-            variant="secondary"
-            block
-            leadingIcon={<Plus size={18} strokeWidth={2.25} />}
-            onClick={() => setAddBreakerOpen(true)}
-            data-testid="open-add-breaker"
-          >
-            Add a breaker
-          </Button>
-        )
+      {/* Add-a-breaker — bottom-sheet Modal (2026-05). The inline 400px+
+         Card form was replaced by the same Add-→-Modal pattern as the
+         other Add/Edit surfaces (cycle-62): a trigger button above the
+         lists opens a sheet that pops up from the bottom on mobile
+         (centered on desktop). The open-state logic is unchanged — it
+         auto-opens on an empty panel to guide first-time setup, and when
+         an empty slot is tapped in the panel viz (the form is pre-filled
+         in that case). The sheet closes on a successful add (matching the
+         other Add-→-Modal surfaces); X / overlay / ESC / swipe-down /
+         Cancel also dismiss it. */}
+      {!loading && (
+        <Button
+          variant="secondary"
+          block
+          leadingIcon={<Plus size={18} strokeWidth={2.25} />}
+          onClick={() => setAddBreakerOpen(true)}
+          data-testid="open-add-breaker"
+        >
+          Add a breaker
+        </Button>
       )}
+      <Modal
+        open={addBreakerOpen}
+        onClose={() => setAddBreakerOpen(false)}
+        title="Add a breaker"
+        testId="add-breaker-modal"
+        presentation="sheet"
+      >
+        <BreakerForm
+          form={formApi}
+          onSubmit={handleCreate}
+          submitLabel="Add breaker"
+          slotCount={panel?.slotCount ?? 24}
+          existingBreakers={breakers}
+          onCancel={() => setAddBreakerOpen(false)}
+        />
+      </Modal>
 
       {/* G25 cycle-24 — split layout: components-on-panel + panel-viz side-
          by-side at ≥960px, stacked below. Click a component on the left,
