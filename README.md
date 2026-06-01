@@ -49,12 +49,15 @@ curl -fsSL https://raw.githubusercontent.com/AntoineBriseboisRoy/house-electrica
 curl -fsSL https://raw.githubusercontent.com/AntoineBriseboisRoy/house-electricals/master/.env.example     -o .env
 ```
 
-All configuration lives in `.env` (compose interpolates it automatically, so the
-app and database credentials can never drift apart). Open it and set at least:
+The compose file ships with sane defaults — it points at the official
+`ghcr.io/antoinebriseboisroy/house-electricals:latest` image, so it runs as-is
+for a quick try. All configuration lives in `.env` (compose interpolates it
+automatically, so the app and database credentials can never drift apart). For
+real use, open it and set:
 
-- **`IMAGE`** — required, no default. Your fork's image, e.g. `ghcr.io/<your-github-username>/house-electricals:latest`.
-- **`POSTGRES_PASSWORD`** — use a strong value.
+- **`POSTGRES_PASSWORD`** — use a strong value (defaults to `postgres`; the DB isn't exposed to the host, but don't ship that).
 - **`DATA_PATH`** — host directory for floor-plan uploads + `.auth-secret` (an absolute path in production, e.g. `/srv/house-electricals/data`).
+- **`IMAGE`** _(optional)_ — override the channel (`:latest`/`:stable`, `:beta`, `:nightly`), pin a `:vX.Y.Z` / `:sha-…` rollback target, or point at your own fork's image.
 
 Everything else (`HOST_PORT`, `POSTGRES_USER`, `POSTGRES_DB`) has a sensible default.
 
@@ -103,7 +106,7 @@ Set under `environment:` in `compose.yaml` or in a sibling `.env` file.
 | `POSTGRES_PASSWORD` | `postgres` | Postgres password. **Set a strong value in production.** |
 | `POSTGRES_DB` | `house_electricals` | Database name. |
 | `DATA_PATH` | `./data` | Host directory holding floor-plan uploads + the auto-generated `.auth-secret`. (Relational data lives in the Postgres volume, not here.) Back up both. |
-| `IMAGE` | _(required for `compose.prod.yaml`)_ | Your fork's GHCR image, e.g. `ghcr.io/<your-github-username>/house-electricals:latest`. Pin to a commit SHA (e.g. `:a1b2c3d…`) or a `vX.Y.Z` tag for a stable rollback target. |
+| `IMAGE` | `ghcr.io/antoinebriseboisroy/house-electricals:latest` | The published image. Override to switch channel (`:nightly`, `:beta`), pin a commit SHA (e.g. `:sha-a1b2c3d…`) or `vX.Y.Z` tag for a stable rollback target, or point at your own fork's GHCR image. |
 
 ## HTTPS
 

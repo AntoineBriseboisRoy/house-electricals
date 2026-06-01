@@ -1,16 +1,8 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# House Electricals — Local DEV database
-# ─────────────────────────────────────────────────────────────────────────────
-# Runs ONLY Postgres, for use with `pnpm dev` (the backend itself runs on the
-# host via tsx, not in a container) and the backend test suite.
-#
-#   docker compose -f docker-compose.dev.yml up -d
-#
-# The backend (and `DATABASE_URL` in .env.dev) connect to it on host port
-# 5433 so it never clashes with a system Postgres on the default 5432.
-#
-# Wipe + reset:  docker compose -f docker-compose.dev.yml down -v
-# ─────────────────────────────────────────────────────────────────────────────
+# House Electricals — dev database only. Backed by `pnpm dev` (backend runs on
+# the host via tsx) and the backend/e2e test suites. Host port 5433 avoids
+# clashing with a system Postgres on 5432.
+#   Up:    docker compose -f docker-compose.dev.yml up -d
+#   Reset: docker compose -f docker-compose.dev.yml down -v
 
 services:
   db:

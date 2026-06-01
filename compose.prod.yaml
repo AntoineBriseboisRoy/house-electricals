@@ -1,24 +1,6 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# House Electricals — Production Docker Compose (single-image)
-# ─────────────────────────────────────────────────────────────────────────────
-# Pulls the pre-built app image from GitHub Container Registry and runs it
-# alongside a Postgres database. Two containers: the app (one Node process
-# serving the API + SPA + uploaded images) and Postgres (all relational data).
-#
-# Quick start on a self-hosted server:
-#
-#   sudo mkdir -p /srv/house-electricals/data
-#   sudo chown -R 65532:65532 /srv/house-electricals/data
-#   sudo cp compose.prod.yaml /srv/house-electricals/compose.yaml
-#   sudo cp .env.example     /srv/house-electricals/.env
-#   # edit .env — set IMAGE, HOST_PORT, DATA_PATH, POSTGRES_PASSWORD
-#   cd /srv/house-electricals
-#   docker compose pull
-#   docker compose up -d
-#
-# The image is published by .github/workflows/release.yml on every push to
-# main. See DEPLOYMENT.md for the full guide.
-# ─────────────────────────────────────────────────────────────────────────────
+# House Electricals — production stack. Pulls the prebuilt image from GHCR
+# (published by .github/workflows/release.yml) and runs it next to Postgres.
+# Full guide: DEPLOYMENT.md. Configure via .env (see .env.example).
 
 services:
   db:
@@ -27,56 +9,43 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      # REQUIRED — compose refuses to start if unset/empty so production never
-      # silently runs on a default password. Set a strong value in .env.
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a strong POSTGRES_PASSWORD in .env}
+      # Postgres is only reachable on the internal compose network (no host
+      # port), so this default is safe to start with — set a strong value in
+      # .env for anything beyond a quick local try.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-house_electricals}
-      # App-wide timezone (IANA name, e.g. America/Toronto). Empty = UTC.
-      TZ: ${TZ:-}
     volumes:
-      # All relational data lives in Postgres — back up this volume.
-      # NOTE: mount the parent dir, not /var/lib/postgresql/data — Postgres 18+
-      # stores its cluster in a version-specific subdir and refuses to start if
-      # a volume is mounted at the old .../data path.
+      # Mount the PARENT dir, not .../data — Postgres 18 keeps its cluster in a
+      # versioned subdir and won't start if a volume sits at the old path.
       - he-pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-house_electricals}"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
 
   app:
-    # No default — fails loudly if IMAGE isn't set so the operator can't
-    # accidentally pull a stale public maintainer image. Set it in .env
-    # (e.g. ghcr.io/<your-github-username>/house-electricals:latest).
-    image: ${IMAGE:?IMAGE must be set in .env — see .env.example}
+    # Defaults to the official published image so `docker compose up` just works.
+    # :latest = newest stable release; use :nightly for the newest build off
+    # main, or pin :vX.Y.Z / :sha-<full> for a frozen rollback. Override via .env.
+    image: ${IMAGE:-ghcr.io/antoinebriseboisroy/house-electricals:latest}
     container_name: house-electricals
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
     volumes:
-      # Uploaded floor-plan images + the auto-generated .auth-secret live
-      # on disk; all relational data lives in Postgres (the `db` service).
+      # Floor-plan images + the auto-generated .auth-secret (relational data is in Postgres).
       - ${DATA_PATH:-./data}:/data
     environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?set a strong POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-house_electricals}
-      FLOOR_PLAN_DIR: /data/floor-plans
-      PUBLIC_DIR: /app/public
-      PORT: 3000
-      HOST: 0.0.0.0
-      # App-wide display timezone (IANA name, e.g. America/Toronto). The Node
-      # process uses it for date math; the SPA reads it from /api/v1/config so
-      # every screen shows dates in this zone. Empty = each device's local time.
+      # Built from the POSTGRES_* parts above (the only env var the image
+      # doesn't already default — NODE_ENV/PORT/HOST/FLOOR_PLAN_DIR/PUBLIC_DIR
+      # are all baked into the Dockerfile).
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-house_electricals}
+      # Optional app-wide display timezone (IANA name). Empty = each device's local time.
       TZ: ${TZ:-}
-      # Auth: no AUTH_USERNAME / AUTH_PASSWORD here. First-time setup
-      # is a sign-up screen the first time you open the app — the
-      # backend stores the (one) user row in the `app_users` table.
     ports:
-      # Your reverse proxy (Caddy / Cloudflare Tunnel / Nginx / Traefik)
-      # forwards to this host port.
+      # Point your reverse proxy (Caddy / Cloudflare Tunnel / Nginx) at this host port.
       - "${HOST_PORT:-8070}:3000"
     healthcheck:
       test: ["CMD", "/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:3000/api/v1/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]

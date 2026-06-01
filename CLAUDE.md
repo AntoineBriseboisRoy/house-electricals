@@ -2344,15 +2344,16 @@ House Electricals can ship to the user's server (push-to-main → CI builds imag
 → server pulls and restarts). Pin these decisions — future cycles touching
 the deploy surface MUST respect them.
 
-1. **Two compose files, two intents.** `docker-compose.yml` (cycle-3 origin)
-   is the **build-from-source** flavor — used for local testing and
-   first-time setup. `compose.prod.yaml` (new cycle-33) is the
-   **registry-based** flavor — used on the production server, pulls
-   pre-built images from the Gitea Container Registry. The CI pipeline
-   builds and pushes; the server only needs `compose.yaml` (copied from
-   `compose.prod.yaml`), `.env`, and `scripts/deploy.sh`. **Do not collapse
-   them into one file** — the build: vs image: distinction is the whole
-   point.
+1. **One full-stack compose file (SUPERSEDED 2026-06).** This pin originally
+   described TWO files — a build-from-source `docker-compose.yml` and a
+   registry-based `compose.prod.yaml`. The build-from-source file was REMOVED:
+   self-hosters pull the prebuilt GHCR image, and contributors iterate via
+   `pnpm dev` (host backend) + `docker-compose.dev.yml` (dev DB), so a
+   full-stack build-from-source compose served no one. `compose.prod.yaml` is
+   now the sole full-stack file (`image:` only, no `build:`); CI builds + pushes
+   via the Dockerfile directly (not compose); the server uses `compose.yaml`
+   (copied from `compose.prod.yaml`), `.env`, and `scripts/deploy.sh`. Do NOT
+   re-introduce a build-from-source compose file.
 
 2. **One container, one image, pinned name**: `house-electricals`. Internal
    port `3000`, host port `${HOST_PORT:-8070}`. Both compose files must
@@ -3140,12 +3141,16 @@ Architecture pins:
 3. **PUBLIC_DIR env var** points the SPA route at the bundled frontend
    (default `/app/public`). Local dev leaves it unset; in that case
    `static-spa.ts` silently 404s and devs use Vite on port 5173.
-4. **Container name `house-electricals`, port `${HOST_PORT:-8070}:3000`.**
-   Both `docker-compose.yml` (build-from-source) and `compose.prod.yaml`
-   (pull-from-GHCR) agree.
-5. **`compose.prod.yaml` requires `IMAGE` in `.env`** via `${IMAGE:?…}`
-   syntax so the operator can't accidentally pull a stale public
-   maintainer image. There is NO default.
+4. **Container name `house-electricals`, port `${HOST_PORT:-8070}:3000`** in
+   `compose.prod.yaml` (the sole full-stack, pull-from-GHCR file).
+5. **`compose.prod.yaml` defaults `IMAGE`** to
+   `ghcr.io/antoinebriseboisroy/house-electricals:latest` (via `${IMAGE:-…}`)
+   so `docker compose up` just works for anyone fetching the file — the user's
+   stated goal (2026-06). `POSTGRES_PASSWORD` likewise defaults to `postgres`
+   (the DB has no host port, so it's only reachable on the compose network).
+   Both are overridable in `.env`; production should set a strong password.
+   (SUPERSEDES the earlier `${IMAGE:?…}` / `${POSTGRES_PASSWORD:?…}` hard-fail
+   design — do not re-add the fail-loud `:?` without an ADR.)
 
 If a future cycle adds a true reverse-proxy need (e.g. a Caddy plugin
 or split workload), revive a `web` service — but the default deploy
@@ -3153,14 +3158,20 @@ stays single-image. The cycle-33 ADR is superseded by this.
 
 ## Deployment
 
-- One canonical deploy path: `docker compose up -d` from the repo root.
+- One canonical deploy path: `docker compose -f compose.prod.yaml up -d`
+  (or copy `compose.prod.yaml` → `compose.yaml` and drop the `-f`). There is
+  only ONE full-stack compose file now — `compose.prod.yaml` (pulls the
+  prebuilt GHCR image; both `IMAGE` and `POSTGRES_PASSWORD` have working
+  defaults so it runs as-is). The old build-from-source `docker-compose.yml`
+  was removed. `docker-compose.dev.yml` (dev-DB-only, for `pnpm dev` + tests)
+  is unrelated and stays.
 - **Two services**: `app` (the unified `house-electricals` image —
   distroless Node 22 + Hono + `pg`, distroless nonroot UID 65532) and
   `db` (`postgres:18-alpine`, container `house-electricals-db`, on the
   internal compose network only). `app` serves `/api/v1/*`,
   `/files/floor-plans/*`, and `/*` (SPA) on a single internal port (3000),
   mapped to `${HOST_PORT:-8070}` on the host, and connects to `db` via the
-  `DATABASE_URL` both compose files derive from `POSTGRES_USER` /
+  `DATABASE_URL` the compose file derives from `POSTGRES_USER` /
   `POSTGRES_PASSWORD` / `POSTGRES_DB`. `app` waits on `db` via
   `depends_on: condition: service_healthy`.
 - **No TLS in the stack.** Inside-the-container port 3000 maps to host

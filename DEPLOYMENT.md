@@ -2,7 +2,7 @@
 
 How to run House Electricals on your own server and reach it from your phone.
 
-If you just want to try it locally, skip ahead to the [Quick Start](#quick-start) — `docker compose up -d --build` is the whole story. The rest of this document is for production deployment.
+If you just want to get it running, skip ahead to the [Quick Start](#quick-start) — it pulls the prebuilt image and starts. The rest of this document covers production specifics.
 
 ## Prerequisites
 
@@ -15,19 +15,21 @@ If you just want to try it locally, skip ahead to the [Quick Start](#quick-start
 
 ## Quick Start
 
+The stack pulls a prebuilt image from GHCR — no source checkout needed. `compose.prod.yaml` ships with sane defaults (it points at the official `ghcr.io/antoinebriseboisroy/house-electricals:latest` image), so it runs as-is:
+
 ```bash
-# Clone and enter the project
-git clone <repo-url> house-electricals
-cd house-electricals
+mkdir -p house-electricals && cd house-electricals
 
-# Create your .env (defaults are fine for first try)
-cp .env.example .env
-nano .env          # set DATA_PATH=/srv/house-electricals/data on a real server
+# Grab the compose file (save as compose.yaml so plain `docker compose`
+# commands work) and the env template.
+curl -fsSL https://raw.githubusercontent.com/AntoineBriseboisRoy/house-electricals/master/compose.prod.yaml -o compose.yaml
+curl -fsSL https://raw.githubusercontent.com/AntoineBriseboisRoy/house-electricals/master/.env.example     -o .env
 
-# Launch everything (builds images from source)
-docker compose up -d --build
+# Optional: edit .env to set a strong POSTGRES_PASSWORD and, on a real
+# server, DATA_PATH=/srv/house-electricals/data. Defaults work for a quick try.
+nano .env
 
-# Check status
+docker compose up -d
 docker compose ps
 ```
 
@@ -59,7 +61,7 @@ On Windows Docker Desktop / WSL2 / macOS this isn't necessary — the VFS layer 
 | `POSTGRES_PASSWORD` | Postgres password — **set a strong value in production**     | `postgres`                                           |
 | `POSTGRES_DB`       | Database name                                                | `house_electricals`                                  |
 | `DATA_PATH`         | Host path holding `floor-plans/` + `.auth-secret` (relational data lives in the Postgres volume, not here) | `./data` |
-| `IMAGE`             | (compose.prod.yaml only) Registry path + release channel for the unified image — **required, no default**. Channels: `:stable` (recommended), `:beta`, `:nightly`; or pin `:X.Y.Z` / `:sha-…` for a frozen rollback. See [RELEASING.md](RELEASING.md). | _e.g._ `ghcr.io/<your-github-username>/house-electricals:stable` |
+| `IMAGE`             | Registry path + release channel for the unified image. Override to pick a channel — `:latest`/`:stable`, `:beta`, `:nightly` — or pin `:X.Y.Z` / `:sha-…` for a frozen rollback, or point at your own fork's GHCR namespace. See [RELEASING.md](RELEASING.md). | `ghcr.io/antoinebriseboisroy/house-electricals:latest` |
 
 There are no `AUTH_USERNAME` / `AUTH_PASSWORD` env vars. The first time you open the app in a browser, a one-time sign-up form mints the account (scrypt-hashed password stored in the Postgres `app_users` table). See [README → Login](README.md#login) for the full account lifecycle (sign-up, change password, reset).
 
@@ -92,7 +94,7 @@ There are no `AUTH_USERNAME` / `AUTH_PASSWORD` env vars. The first time you open
 > token on the first sign-up; it is out of scope today. Until then, the
 > LAN-first workflow is the supported way to claim the account safely.
 
-The `POSTGRES_*` values seed the `db` container on first boot **and** are interpolated into the `DATABASE_URL` the app connects with — they must stay in sync, which is why both compose files derive `DATABASE_URL` from them rather than asking you to set it twice.
+The `POSTGRES_*` values seed the `db` container on first boot **and** are interpolated into the `DATABASE_URL` the app connects with — they must stay in sync, which is why the compose file derives `DATABASE_URL` from them rather than asking you to set it twice.
 
 For real-server deployments use an absolute `DATA_PATH` (e.g. `/srv/house-electricals/data`), not a repo-relative path.
 
@@ -162,9 +164,9 @@ docker compose restart app
 # Stop
 docker compose down
 
-# Update after git pull (build-from-source flavor)
-git pull
-docker compose up -d --build
+# Update to a newer published image
+docker compose pull
+docker compose up -d
 
 # Open a psql shell against the database
 docker compose exec db psql -U postgres -d house_electricals
@@ -221,7 +223,7 @@ For "push to main → images build → server pulls and redeploys", see **[docs/
 - A restricted-SSH `deployer` user on your server runs [`scripts/deploy.sh`](scripts/deploy.sh), which `docker compose pull`s the new images and `up -d`s them.
 - The server uses `compose.prod.yaml` (renamed to `compose.yaml` on the host) — no source code on the server, only `compose.yaml`, `.env`, and `deploy.sh`.
 
-The build-from-source path described above ("Quick Start") is still fully supported — use it for local testing, first-time setup before CI is wired up, or rapid iteration on a dev machine.
+The [Quick Start](#quick-start) above is the same image-pull flow, just run by hand from a repo clone instead of by CI. For iterating on the code itself (not deploying), use `pnpm dev` with the dev database (`docker compose -f docker-compose.dev.yml up -d`) — see the repo README.
 
 ## Troubleshooting
 
