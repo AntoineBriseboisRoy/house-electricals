@@ -632,6 +632,12 @@ export const updateComponent = async (
 export const deleteComponent = async (id: string): Promise<void> => {
   const res = await fetch(`/api/v1/components/${encodeURIComponent(id)}`, {
     method: 'DELETE',
+    // `keepalive` lets a deferred-delete commit complete even if it's fired
+    // from the `pagehide` flush (see lib/pendingDeletes.ts) — i.e. when the
+    // user refreshes / closes the tab during the undo window, the delete is
+    // finalized server-side instead of resurrecting the row. DELETE has no
+    // body so the 64 KB keepalive cap is irrelevant.
+    keepalive: true,
   });
   if (!res.ok && res.status !== 204) {
     throw new Error(`HTTP ${res.status}`);

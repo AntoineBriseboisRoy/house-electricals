@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
@@ -16,6 +17,7 @@ import {
   ChevronRight,
   CornerDownRight,
   GitFork,
+  Image as ImageIcon,
   Lightbulb,
   Maximize2,
   Minus,
@@ -55,6 +57,7 @@ import {
   createWall,
   deleteComponent,
   deleteFloor,
+  deleteFloorPlan,
   deleteRoom,
   deleteWall,
   floorPlanUrl,
@@ -70,6 +73,7 @@ import {
   removeSwitchControl,
   updateComponent,
   updateFloor,
+  uploadFloorPlan,
   updateRoom,
   updateWall,
   type PanelWithBreakers,
@@ -411,6 +415,11 @@ export const FloorEditScreen = (): JSX.Element => {
   );
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
+  // Backdrop floor-plan image (trace-your-house-plan underlay). The upload
+  // control lives here on the floor editor — the surface where the user
+  // actually draws walls/rooms against the plan.
+  const [uploadingPlan, setUploadingPlan] = useState(false);
+  const planInputRef = useRef<HTMLInputElement>(null);
 
   const [tool, setTool] = useState<Tool>('pointer');
   const [selectedWallId, setSelectedWallId] = useState<string | null>(null);
@@ -1893,6 +1902,54 @@ export const FloorEditScreen = (): JSX.Element => {
     [floor, prompt]
   );
 
+  /** Attach (or replace) the floor's backdrop plan image. The image renders
+   *  as the canvas underlay so the user can trace walls/rooms over their real
+   *  house plan. Reuses the floor-plan pipeline (POST /floors/:id/floor-plan).
+   */
+  const handleBackdropChange = async (
+    e: ChangeEvent<HTMLInputElement>
+  ): Promise<void> => {
+    const file = e.target.files?.[0];
+    if (!file || floor === null) return;
+    setUploadingPlan(true);
+    try {
+      await uploadFloorPlan(floor.id, file);
+      toast.success('Backdrop uploaded');
+      await refresh({ silent: true });
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to upload backdrop.'
+      );
+    } finally {
+      if (aliveRef.current) setUploadingPlan(false);
+      if (planInputRef.current) planInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveBackdrop = async (): Promise<void> => {
+    if (floor === null || floor.floorPlan === null || uploadingPlan) return;
+    const ok = await confirm({
+      title: 'Remove backdrop?',
+      message:
+        'The plan image will be removed. Your walls, rooms, and component pins are unaffected.',
+      confirmLabel: 'Remove',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
+    setUploadingPlan(true);
+    try {
+      await deleteFloorPlan(floor.id);
+      toast.success('Backdrop removed');
+      await refresh({ silent: true });
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to remove backdrop.'
+      );
+    } finally {
+      if (aliveRef.current) setUploadingPlan(false);
+    }
+  };
+
   const handleRenameFloor = async (): Promise<void> => {
     if (floor === null || acting) return;
     const next = await prompt({
@@ -2333,6 +2390,42 @@ export const FloorEditScreen = (): JSX.Element => {
                 { label: floor.name },
               ]}
             >
+          <input
+            ref={planInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={(e) => {
+              void handleBackdropChange(e);
+            }}
+            disabled={uploadingPlan}
+            className="visually-hidden"
+            data-testid="floor-edit-backdrop-input"
+          />
+          <Button
+            variant="secondary"
+            size="sm"
+            leadingIcon={<ImageIcon size={16} strokeWidth={2.25} />}
+            onClick={() => planInputRef.current?.click()}
+            disabled={uploadingPlan}
+            busy={uploadingPlan}
+            data-testid="floor-edit-backdrop-upload"
+          >
+            {floor.floorPlan ? 'Replace backdrop' : 'Add backdrop'}
+          </Button>
+          {floor.floorPlan !== null && (
+            <Button
+              variant="ghost"
+              size="sm"
+              leadingIcon={<Trash2 size={16} strokeWidth={2.25} />}
+              onClick={() => {
+                void handleRemoveBackdrop();
+              }}
+              disabled={uploadingPlan}
+              data-testid="floor-edit-backdrop-remove"
+            >
+              Remove backdrop
+            </Button>
+          )}
           <Button
             variant="secondary"
             size="sm"

@@ -1,13 +1,13 @@
 /**
  * useUndoableDelete (G42(c) — cycle-47, extended G42(f) — cycle-50).
  *
- * Generic hook for deferred-DELETE with a 30-second undo window. Wraps
+ * Generic hook for deferred-DELETE with a 5-second undo window. Wraps
  * sonner via ui/toast.ts; the actual server DELETE is held by a
  * setTimeout, cancelled if the user clicks "Undo" on the toast.
  *
  * Cycle-50 adds `deleteManyWithUndo(entries[])` for batched bulk delete:
  * ONE shared timer fires Promise.allSettled across all per-id commits at
- * T+30s, ONE shared sonner toast hosts a single Undo button that cancels
+ * T+window, ONE shared sonner toast hosts a single Undo button that cancels
  * the shared timer + restores ALL entries' optimistic state. Per-id
  * entries are still tracked in `pendingDeletes` (so an in-flight bulk
  * survives a route change), but they all share the same `timer` and
@@ -27,7 +27,11 @@ import {
   schedulePendingDelete,
 } from '../lib/pendingDeletes.js';
 
-const UNDO_WINDOW_MS = 30_000;
+// 2026-06: shortened from 30s → 5s per user feedback ("soft-deleted straight
+// away with a 5 seconds undo"). The deferred-delete model is unchanged; only
+// the window is tighter. Leaving/refreshing finalizes pending deletes via the
+// pagehide flush in lib/pendingDeletes.ts.
+const UNDO_WINDOW_MS = 5_000;
 
 export type UndoableDeleteOptions = {
   /** Stable id of the resource being deleted. */
@@ -40,7 +44,7 @@ export type UndoableDeleteOptions = {
   removeOptimistically: () => void;
   /** Restore the optimistic UI on undo (or on commit error). */
   restore: () => void;
-  /** Server-side commit fn (the real api.deleteX). Called at T+30s if
+  /** Server-side commit fn (the real api.deleteX). Called at T+window if
    *  the user never clicked Undo. */
   commit: () => Promise<void>;
   /** Optional callback after the server commit succeeds. */
@@ -90,7 +94,7 @@ export const useUndoableDelete = (): {
           completePendingDelete(opts.id);
           opts.onCommitted?.();
         } catch (err) {
-          // Server commit failed at T+30s — restore the UI so the user
+          // Server commit failed at T+window — restore the UI so the user
           // isn't lying to themselves about the row being gone.
           opts.restore();
           completePendingDelete(opts.id);

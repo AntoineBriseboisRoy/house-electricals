@@ -267,11 +267,11 @@ export const ComponentsScreen = (): JSX.Element => {
   // design — out of scope this cycle).
   const { confirm, pick, modalNode } = useModal();
   const { deleteWithUndo, deleteManyWithUndo } = useUndoableDelete();
-  // G42(f) cycle-50 — bulk-actions support. The multi-select set lives
-  // here (component-scoped, not URL/localStorage-persisted per the pin).
-  // The optimistic-patch hook fans out N PATCHes for the "Assign breaker"
+  // G42(f) cycle-50 — bulk-actions support. The multi-select set (`ms`) is
+  // declared below, AFTER `visibleComponents`, so "Select all" targets the
+  // currently-visible (filtered) rows rather than the full house. The
+  // optimistic-patch hook fans out N PATCHes for the "Assign breaker"
   // action — no backend bulk endpoint (Lockin OBJ1).
-  const ms = useMultiSelect(components);
   const bulkAssign = useOptimisticPatch(
     async (id: string, body: { breakerId: string | null }) => {
       return updateComponent(id, body);
@@ -510,6 +510,13 @@ export const ComponentsScreen = (): JSX.Element => {
       : components;
     return sortComponents(filtered, sortBy, sortOrder);
   }, [components, filterCritical, sortBy, sortOrder]);
+
+  // Multi-select is scoped to the VISIBLE list so "Select all" picks exactly
+  // the rows the user can see (auto-prunes ids that drop out when filters
+  // change — see useMultiSelect). Declared here, after `visibleComponents`.
+  const ms = useMultiSelect(visibleComponents);
+  const allVisibleSelected =
+    visibleComponents.length > 0 && ms.count === visibleComponents.length;
 
   // G37 cycle-68 — map breakerId → protection so the ComponentsScreen breaker
   // chip can show the badge alongside the slot label. ResolvedBreakerSummary
@@ -871,6 +878,17 @@ export const ComponentsScreen = (): JSX.Element => {
     () => (
       <>
         <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            if (allVisibleSelected) ms.clear();
+            else ms.selectAll();
+          }}
+          data-testid="bulk-select-all"
+        >
+          {allVisibleSelected ? 'Unselect all' : 'Select all'}
+        </Button>
+        <Button
           variant="secondary"
           size="sm"
           onClick={() => {
@@ -892,7 +910,7 @@ export const ComponentsScreen = (): JSX.Element => {
         </Button>
       </>
     ),
-    [handleBulkAssign, handleBulkDelete]
+    [allVisibleSelected, ms.clear, ms.selectAll, handleBulkAssign, handleBulkDelete]
   );
 
   return (

@@ -2,14 +2,19 @@
  * Pending-deletes queue (G42(c) — cycle-47).
  *
  * Module-level singleton tracking deferred DELETE operations during the
- * 30-second undo window. The actual server DELETE is held by a setTimeout
+ * (short) undo window. The actual server DELETE is held by a setTimeout
  * stashed in each entry; clicking "Undo" cancels the timer (no server
  * traffic), letting the optimistic UI restore cleanly. See CLAUDE.md
  * "Undoable delete (G42(c) — cycle-47)" for the pinned contract.
  *
  * Module-level — NOT React state — so an in-flight pending delete
  * survives a route change (e.g. user clicks Delete on /components, then
- * navigates to /panels/:id mid-window; the timer still fires at T+30s).
+ * navigates to /panels/:id mid-window; the timer still fires at T+window).
+ *
+ * 2026-06: leaving/refreshing now FINALIZES pending deletes instead of
+ * resurrecting them. A `pagehide` listener flushes the queue (firing each
+ * commit immediately via a `keepalive` fetch) so a refresh or tab-close
+ * during the undo window leaves the rows deleted — the user's expectation.
  */
 
 export type PendingId = string;
@@ -56,3 +61,31 @@ export const completePendingDelete = (id: PendingId): void => {
 
 /** Test/debug helper — current queue size. */
 export const _pendingCount = (): number => queue.size;
+
+/**
+ * Finalize every pending delete RIGHT NOW — clear each timer and fire its
+ * commit immediately, then empty the queue. Used by the `pagehide` flush so
+ * leaving/refreshing the app commits in-flight deletes (the commit's fetch
+ * is `keepalive`, so it survives page unload) instead of leaving the row on
+ * the server to "reappear" on next load.
+ *
+ * Errors from commits are swallowed — there is no UI left to surface them to
+ * during unload, and the optimistic removal has already happened.
+ */
+export const flushPendingDeletes = (): void => {
+  for (const entry of queue.values()) {
+    clearTimeout(entry.timer);
+    void entry.commit().catch(() => {
+      /* page is unloading — nothing to restore or report */
+    });
+  }
+  queue.clear();
+};
+
+// Flush on `pagehide` (the reliable cross-browser/mobile unload signal —
+// `beforeunload` is unreliable on mobile). In-app SPA navigation does NOT
+// fire this; those pending deletes simply commit at the normal T+window
+// timer, which is fine. Guarded for non-DOM (SSR/test) environments.
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushPendingDeletes);
+}
