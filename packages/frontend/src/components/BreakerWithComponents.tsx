@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Breaker, BreakerInput, BreakerTest, Component, Panel } from '@he/shared';
+import type { Breaker, BreakerTest, Component } from '@he/shared';
 import type { BreakerLoad } from '../lib/load.js';
 import { BreakerRow } from './BreakerRow.js';
 import { listComponents } from '../api.js';
@@ -7,19 +7,12 @@ import { toast } from '../ui/index.js';
 
 type Props = {
   breaker: Breaker;
-  isEditing: boolean;
+  /** Open the edit bottom-sheet for this breaker (2026-06 — the row no
+   *  longer renders an inline edit form; editing pops up in a Modal owned
+   *  by PanelDetailScreen). */
   onStartEdit: () => void;
-  onCancelEdit: () => void;
-  onSave: (patch: Partial<BreakerInput>) => Promise<void>;
   onDelete: () => Promise<void>;
   componentCount: number;
-  /** G33 cycle-41 — thread slot-validation context down to BreakerRow → BreakerForm. */
-  slotCount: number;
-  siblings: Breaker[];
-  /** G39 cycle-56 — thread "Feeds subpanel" picker context. */
-  allPanels?: Panel[];
-  currentSubpanelId?: string | null;
-  onChangeFeedsSubpanel?: (subpanelId: string | null) => void | Promise<void>;
   /** 2026-05 — toggle the breaker's persistent on/off state. Pass-through. */
   onToggleState?: (nextIsOn: boolean) => void | Promise<void>;
   stateToggling?: boolean;
@@ -43,17 +36,9 @@ type Props = {
  */
 export const BreakerWithComponents = ({
   breaker,
-  isEditing,
   onStartEdit,
-  onCancelEdit,
-  onSave,
   onDelete,
   componentCount,
-  slotCount,
-  siblings,
-  allPanels,
-  currentSubpanelId,
-  onChangeFeedsSubpanel,
   onToggleState,
   stateToggling,
   load,
@@ -88,16 +73,8 @@ export const BreakerWithComponents = ({
   return (
     <BreakerRow
       breaker={breaker}
-      isEditing={isEditing}
       onStartEdit={onStartEdit}
-      onCancelEdit={onCancelEdit}
-      onSave={onSave}
       onDelete={onDelete}
-      slotCount={slotCount}
-      siblings={siblings}
-      allPanels={allPanels}
-      currentSubpanelId={currentSubpanelId}
-      onChangeFeedsSubpanel={onChangeFeedsSubpanel}
       onToggleState={onToggleState}
       stateToggling={stateToggling}
       load={load}

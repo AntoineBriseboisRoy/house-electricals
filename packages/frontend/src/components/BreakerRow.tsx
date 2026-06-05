@@ -1,5 +1,3 @@
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
 import {
   AlertCircle,
   Camera,
@@ -10,14 +8,10 @@ import {
   Trash2,
 } from 'lucide-react';
 import {
-  breakerInputSchema,
   type Breaker,
-  type BreakerInput,
   type BreakerTest,
   type Component,
-  type Panel,
 } from '@he/shared';
-import { BreakerForm } from './BreakerForm.js';
 import { ComponentTypeIcon } from './ComponentTypeIcon.js';
 import { Button, IconButton, Spinner } from '../ui/index.js';
 import { formatRelative, isStaleOlderThanOneYear } from '../lib/relativeTime.js';
@@ -25,23 +19,11 @@ import { formatWatts, type BreakerLoad } from '../lib/load.js';
 
 type Props = {
   breaker: Breaker;
-  isEditing: boolean;
+  /** Open the edit bottom-sheet for this breaker (2026-06 — the row no
+   *  longer swaps to an inline edit form; editing pops up in a Modal owned
+   *  by PanelDetailScreen, matching every other create/edit surface). */
   onStartEdit: () => void;
-  onCancelEdit: () => void;
-  onSave: (patch: Partial<BreakerInput>) => Promise<void>;
   onDelete: () => Promise<void>;
-  /** G33 cycle-41 — context for BreakerForm's strict slot validation
-   *  while editing. slotCount is the panel's slot capacity; siblings
-   *  are the other breakers on this panel (used to detect collisions).
-   *  The breaker being edited is skipped from the collision check
-   *  inside BreakerForm via its own id. */
-  slotCount: number;
-  siblings: Breaker[];
-  /** G39 cycle-56 — thread the "Feeds subpanel" picker context down to
-   *  the BreakerForm when editing. */
-  allPanels?: Panel[];
-  currentSubpanelId?: string | null;
-  onChangeFeedsSubpanel?: (subpanelId: string | null) => void | Promise<void>;
   /** 2026-05 — toggle the breaker's persistent on/off energization state.
    *  Replaces the removed Impact button. `nextIsOn` is the desired state.
    *  The whole card reflects `breaker.isOn` (danger-tinted when off). */
@@ -77,16 +59,8 @@ const formatPoles = (poles: Breaker['poles']): string =>
 
 export const BreakerRow = ({
   breaker,
-  isEditing,
   onStartEdit,
-  onCancelEdit,
-  onSave,
   onDelete,
-  slotCount,
-  siblings,
-  allPanels,
-  currentSubpanelId,
-  onChangeFeedsSubpanel,
   onToggleState,
   stateToggling,
   load,
@@ -100,39 +74,6 @@ export const BreakerRow = ({
   components,
   onToggleComponents,
 }: Props): JSX.Element => {
-  const form = useForm<BreakerInput>({
-    resolver: zodResolver(breakerInputSchema),
-    values: {
-      slot: breaker.slot,
-      amperage: breaker.amperage,
-      poles: breaker.poles,
-      label: breaker.label,
-      slotPosition: breaker.slotPosition,
-      // G37 cycle-68 — seed protection so the edit form shows current value.
-      protection: breaker.protection,
-    },
-  });
-
-  if (isEditing) {
-    return (
-      <li className="breaker-row breaker-row--editing">
-        <BreakerForm
-          form={form}
-          onSubmit={(values) => onSave(values)}
-          onCancel={onCancelEdit}
-          submitLabel="Save"
-          slotCount={slotCount}
-          existingBreakers={siblings}
-          editingBreakerId={breaker.id}
-          allPanels={allPanels}
-          currentPanelId={breaker.panelId}
-          currentSubpanelId={currentSubpanelId}
-          onChangeFeedsSubpanel={onChangeFeedsSubpanel}
-        />
-      </li>
-    );
-  }
-
   // G36 cycle-61 — "Last verified" hint values. `lastTest === undefined`
   // means the parent didn't supply the prop; hide the hint entirely.
   // `lastTest === null` means no test yet → "never" + warn dot.

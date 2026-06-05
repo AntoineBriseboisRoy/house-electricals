@@ -1172,6 +1172,22 @@ button that navigates to `/map` (cycle-44 G42(d) CTA contract).
 DO NOT re-introduce auto-create from PanelMapScreen — that's a divergent
 flow.
 
+## Floor backdrop upload on FloorEditScreen (2026-06)
+
+`/floors/:id/edit` (FloorEditScreen) now hosts the canonical backdrop
+floor-plan upload, in its ScreenHeader: **Add/Replace backdrop** (opens a
+hidden `<input type=file>`) + **Remove backdrop** (confirm → delete). This
+closes a usability gap — the floor editor is the surface where the user
+draws walls/rooms, so the trace-your-house-plan image upload belongs here,
+not only on PanelMapScreen (which still has its own attach-only upload).
+Both reuse the same pipeline (`uploadFloorPlan` / `deleteFloorPlan` →
+`POST`/`DELETE /api/v1/floors/:id/floor-plan`); FloorEditScreen already
+rendered the image as the transformed canvas underlay, it just lacked the
+upload control. This is attach-only (does NOT create floors — the cycle-70b
+single-creation-surface rule is intact). testids:
+`floor-edit-backdrop-upload`, `floor-edit-backdrop-remove`,
+`floor-edit-backdrop-input`.
+
 ## Per-row destructive affordance (cycle-70 polish-pass-2)
 
 Per-row Delete (or other destructive) affordances on list screens MUST
@@ -1592,15 +1608,48 @@ follow this pattern.
    forms into header-triggered Modals, removing the adjacency. Both
    "No panels yet" + "No floors yet" EmptyStates NOW have a primary
    "Add X" CTA. Still EXCLUDED from EmptyState CTAs:
-   - **PanelDetailScreen** "No breakers yet" — create-form still
-     inline above (port to this pattern is a future cycle's call).
    - **FloorEditScreen** "Nothing selected" — passive sidebar
      placeholder, mobile-hidden, no analogous CTA.
+
+   (**PanelDetailScreen breaker form adopted the pattern** — see the
+   "Breaker create + edit are bottom-sheet Modals" pin below.)
 
 5. **EmptyState copy avoids "above"** for screens that adopted the
    pattern. Old: "Add your first panel above…". New: "Use the Add
    panel button in the header to…". The "above" phrasing becomes a
    lie once the form moves into a modal.
+
+## Breaker create + edit are bottom-sheet Modals (2026-06)
+
+Both creating AND editing a breaker on `PanelDetailScreen` now use the
+base `Modal` (`presentation="sheet"`) — the same pop-up-from-the-bottom
+surface as every other create/edit form in the app. Pin these decisions:
+
+1. **`BreakerRow` no longer renders an inline edit form.** The old
+   `isEditing` branch (row swaps to an embedded `<BreakerForm>`) is GONE,
+   along with the props that fed it (`isEditing`, `onCancelEdit`,
+   `onSave`, `slotCount`, `siblings`, `allPanels`, `currentSubpanelId`,
+   `onChangeFeedsSubpanel`). `BreakerWithComponents` dropped the same
+   pass-throughs. The row keeps only `onStartEdit` (the Edit button) +
+   `onDelete` + the on/off/photos/service-log affordances.
+
+2. **`PanelDetailScreen` owns BOTH sheets.** The add sheet
+   (`testId="add-breaker-modal"`, opened by `setAddBreakerOpen`) was
+   already there (commit `716148c`); the edit sheet
+   (`testId="edit-breaker-modal"`) opens on `editingId !== null` and
+   mounts the local `EditBreakerForm` helper (its own `useForm` seeded
+   from the breaker, `key={breaker.id}` so switching breakers re-seeds).
+   `handleUpdate` clears `editingId` on success → the sheet closes.
+
+3. **Two ways to open edit, both → the sheet:** the **Edit** button on a
+   list row (`onStartEdit` → `setEditingId`), and **tapping an existing
+   breaker slot** in `PanelVisualization` (`handleSlotClick` →
+   `setEditingId`). Tapping an EMPTY slot still opens the ADD sheet with
+   the form pre-filled (unchanged). The old scroll-the-row-into-view on
+   edit was removed (a modal makes it pointless).
+
+4. **The `.breaker-row--editing` CSS rule was removed** (no element uses
+   it any more). No new token NAMES (cycle-11/17/20 rule).
 
 ## Breaker-test audit trail (G36 — cycle-61)
 
@@ -2131,11 +2180,13 @@ container" tables. Pin these decisions:
 
 ## Undoable delete (G42(c) — cycle-47)
 
-Cycle-47 introduces a 30-second undo window for destructive deletes
+Cycle-47 introduces an undo window for destructive deletes
 (Component, Breaker, Component-from-FloorEdit). The actual server
-DELETE is DEFERRED — held by a setTimeout for 30s — and fires only if
+DELETE is DEFERRED — held by a setTimeout — and fires only if
 the user does not click "Undo" on the sonner toast. Clicking undo
-cancels the timer (no server traffic). Pin these decisions:
+cancels the timer (no server traffic). **Window is 5 seconds**
+(`UNDO_WINDOW_MS` in `useUndoableDelete.ts`; shortened from the original
+30s in 2026-06 per user feedback). Pin these decisions:
 
 1. **Model is DEFERRED-DELETE, not delete-then-recreate.** Recreating
    on undo would mint new ULIDs (breaks cycle-22/23 `#breaker-<id>`
@@ -2147,11 +2198,18 @@ cancels the timer (no server traffic). Pin these decisions:
    React-tree unmount so a user can navigate from `/components` to
    `/panels/:id` mid-undo-window without dropping the pending delete.
 
-3. **Tab-close orphans are accepted** for the single-user LAN PWA.
-   If the user closes the tab during the 30s window, the optimistic UI
-   removal "reappears" on next load (server still has the row). This is
-   defensible — no data loss — and adding `fetch keepalive` on
-   `beforeunload` is deferred to a future cycle.
+3. **Leaving/refreshing FINALIZES pending deletes** (changed 2026-06 —
+   supersedes the original "tab-close orphans are accepted" decision).
+   `pendingDeletes.ts` registers a `pagehide` listener that calls
+   `flushPendingDeletes()` — clearing each timer and firing its commit
+   immediately. The delete fetch sets `keepalive: true` so the request
+   survives page unload. So a refresh or tab-close during the undo window
+   leaves the rows deleted (the user's expectation), instead of the row
+   "reappearing" on next load. `pagehide` (NOT `beforeunload`) is used —
+   it's the reliable cross-browser/mobile unload signal. In-app SPA
+   navigation does not fire `pagehide`; those pending deletes simply commit
+   at the normal T+window timer (the toast + undo persist across in-app nav
+   via the single global ThemedToaster mount).
 
 4. **The toast is the tray.** No new floating UI component. sonner via
    `ui/toast.ts` is the canonical surface (cycle-11 G11 pin).

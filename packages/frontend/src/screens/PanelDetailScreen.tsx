@@ -73,6 +73,60 @@ const readView = (): ViewMode => {
   return v === 'list' ? 'list' : 'viz';
 };
 
+/** Edit-a-breaker form, mounted inside the bottom-sheet Modal (2026-06).
+ *  Owns its own react-hook-form instance seeded from the breaker being
+ *  edited — same shape as the (now removed) inline BreakerRow edit form,
+ *  so editing behaves identically; it just pops up in a sheet like every
+ *  other create/edit surface in the app. Keyed on the breaker id by the
+ *  caller so switching breakers re-seeds the form. */
+function EditBreakerForm({
+  breaker,
+  slotCount,
+  siblings,
+  allPanels,
+  currentSubpanelId,
+  onChangeFeedsSubpanel,
+  onCancel,
+  onSave,
+}: {
+  breaker: Breaker;
+  slotCount: number;
+  siblings: Breaker[];
+  allPanels: Panel[];
+  currentSubpanelId: string | null;
+  onChangeFeedsSubpanel: (subpanelId: string | null) => void | Promise<void>;
+  onCancel: () => void;
+  onSave: (patch: Partial<BreakerInput>) => Promise<void>;
+}): JSX.Element {
+  const form = useForm<BreakerInput>({
+    resolver: zodResolver(breakerInputSchema),
+    values: {
+      slot: breaker.slot,
+      amperage: breaker.amperage,
+      poles: breaker.poles,
+      label: breaker.label,
+      slotPosition: breaker.slotPosition,
+      // G37 cycle-68 — seed protection so the edit form shows current value.
+      protection: breaker.protection,
+    },
+  });
+  return (
+    <BreakerForm
+      form={form}
+      onSubmit={(values) => onSave(values)}
+      onCancel={onCancel}
+      submitLabel="Save"
+      slotCount={slotCount}
+      existingBreakers={siblings}
+      editingBreakerId={breaker.id}
+      allPanels={allPanels}
+      currentPanelId={breaker.panelId}
+      currentSubpanelId={currentSubpanelId}
+      onChangeFeedsSubpanel={onChangeFeedsSubpanel}
+    />
+  );
+}
+
 export const PanelDetailScreen = (): JSX.Element => {
   const [, params] = useRoute<{ id: string }>('/panels/:id');
   const panelId = params?.id ?? '';
@@ -153,14 +207,9 @@ export const PanelDetailScreen = (): JSX.Element => {
   const handleSlotClick = useCallback(
     (slotN: number, breaker: Breaker | null, tandemHalf?: 'a' | 'b'): void => {
       if (breaker !== null) {
+        // Existing breaker → open the edit bottom-sheet (2026-06). The edit
+        // Modal mounts on `editingId !== null` at the screen root.
         setEditingId(breaker.id);
-        // Scroll the row into view if it's been mounted
-        setTimeout(() => {
-          document.getElementById(`breaker-${breaker.id}`)?.scrollIntoView({
-            behavior: 'smooth',
-            block: 'center',
-          });
-        }, 0);
         return;
       }
       // Empty slot: pre-fill the add-breaker form. Tandem half clicks
@@ -917,6 +966,43 @@ export const PanelDetailScreen = (): JSX.Element => {
         />
       </Modal>
 
+      {/* Edit-a-breaker — bottom-sheet Modal (2026-06). Tapping a breaker
+         slot in the viz OR the Edit button on a list row sets `editingId`,
+         which opens this sheet (the inline list-row edit form was removed so
+         create AND edit share the same pop-up surface). Closes on a
+         successful save (handleUpdate clears editingId); X / overlay / ESC /
+         swipe-down / Cancel also dismiss it. */}
+      <Modal
+        open={editingId !== null}
+        onClose={() => setEditingId(null)}
+        title="Edit breaker"
+        testId="edit-breaker-modal"
+        presentation="sheet"
+      >
+        {(() => {
+          const editing =
+            editingId !== null
+              ? breakers.find((b) => b.id === editingId) ?? null
+              : null;
+          if (editing === null) return null;
+          return (
+            <EditBreakerForm
+              key={editing.id}
+              breaker={editing}
+              slotCount={panel?.slotCount ?? 24}
+              siblings={breakers}
+              allPanels={allPanels}
+              currentSubpanelId={subpanelByBreakerId.get(editing.id) ?? null}
+              onChangeFeedsSubpanel={(subId) =>
+                handleChangeFeedsSubpanel(editing.id, subId)
+              }
+              onCancel={() => setEditingId(null)}
+              onSave={(patch) => handleUpdate(editing.id, patch)}
+            />
+          );
+        })()}
+      </Modal>
+
       {/* G25 cycle-24 — split layout: components-on-panel + panel-viz side-
          by-side at ≥960px, stacked below. Click a component on the left,
          see its slot pulse on the right — no navigation away from the page. */}
@@ -1064,19 +1150,9 @@ export const PanelDetailScreen = (): JSX.Element => {
               <BreakerWithComponents
                 key={b.id}
                 breaker={b}
-                isEditing={editingId === b.id}
                 onStartEdit={() => setEditingId(b.id)}
-                onCancelEdit={() => setEditingId(null)}
-                onSave={(patch) => handleUpdate(b.id, patch)}
                 onDelete={async () => handleDelete(b.id)}
                 componentCount={counts[b.id] ?? 0}
-                slotCount={panel?.slotCount ?? 24}
-                siblings={breakers}
-                allPanels={allPanels}
-                currentSubpanelId={subpanelByBreakerId.get(b.id) ?? null}
-                onChangeFeedsSubpanel={(subId) =>
-                  handleChangeFeedsSubpanel(b.id, subId)
-                }
                 onToggleState={(nextIsOn) => handleToggleState(b.id, nextIsOn)}
                 stateToggling={togglingStateIds.has(b.id)}
                 load={loadByBreakerId.get(b.id) ?? null}

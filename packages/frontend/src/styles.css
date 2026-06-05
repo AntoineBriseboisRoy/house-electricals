@@ -1830,10 +1830,6 @@ h2 {
   overflow: hidden;
 }
 
-.breaker-row--editing {
-  padding: 0.75rem;
-}
-
 /* ── Header ── */
 .breaker-row__header {
   display: flex;
